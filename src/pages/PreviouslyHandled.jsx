@@ -37,14 +37,14 @@ function ControlsBar({
           onClick={() => { setFilterOpen(o => !o); setSortOpen(false); }}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold transition-colors cursor-pointer ${
             filterOpen || activeFilterCount > 0
-              ? 'bg-[var(--color-brand-accent)] text-white'
+              ? 'bg-[var(--color-surface-highlight)] text-[var(--color-surface-highlight-text)]'
               : 'bg-white text-[var(--color-text-primary)] hover:bg-gray-50'
           }`}
         >
           <Filter className="h-4 w-4" />
           <span>Filter</span>
           {activeFilterCount > 0 && (
-            <span className="ml-0.5 bg-white/30 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+            <span className="ml-0.5 bg-[var(--color-brand-primary)]/10 text-[var(--color-text-primary)] text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
               {activeFilterCount}
             </span>
           )}
@@ -54,7 +54,7 @@ function ControlsBar({
         <button
           onClick={() => { setSortOpen(o => !o); setFilterOpen(false); }}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold transition-colors cursor-pointer ${
-            sortOpen ? 'bg-[var(--color-brand-accent)] text-white' : 'bg-white text-[var(--color-text-primary)] hover:bg-gray-50'
+            sortOpen ? 'bg-[var(--color-surface-highlight)] text-[var(--color-surface-highlight-text)]' : 'bg-white text-[var(--color-text-primary)] hover:bg-gray-50'
           }`}
         >
           {sortDir === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
@@ -73,8 +73,8 @@ function ControlsBar({
                   <button key={opt.value} onClick={() => slot.onChange(opt.value)}
                     className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
                       slot.value === opt.value
-                        ? 'bg-[var(--color-brand-accent)] text-white'
-                        : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent)]'
+                        ? 'bg-[var(--color-surface-highlight)] text-[var(--color-surface-highlight-text)] border border-[var(--color-border-default)]'
+                        : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:bg-gray-50'
                     }`}
                   >{opt.label}</button>
                 ))}
@@ -99,8 +99,8 @@ function ControlsBar({
                 <button key={opt.value} onClick={() => setSortField(opt.value)}
                   className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
                     sortField === opt.value
-                      ? 'bg-[var(--color-brand-accent)] text-white'
-                      : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent)]'
+                      ? 'bg-[var(--color-surface-highlight)] text-[var(--color-surface-highlight-text)] border border-[var(--color-border-default)]'
+                      : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:bg-gray-50'
                   }`}
                 >{opt.label}</button>
               ))}
@@ -114,8 +114,8 @@ function ControlsBar({
                 <button key={value} onClick={() => setSortDir(value)}
                   className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
                     sortDir === value
-                      ? 'bg-[var(--color-brand-accent)] text-white'
-                      : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent)]'
+                      ? 'bg-[var(--color-surface-highlight)] text-[var(--color-surface-highlight-text)] border border-[var(--color-border-default)]'
+                      : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:bg-gray-50'
                   }`}
                 ><Icon className="h-3 w-3" />{label}</button>
               ))}
@@ -140,7 +140,7 @@ export default function PreviouslyHandled() {
   const [sortDir, setSortDir] = useState('asc');
 
   // Panel open states
-  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(true);
   const [sortOpen, setSortOpen] = useState(false);
 
   // ── Formatters ──
@@ -435,6 +435,14 @@ export default function PreviouslyHandled() {
                 <div>Email: {selectedRequest.person.email}</div>
                 {selectedRequest.person.location && <div>Location: {selectedRequest.person.location}</div>}
               </div>
+            </div>
+
+            {/* Notes */}
+            <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Notes</span>
+              <p className="text-sm text-[var(--color-text-primary)] leading-normal whitespace-pre-wrap">
+                {selectedRequest.notes?.trim() ? selectedRequest.notes : '—'}
+              </p>
             </div>
 
             {/* Activity Log */}

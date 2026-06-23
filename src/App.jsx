@@ -16,7 +16,7 @@ export default function App() {
         <Route
           path="/"
           element={
-            <AppLayout title="Home">
+            <AppLayout>
               <Home />
             </AppLayout>
           }
@@ -24,7 +24,7 @@ export default function App() {
         <Route
           path="/new-requests"
           element={
-            <AppLayout title="New Requests">
+            <AppLayout>
               <NewRequests />
             </AppLayout>
           }
@@ -33,7 +33,7 @@ export default function App() {
         <Route
           path="/user-ledger"
           element={
-            <AppLayout title="User Ledger">
+            <AppLayout>
               <UserLedger />
             </AppLayout>
           }
@@ -41,7 +41,7 @@ export default function App() {
         <Route
           path="/templates"
           element={
-            <AppLayout title="Template Management">
+            <AppLayout>
               <TemplateManagement />
             </AppLayout>
           }
@@ -49,28 +49,8 @@ export default function App() {
         <Route
           path="/gmail-accounts"
           element={
-            <AppLayout title="Gmail Accounts">
+            <AppLayout>
               <GmailAccounts />
-            </AppLayout>
-          }
-        />
-        <Route
-          path="/settings"
-          element={
-            <AppLayout title="Settings">
-              <div className="bg-white p-6 rounded-lg border border-[var(--color-border-default)] shadow-sm">
-                Settings — coming soon
-              </div>
-            </AppLayout>
-          }
-        />
-        <Route
-          path="/future-pilots"
-          element={
-            <AppLayout title="Future Pilots">
-              <div className="bg-white p-6 rounded-lg border border-[var(--color-border-default)] shadow-sm">
-                Future Pilots — coming soon
-              </div>
             </AppLayout>
           }
         />

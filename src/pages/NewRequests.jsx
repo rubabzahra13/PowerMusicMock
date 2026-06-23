@@ -1,28 +1,76 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
-  Search, Plus, SortAsc, SortDesc, ChevronDown, Filter,
-  Download, Info
+  Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
-import { pendingRequests, handledRequests, userLedger } from '../data/mockData';
-import { DataTable, Tag, Modal, Toast, useToast, Drawer } from '../components/ui';
+import { format, parseISO, isToday, isYesterday } from 'date-fns';
+import { pendingRequests, userLedger } from '../data/mockData';
+import { DataTable, Tag, Modal, Toast, useToast } from '../components/ui';
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
+import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
+
+const SORT_PRESETS = [
+  { value: 'displayId-asc', label: 'ID (newest first)' },
+  { value: 'displayId-desc', label: 'ID (oldest first)' },
+  { value: 'receivedAt-desc', label: 'Received (newest first)' },
+  { value: 'receivedAt-asc', label: 'Received (oldest first)' },
+  { value: 'personName-asc', label: 'Person name (A–Z)' },
+  { value: 'personName-desc', label: 'Person name (Z–A)' },
+  { value: 'managerName-asc', label: 'Manager name (A–Z)' },
+  { value: 'managerName-desc', label: 'Manager name (Z–A)' },
+  { value: 'location-asc', label: 'Location (A–Z)' },
+  { value: 'location-desc', label: 'Location (Z–A)' },
+  { value: 'club-asc', label: 'Manager club (A–Z)' },
+  { value: 'club-desc', label: 'Manager club (Z–A)' }
+];
+
+const DEFAULT_SORT = 'displayId-asc';
+
+function parseSortPreset(preset) {
+  const match = preset.match(/^(.+)-(asc|desc)$/);
+  if (!match) return { field: 'displayId', dir: 'asc' };
+  return { field: match[1], dir: match[2] };
+}
 
 // ─── Shared Controls Bar ──────────────────────────────────────────────────────
 function ControlsBar({
   searchQuery, setSearchQuery,
   filterOpen, setFilterOpen,
-  sortOpen, setSortOpen,
   filterSlots,
-  sortFields,
-  sortField, setSortField,
-  sortDir, setSortDir,
+  sortPreset, setSortPreset,
   activeFilterCount
 }) {
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef(null);
+  const isSortCustom = sortPreset !== DEFAULT_SORT;
+  const activeSortLabel = SORT_PRESETS.find((o) => o.value === sortPreset)?.label ?? 'Sort';
+
+  useEffect(() => {
+    if (!sortOpen) return;
+    const onClickOutside = (e) => {
+      if (sortRef.current && !sortRef.current.contains(e.target)) {
+        setSortOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [sortOpen]);
+
+  const toolbarBtnClass = (active) =>
+    `flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+      active
+        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] shadow-sm ring-1 ring-[rgba(26,26,46,0.06)]'
+        : 'text-[var(--color-text-secondary)] hover:bg-white hover:text-[var(--color-text-primary)]'
+    }`;
+
   return (
-    <div className="w-full bg-white rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm">
-      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-0 divide-y md:divide-y-0 md:divide-x divide-[var(--color-border-default)]">
-        <div className="flex items-center gap-2 px-4 py-3 flex-1">
+    <div className="w-full rounded-2xl border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-card)]">
+      <div
+        className={`bg-[var(--color-surface-panel)] ${
+          filterOpen ? 'border-b border-[var(--color-border-default)] rounded-t-2xl' : 'rounded-2xl'
+        }`}
+      >
+        <div className="flex flex-col md:flex-row items-stretch gap-2 p-2">
+          <div className="flex items-center gap-2.5 px-3 py-2 flex-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-sm focus-within:ring-2 focus-within:ring-[rgba(26,26,46,0.08)] focus-within:border-transparent transition-shadow">
           <Search className="h-4 w-4 text-[var(--color-text-muted)] shrink-0" />
           <input
             type="text"
@@ -37,93 +85,93 @@ function ControlsBar({
           )}
         </div>
 
-        <button
-          onClick={() => { setFilterOpen(o => !o); setSortOpen(false); }}
-          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold transition-colors cursor-pointer ${
-            filterOpen || activeFilterCount > 0
-              ? 'bg-[var(--color-brand-accent)] text-white'
-              : 'bg-white text-[var(--color-text-primary)] hover:bg-gray-50'
-          }`}
-        >
-          <Filter className="h-4 w-4" />
-          <span>Filter</span>
-          {activeFilterCount > 0 && (
-            <span className="ml-0.5 bg-white/30 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-              {activeFilterCount}
-            </span>
-          )}
-          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${filterOpen ? 'rotate-180' : ''}`} />
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => { setFilterOpen((o) => !o); setSortOpen(false); }}
+            className={toolbarBtnClass(filterOpen || activeFilterCount > 0)}
+          >
+            <Filter className="h-4 w-4" />
+            <span>Filter</span>
+            {activeFilterCount > 0 && (
+              <span className="ml-0.5 bg-[var(--color-brand-primary)] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                {activeFilterCount}
+              </span>
+            )}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${filterOpen ? 'rotate-180' : ''}`} />
+          </button>
 
-        <button
-          onClick={() => { setSortOpen(o => !o); setFilterOpen(false); }}
-          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold transition-colors cursor-pointer ${
-            sortOpen ? 'bg-[var(--color-brand-accent)] text-white' : 'bg-white text-[var(--color-text-primary)] hover:bg-gray-50'
-          }`}
-        >
-          {sortDir === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
-          <span>Sort</span>
-          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${sortOpen ? 'rotate-180' : ''}`} />
-        </button>
+          <div className="relative" ref={sortRef}>
+            <button
+              onClick={() => setSortOpen((o) => !o)}
+              className={toolbarBtnClass(sortOpen || isSortCustom)}
+            >
+              <SortAsc className="h-4 w-4" />
+              <span className="max-w-[120px] truncate">{isSortCustom ? activeSortLabel : 'Sort'}</span>
+              <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${sortOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {sortOpen && (
+              <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-56 max-h-72 overflow-y-auto py-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-[var(--shadow-modal)]">
+                {SORT_PRESETS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => { setSortPreset(opt.value); setSortOpen(false); }}
+                    className={`w-full text-left px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
+                      sortPreset === opt.value
+                        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                        : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+                {isSortCustom && (
+                  <>
+                    <div className="my-1 h-px bg-[var(--color-border-default)]" />
+                    <button
+                      type="button"
+                      onClick={() => { setSortPreset(DEFAULT_SORT); setSortOpen(false); }}
+                      className="w-full text-left px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-brand-accent)] transition-colors cursor-pointer"
+                    >
+                      Reset sort
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        </div>
       </div>
 
       {filterOpen && (
-        <div className="border-t border-[var(--color-border-default)] bg-gray-50 px-4 py-3 flex flex-wrap items-center gap-4">
-          {filterSlots.map((slot) => (
-            <div key={slot.label} className="flex items-center gap-2">
-              <span className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">{slot.label}</span>
-              <div className="flex gap-1 flex-wrap">
-                {slot.options.map(opt => (
-                  <button key={opt.value} onClick={() => slot.onChange(opt.value)}
-                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                      slot.value === opt.value
-                        ? 'bg-[var(--color-brand-accent)] text-white'
-                        : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent)]'
-                    }`}
-                  >{opt.label}</button>
-                ))}
+        <div className="bg-[var(--color-surface-highlight)]/50 px-4 py-4 rounded-b-2xl">
+          <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
+            {filterSlots.map((slot) => (
+              <div key={slot.label} className="flex flex-col gap-1 min-w-[140px]">
+                <label className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                  {slot.label}
+                </label>
+                <select
+                  value={slot.value}
+                  onChange={(e) => slot.onChange(e.target.value)}
+                  className="h-9 px-3 rounded-md border border-[var(--color-border-default)] bg-white text-sm font-medium text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer"
+                >
+                  {slot.options.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
-            </div>
-          ))}
-          {activeFilterCount > 0 && (
-            <button onClick={() => filterSlots.forEach(s => s.onChange(s.options[0].value))}
-              className="ml-auto text-xs font-semibold text-[var(--color-text-secondary)] hover:text-red-500 transition-colors cursor-pointer">
-              Clear filters
-            </button>
-          )}
-        </div>
-      )}
-
-      {sortOpen && (
-        <div className="border-t border-[var(--color-border-default)] bg-gray-50 px-4 py-3 flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Sort by</span>
-            <div className="flex gap-1 flex-wrap">
-              {sortFields.map(opt => (
-                <button key={opt.value} onClick={() => setSortField(opt.value)}
-                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                    sortField === opt.value
-                      ? 'bg-[var(--color-brand-accent)] text-white'
-                      : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent)]'
-                  }`}
-                >{opt.label}</button>
-              ))}
-            </div>
-          </div>
-          <div className="h-5 w-px bg-[var(--color-border-default)] hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Direction</span>
-            <div className="flex gap-1">
-              {[{ value: 'asc', label: 'Ascending', Icon: SortAsc }, { value: 'desc', label: 'Descending', Icon: SortDesc }].map(({ value, label, Icon }) => (
-                <button key={value} onClick={() => setSortDir(value)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                    sortDir === value
-                      ? 'bg-[var(--color-brand-accent)] text-white'
-                      : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent)]'
-                  }`}
-                ><Icon className="h-3 w-3" />{label}</button>
-              ))}
-            </div>
+            ))}
+            {activeFilterCount > 0 && (
+              <button
+                onClick={() => filterSlots.forEach((s) => s.onChange(s.options[0].value))}
+                className="ml-auto text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-brand-accent)] transition-colors cursor-pointer pb-2"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -138,10 +186,6 @@ function formatTimestamp(iso) {
     return { date: format(d, 'dd MMM yyyy'), time: format(d, 'hh:mm a') };
   } catch { return { date: iso, time: '' }; }
 }
-function formatDateTime(iso) {
-  try { return format(parseISO(iso), 'dd MMM yyyy, hh:mm a'); }
-  catch { return iso; }
-}
 
 // ─── Shared 11-column table cell renderers ────────────────────────────────────
 const TimestampCell = ({ val }) => {
@@ -154,46 +198,103 @@ const TimestampCell = ({ val }) => {
   );
 };
 
+const formatDisplayId = (displayId) => `R-${String(displayId).padStart(2, '0')}`;
+
+const matchesDateFilter = (iso, filterDate) => {
+  if (filterDate === 'All') return true;
+  try {
+    const d = parseISO(iso);
+    if (filterDate === 'Today') return isToday(d);
+    if (filterDate === 'Yesterday') return isYesterday(d);
+    if (filterDate === 'Older') return !isToday(d) && !isYesterday(d);
+  } catch {
+    return true;
+  }
+  return true;
+};
+
+const buildFilterOptions = (values) => [
+  { value: 'All', label: 'All' },
+  ...values.map((v) => ({ value: v, label: v }))
+];
+
+const emptyPersonForm = () => ({
+  id: `person-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  firstName: '',
+  lastName: '',
+  email: '',
+  location: ''
+});
+
+const emptyManagerForm = () => ({
+  firstName: '',
+  lastName: '',
+  email: '',
+  club: ''
+});
+
 // ─── Page Component ───────────────────────────────────────────────────────────
 export default function Requests() {
   const { showToast } = useToast();
 
-  // ── View toggle ──
-  const [view, setView] = useState('new'); // 'new' | 'handled'
+  // ── Action tab (Add / Remove) ──
+  const [actionTab, setActionTab] = useState('All');
 
   // ── New requests data ──
   const [newRequests, setNewRequests] = useState(pendingRequests);
 
-  // ── Filter / Sort states (shared for both views) ──
+  // ── Filter / Sort states ──
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterAction, setFilterAction] = useState('All');
-  const [filterTag, setFilterTag] = useState('All');
-  const [sortField, setSortField] = useState('displayId');
-  const [sortDir, setSortDir] = useState('asc');
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
+  const [filterDate, setFilterDate] = useState('All');
+  const [filterLocation, setFilterLocation] = useState('All');
+  const [filterClub, setFilterClub] = useState('All');
+  const [filterAlreadyExists, setFilterAlreadyExists] = useState('All');
+  const [sortPreset, setSortPreset] = useState(DEFAULT_SORT);
+  const [filterOpen, setFilterOpen] = useState(true);
 
   // ── Drawer / Modal states ──
   const [selectedNewRequest, setSelectedNewRequest] = useState(null);
-  const [selectedHandledRequest, setSelectedHandledRequest] = useState(null);
+  const [confirmActionRequest, setConfirmActionRequest] = useState(null);
   const [showAddManualModal, setShowAddManualModal] = useState(false);
 
   // ── Manual form states ──
-  const [managerForm, setManagerForm] = useState({ firstName: '', lastName: '', email: '', club: '' });
-  const [personForm, setPersonForm] = useState({ firstName: '', lastName: '', email: '', location: '' });
+  const [managerForm, setManagerForm] = useState(emptyManagerForm());
+  const [personForms, setPersonForms] = useState([emptyPersonForm()]);
   const [action, setAction] = useState('Add');
   const [notes, setNotes] = useState('');
 
-  // Reset filters when switching views
-  const handleViewSwitch = (newView) => {
-    setView(newView);
+  const resetManualForm = (nextAction = actionTab) => {
+    setManagerForm(emptyManagerForm());
+    setPersonForms([emptyPersonForm()]);
+    setAction(nextAction);
+    setNotes('');
+  };
+
+  const updatePersonForm = (index, field, value) => {
+    setPersonForms((prev) => prev.map((person, i) => (
+      i === index ? { ...person, [field]: value } : person
+    )));
+  };
+
+  const addPersonForm = () => {
+    setPersonForms((prev) => [...prev, emptyPersonForm()]);
+  };
+
+  const removePersonForm = (index) => {
+    setPersonForms((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  };
+
+  // Reset filters when switching Add / Remove
+  const handleActionTabSwitch = (tab) => {
+    setActionTab(tab);
+    setAction(tab);
     setSearchQuery('');
-    setFilterAction('All');
-    setFilterTag('All');
-    setSortField('displayId');
-    setSortDir('asc');
-    setFilterOpen(false);
-    setSortOpen(false);
+    setFilterDate('All');
+    setFilterLocation('All');
+    setFilterClub('All');
+    setFilterAlreadyExists('All');
+    setSortPreset(DEFAULT_SORT);
+    setFilterOpen(true);
   };
 
   // ── Generic filter + sort function ──
@@ -201,8 +302,8 @@ export default function Requests() {
     const query = searchQuery.trim().toLowerCase();
     const filtered = rows.filter((req) => {
       const personName = `${req.person.firstName} ${req.person.lastName}`.toLowerCase();
-      const isManual = req.submittedBy?.club === 'Manual entry';
-      const managerName = isManual ? 'andrea admin' : `${req.submittedBy?.firstName || ''} ${req.submittedBy?.lastName || ''}`.toLowerCase();
+      const isManual = isManualEntry(req.submittedBy);
+      const managerName = isManual ? 'admin' : `${req.submittedBy?.firstName || ''} ${req.submittedBy?.lastName || ''}`.toLowerCase();
 
       const matchesSearch =
         query === '' ||
@@ -213,17 +314,30 @@ export default function Requests() {
         (req.submittedBy?.email && req.submittedBy.email.toLowerCase().includes(query)) ||
         (req.submittedBy?.club && req.submittedBy.club.toLowerCase().includes(query));
 
-      const matchesAction = filterAction === 'All' || req.action === filterAction;
+      const matchesAction =
+        actionTab === 'All' ? true : req.action === actionTab;
+      const matchesDate = matchesDateFilter(req[timestampKey], filterDate);
+      const matchesLocation =
+        filterLocation === 'All' || req.person.location === filterLocation;
+      const matchesClub =
+        filterClub === 'All' || req.submittedBy?.club === filterClub;
+      const hasAlreadyExists = req.tags?.includes('Already Exists');
+      const matchesAlreadyExists =
+        filterAlreadyExists === 'All' ||
+        (filterAlreadyExists === 'Yes' && hasAlreadyExists) ||
+        (filterAlreadyExists === 'No' && !hasAlreadyExists);
 
-      let matchesTag = true;
-      if (filterTag === 'Already Exists') matchesTag = req.tags?.includes('Already Exists');
-      else if (filterTag === 'Added') matchesTag = req.tags?.includes('Added');
-      else if (filterTag === 'Removed') matchesTag = req.tags?.includes('Removed');
-      else if (filterTag === 'No Tag') matchesTag = (req.tags?.length ?? 0) === 0;
-
-      return matchesSearch && matchesAction && matchesTag;
+      return (
+        matchesSearch &&
+        matchesAction &&
+        matchesDate &&
+        matchesLocation &&
+        matchesClub &&
+        matchesAlreadyExists
+      );
     });
 
+    const { field: sortField, dir: sortDir } = parseSortPreset(sortPreset);
     const dir = sortDir === 'asc' ? 1 : -1;
     return [...filtered].sort((a, b) => {
       if (sortField === 'managerName') {
@@ -236,94 +350,141 @@ export default function Requests() {
         const nB = `${b.person.firstName} ${b.person.lastName}`.toLowerCase();
         return nA.localeCompare(nB) * dir;
       }
-      if (sortField === timestampKey) return (new Date(a[timestampKey]) - new Date(b[timestampKey])) * dir;
+      if (sortField === 'location') {
+        return (a.person.location || '').localeCompare(b.person.location || '') * dir;
+      }
+      if (sortField === 'club') {
+        return (a.submittedBy?.club || '').localeCompare(b.submittedBy?.club || '') * dir;
+      }
+      if (sortField === 'receivedAt' || sortField === timestampKey) {
+        return (new Date(a[timestampKey]) - new Date(b[timestampKey])) * dir;
+      }
       return (a.displayId - b.displayId) * dir;
     });
   };
 
-  const filteredNew = useMemo(
-    () => applyFilterSort(newRequests, 'receivedAt'),
-    [newRequests, searchQuery, filterAction, filterTag, sortField, sortDir]
-  );
-  const filteredHandled = useMemo(
-    () => applyFilterSort(handledRequests, 'handledAt'),
-    [searchQuery, filterAction, filterTag, sortField, sortDir]
+  const actionTabRows = useMemo(
+    () => (actionTab === 'All' ? newRequests : newRequests.filter((r) => r.action === actionTab)),
+    [newRequests, actionTab]
   );
 
-  const activeFilterCount = [filterAction !== 'All', filterTag !== 'All'].filter(Boolean).length;
+  const locationOptions = useMemo(
+    () => buildFilterOptions(
+      [...new Set(actionTabRows.map((r) => r.person.location).filter(Boolean))].sort()
+    ),
+    [actionTabRows]
+  );
 
-  // ── CSV export for handled ──
-  const handleExportCSV = () => {
-    const headers = ['#', 'Timestamp', 'Handled At', 'Request Type', 'Person Name', 'Person Email', 'Person Location', 'Manager Name', 'Manager Email', 'Manager Club', 'Tags'];
-    const csvRows = filteredHandled.map((req) => {
-      const isManual = req.submittedBy.club === 'Manual entry';
-      return [
-        req.displayId, formatDateTime(req.receivedAt), formatDateTime(req.handledAt), req.action,
-        `${req.person.firstName} ${req.person.lastName}`, req.person.email, req.person.location || '',
-        isManual ? 'Andrea (Admin)' : `${req.submittedBy.firstName} ${req.submittedBy.lastName || ''}`.trim(),
-        req.submittedBy.email || '', req.submittedBy.club, req.tags.join('; ')
-      ].map((val) => `"${String(val).replace(/"/g, '""')}"`).join(',');
-    });
-    const blob = new Blob([[headers.join(','), ...csvRows].join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'previously-handled-export.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+  const clubOptions = useMemo(
+    () => buildFilterOptions(
+      [...new Set(actionTabRows.map((r) => r.submittedBy?.club).filter(Boolean))].sort()
+    ),
+    [actionTabRows]
+  );
+
+  const filteredRequests = useMemo(
+    () => applyFilterSort(actionTabRows, 'receivedAt'),
+    [actionTabRows, searchQuery, actionTab, filterDate, filterLocation, filterClub, filterAlreadyExists, sortPreset]
+  );
+
+  const allCount = newRequests.length;
+  const addCount = newRequests.filter((r) => r.action === 'Add').length;
+  const removeCount = newRequests.filter((r) => r.action === 'Remove').length;
+
+  const activeFilterCount = [
+    filterDate !== 'All',
+    filterLocation !== 'All',
+    filterClub !== 'All',
+    filterAlreadyExists !== 'All',
+  ].filter(Boolean).length;
 
   // ── Manual form submit ──
-  const handleCreateRequest = (e) => {
-    e.preventDefault();
-    const isValid =
-      managerForm.firstName.trim() && managerForm.lastName.trim() &&
-      managerForm.email.trim() && managerForm.club.trim() &&
-      personForm.firstName.trim() && personForm.lastName.trim() &&
-      personForm.email.trim() && personForm.location.trim();
-    if (!isValid) return;
-    const maxId = newRequests.reduce((m, r) => Math.max(m, r.displayId || 0), 0);
-    const newRequest = {
-      id: `req-manual-${Date.now()}`, displayId: maxId + 1,
-      receivedAt: new Date().toISOString(), submittedBy: { ...managerForm },
-      person: { ...personForm }, action, notes, tags: [], createdBy: 'Andrea (Admin)'
-    };
-    setNewRequests((prev) => [newRequest, ...prev]);
-    showToast('Request created.', 'success');
-    setShowAddManualModal(false);
-    setManagerForm({ firstName: '', lastName: '', email: '', club: '' });
-    setPersonForm({ firstName: '', lastName: '', email: '', location: '' });
-    setAction('Add'); setNotes('');
-  };
+  const isPersonFormValid = (person) =>
+    person.firstName.trim() &&
+    person.lastName.trim() &&
+    person.email.trim() &&
+    person.location.trim();
 
   const isModalFormValid =
-    managerForm.firstName.trim() && managerForm.lastName.trim() &&
-    managerForm.email.trim() && managerForm.club.trim() &&
-    personForm.firstName.trim() && personForm.lastName.trim() &&
-    personForm.email.trim() && personForm.location.trim();
+    managerForm.firstName.trim() &&
+    managerForm.lastName.trim() &&
+    managerForm.email.trim() &&
+    managerForm.club.trim() &&
+    personForms.every(isPersonFormValid);
+
+  const handleCreateRequest = (e) => {
+    e.preventDefault();
+    if (!isModalFormValid) return;
+
+    const maxId = newRequests.reduce((m, r) => Math.max(m, r.displayId || 0), 0);
+    const timestamp = Date.now();
+    const created = personForms.map((person, index) => ({
+      id: `req-manual-${timestamp}-${index}`,
+      displayId: maxId + index + 1,
+      receivedAt: new Date().toISOString(),
+      submittedBy: {
+        firstName: 'Admin',
+        lastName: '',
+        email: managerForm.email,
+        club: 'Manual entry'
+      },
+      person: {
+        firstName: person.firstName,
+        lastName: person.lastName,
+        email: person.email,
+        location: person.location
+      },
+      action,
+      notes,
+      tags: [],
+      createdBy: 'Andrea (Admin)'
+    }));
+
+    setNewRequests((prev) => [...created, ...prev]);
+    showToast(
+      created.length === 1 ? 'Request created.' : `${created.length} requests created.`,
+      'success'
+    );
+    setShowAddManualModal(false);
+    resetManualForm();
+  };
+
+  const completeRequest = (req) => {
+    setNewRequests((prev) => prev.filter((r) => r.id !== req.id));
+    showToast(
+      `${req.person.firstName} ${req.person.lastName} marked as ${req.action === 'Add' ? 'Added' : 'Removed'}.`,
+      'success'
+    );
+    setSelectedNewRequest((current) => (current?.id === req.id ? null : current));
+    setConfirmActionRequest(null);
+  };
 
   // ── Column definitions — shared structure ──
   const sharedStartColumns = [
     {
       key: 'displayId',
       label: '#',
-      render: (val) => <span className="text-xs font-bold text-[var(--color-text-muted)]">{val}</span>
+      width: '60px',
+      render: (val) => (
+        <span className="text-xs font-bold text-[var(--color-text-muted)]">{formatDisplayId(val)}</span>
+      )
     },
     {
       key: 'timestamp',
       label: 'Timestamp',
-      render: (_, row) => <TimestampCell val={view === 'new' ? row.receivedAt : row.receivedAt} />
+      width: '130px',
+      render: (_, row) => <TimestampCell val={row.receivedAt} />
     },
     {
       key: 'action',
-      label: 'Request Type',
+      label: 'Type',
+      width: '80px',
       render: (val) => <Tag variant={val === 'Add' ? 'add-action' : 'remove-action'} label={val} />
     },
     {
       key: 'personName',
       label: 'Person Name',
+      width: '110px',
       render: (_, row) => (
         <span className="font-semibold text-sm text-[var(--color-text-primary)]">
           {row.person.firstName} {row.person.lastName}
@@ -333,33 +494,36 @@ export default function Requests() {
     {
       key: 'personEmail',
       label: 'Person Email',
+      width: '150px',
       render: (_, row) => <span className="text-xs text-[var(--color-text-secondary)]">{row.person.email}</span>
     },
     {
       key: 'personLocation',
       label: 'Location',
+      width: '95px',
       render: (_, row) => <span className="text-xs text-[var(--color-text-secondary)]">{row.person.location || '—'}</span>
     },
     {
       key: 'managerName',
       label: 'Manager Name',
-      render: (_, row) => {
-        const isManual = row.submittedBy?.club === 'Manual entry';
-        return (
-          <span className="font-semibold text-sm text-[var(--color-text-primary)]">
-            {isManual ? 'Andrea (Admin)' : `${row.submittedBy?.firstName || ''} ${row.submittedBy?.lastName || ''}`.trim()}
-          </span>
-        );
-      }
+      width: '120px',
+      render: (_, row) => (
+        <span className="font-semibold text-sm text-[var(--color-text-primary)]">
+          {getManagerDisplayName(row.submittedBy)}
+        </span>
+      )
     },
     {
       key: 'managerEmail',
       label: 'Manager Email',
+      width: '155px',
       render: (_, row) => <span className="text-xs text-[var(--color-text-secondary)]">{row.submittedBy?.email || '—'}</span>
     },
     {
       key: 'managerClub',
       label: 'Manager Club',
+      width: '130px',
+      cellClassName: 'align-middle whitespace-normal break-words leading-snug',
       render: (_, row) => <span className="text-xs text-[var(--color-text-secondary)]">{row.submittedBy?.club}</span>
     }
   ];
@@ -369,42 +533,53 @@ export default function Requests() {
     {
       key: 'tags',
       label: 'Tags',
+      width: '100px',
+      cellClassName: 'align-middle whitespace-nowrap pl-2 pr-1',
       render: (val) => (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex items-center justify-start -ml-1">
           {(val || []).map((t) => (
-            <Tag key={t} variant={t === 'Already Exists' ? 'already-exists' : 'neutral'} label={t} />
+            <Tag key={t} variant={t === 'Already Exists' ? 'already-exists' : 'neutral'} label={t} compact={t === 'Already Exists'} />
           ))}
         </div>
       )
     },
     {
-      key: 'expand',
-      label: '',
-      render: () => <span className="text-gray-300 text-xs select-none">▶</span>
-    }
-  ];
-
-  const handledColumns = [
-    ...sharedStartColumns,
-    {
-      key: 'tags',
-      label: 'Status / Tags',
-      render: (tagsList) => (
-        <div className="flex flex-wrap gap-1.5">
-          {(tagsList || []).map((t) => {
-            let v = 'added';
-            if (t === 'Removed') v = 'removed';
-            else if (t === 'Already Exists') v = 'already-exists';
-            return <Tag key={t} variant={v} label={t} />;
-          })}
+      key: 'actions',
+      label: 'Mark as',
+      width: '128px',
+      cellClassName: 'text-right align-middle whitespace-nowrap pl-0 pr-2',
+      render: (_, row) => (
+        <div
+          className="flex items-center justify-end gap-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={() => setSelectedNewRequest(row)}
+            aria-label="View request details"
+            className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer shrink-0"
+          >
+            <Eye className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmActionRequest(row)}
+            className={`min-w-[4.75rem] w-[4.75rem] text-center px-2 py-1.5 text-xs font-semibold rounded-md border transition-all cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.12)] active:translate-y-px active:shadow-none shrink-0 ${
+              row.action === 'Add'
+                ? 'bg-[#16a34a] text-white border-[#15803d] hover:bg-[#15803d]'
+                : 'bg-[#dc2626] text-white border-[#b91c1c] hover:bg-[#b91c1c]'
+            }`}
+          >
+            {row.action === 'Add' ? 'Added' : 'Removed'}
+          </button>
         </div>
       )
     }
   ];
 
-  const displayedNewRows = useMemo(() =>
-    filteredNew.map((req) => ({ ...req, alreadyExists: req.tags?.includes('Already Exists') })),
-    [filteredNew]
+  const displayedRows = useMemo(
+    () => filteredRequests.map((req) => ({ ...req, alreadyExists: req.tags?.includes('Already Exists') })),
+    [filteredRequests]
   );
 
   return (
@@ -416,208 +591,273 @@ export default function Requests() {
         <div className="flex items-center gap-4">
           <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Requests</h2>
 
-          {/* Toggle switch */}
-          <div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1">
-            <button
-              onClick={() => handleViewSwitch('new')}
-              className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-all cursor-pointer ${
-                view === 'new'
-                  ? 'bg-white text-[var(--color-text-primary)] shadow-sm'
-                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-              }`}
-            >
-              New Requests
-              <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                view === 'new'
-                  ? 'bg-[var(--color-brand-accent)] text-white'
-                  : 'bg-gray-300 text-gray-600'
-              }`}>
-                {newRequests.length}
-              </span>
-            </button>
-            <button
-              onClick={() => handleViewSwitch('handled')}
-              className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-all cursor-pointer ${
-                view === 'handled'
-                  ? 'bg-white text-[var(--color-text-primary)] shadow-sm'
-                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-              }`}
-            >
-              Previously Handled
-              <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                view === 'handled'
-                  ? 'bg-gray-100 text-gray-700'
-                  : 'bg-gray-300 text-gray-600'
-              }`}>
-                44
-              </span>
-            </button>
+          {/* All / Add / Remove toggle */}
+          <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)]">
+            {[
+              { key: 'All', label: 'All', count: allCount },
+              { key: 'Add', label: 'Add', count: addCount },
+              { key: 'Remove', label: 'Remove', count: removeCount }
+            ].map(({ key, label, count }) => (
+              <button
+                key={key}
+                onClick={() => handleActionTabSwitch(key)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+                  actionTab === key
+                    ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] shadow-sm'
+                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                }`}
+              >
+                {label}
+                <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  actionTab === key
+                    ? 'bg-[var(--color-brand-primary)] text-white'
+                    : 'bg-[var(--color-surface-highlight)] text-[var(--color-text-secondary)]'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Right actions */}
-        {view === 'new' ? (
-          <button
-            onClick={() => setShowAddManualModal(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-semibold bg-white hover:bg-gray-50 transition-colors shadow-sm focus:outline-none cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Manually</span>
-          </button>
-        ) : (
-          <button
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-1.5 px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-semibold bg-white hover:bg-gray-50 transition-colors shadow-sm focus:outline-none cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export CSV</span>
-          </button>
-        )}
+        <button
+          onClick={() => { resetManualForm(actionTab === 'All' ? 'Add' : actionTab); setShowAddManualModal(true); }}
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Add Manually</span>
+        </button>
       </div>
-
-      {/* Read-only banner (handled view only) */}
-      {view === 'handled' && (
-        <div className="bg-[#eff6ff] border border-[#bfdbfe] rounded-md px-4 py-2.5 flex items-center gap-2.5">
-          <Info className="w-4 h-4 text-blue-500 shrink-0" />
-          <span className="text-xs text-blue-800 font-semibold">This is a read-only log. Records cannot be edited.</span>
-        </div>
-      )}
 
       {/* Controls Bar */}
       <ControlsBar
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
         filterOpen={filterOpen} setFilterOpen={setFilterOpen}
-        sortOpen={sortOpen} setSortOpen={setSortOpen}
         activeFilterCount={activeFilterCount}
         filterSlots={[
           {
-            label: 'Request Type', value: filterAction, onChange: setFilterAction,
-            options: [{ value: 'All', label: 'All' }, { value: 'Add', label: 'Add' }, { value: 'Remove', label: 'Remove' }]
+            label: 'Received',
+            value: filterDate, onChange: setFilterDate,
+            options: [
+              { value: 'All', label: 'All' },
+              { value: 'Today', label: 'Today' },
+              { value: 'Yesterday', label: 'Yesterday' },
+              { value: 'Older', label: 'Older' }
+            ]
           },
           {
-            label: 'Tag', value: filterTag, onChange: setFilterTag,
-            options: view === 'new'
-              ? [{ value: 'All', label: 'All Tags' }, { value: 'Already Exists', label: 'Already Exists' }, { value: 'No Tag', label: 'No Tag' }]
-              : [{ value: 'All', label: 'All Tags' }, { value: 'Added', label: 'Added' }, { value: 'Removed', label: 'Removed' }, { value: 'Already Exists', label: 'Already Exists' }]
+            label: 'User Location', value: filterLocation, onChange: setFilterLocation,
+            options: locationOptions
+          },
+          {
+            label: 'Manager Club', value: filterClub, onChange: setFilterClub,
+            options: clubOptions
+          },
+          {
+            label: 'Already Exists', value: filterAlreadyExists, onChange: setFilterAlreadyExists,
+            options: [
+              { value: 'All', label: 'All' },
+              { value: 'Yes', label: 'Yes' },
+              { value: 'No', label: 'No' }
+            ]
           }
         ]}
-        sortFields={[
-          { value: 'displayId', label: 'ID' },
-          { value: view === 'new' ? 'receivedAt' : 'handledAt', label: 'Timestamp' },
-          { value: 'personName', label: 'Person Name' },
-          { value: 'managerName', label: 'Manager Name' }
-        ]}
-        sortField={sortField} setSortField={setSortField}
-        sortDir={sortDir} setSortDir={setSortDir}
+        sortPreset={sortPreset}
+        setSortPreset={setSortPreset}
       />
 
       {/* Table */}
       <div className="w-full">
-        {view === 'new' ? (
-          <DataTable
-            columns={newColumns}
-            rows={displayedNewRows}
-            onRowClick={(row) => setSelectedNewRequest(row)}
-            emptyMessage="No pending requests matching your filters."
-          />
-        ) : (
-          <DataTable
-            columns={handledColumns}
-            rows={filteredHandled}
-            onRowClick={(row) => setSelectedHandledRequest(row)}
-            emptyMessage="No handled requests matching your filters."
-          />
-        )}
+        <DataTable
+          columns={newColumns}
+          rows={displayedRows}
+          onRowClick={(row) => setSelectedNewRequest(row)}
+          emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
+          compact
+          centerHeaders
+        />
       </div>
 
       {/* Footer */}
       <div className="px-2 text-xs font-medium text-[var(--color-text-secondary)]">
-        {view === 'new' ? `${filteredNew.length} requests` : `${filteredHandled.length} records shown`}
+        {filteredRequests.length} requests
       </div>
 
       {/* ── Add Manually Modal ── */}
       <Modal
         isOpen={showAddManualModal}
-        onClose={() => setShowAddManualModal(false)}
+        onClose={() => { setShowAddManualModal(false); resetManualForm(); }}
         title="Add Request Manually"
+        wide
+        headerExtra={
+          <div className="flex items-center bg-white rounded-lg p-0.5 gap-0.5 ring-1 ring-[rgba(26,26,46,0.08)] shadow-sm">
+            {[['Add', 'Add'], ['Remove', 'Remove']].map(([val, label]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setAction(val)}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  action === val
+                    ? val === 'Add'
+                      ? 'bg-[var(--color-tag-add-action-bg)] text-[var(--color-tag-add-action-text)] shadow-sm'
+                      : 'bg-[var(--color-tag-remove-action-bg)] text-[var(--color-tag-remove-action-text)] shadow-sm'
+                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
         footer={
           <>
-            <button onClick={() => setShowAddManualModal(false)}
-              className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium text-[var(--color-text-primary)] hover:bg-gray-50 transition-colors">Cancel</button>
+            <button onClick={() => { setShowAddManualModal(false); resetManualForm(); }}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer">Cancel</button>
             <button onClick={handleCreateRequest} disabled={!isModalFormValid}
-              className={`px-4 py-2 text-white text-sm font-semibold rounded-md transition-colors shadow-sm ${isModalFormValid ? 'bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)] cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}>
-              Create Request
+              className={`px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm cursor-pointer ${isModalFormValid ? 'bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)]' : 'bg-gray-300 cursor-not-allowed'}`}>
+              {personForms.length === 1 ? 'Create Request' : `Create ${personForms.length} Requests`}
             </button>
           </>
         }
       >
-        <form onSubmit={handleCreateRequest} className="space-y-5 text-left">
+        <form onSubmit={handleCreateRequest} className="space-y-4 text-left">
           <div className="space-y-3">
             <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Manager Details</span>
             <div className="grid grid-cols-2 gap-3">
               {[['First Name *', 'firstName', 'text'], ['Last Name *', 'lastName', 'text']].map(([label, field, type]) => (
                 <div key={field}>
-                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-0.5">{label}</label>
+                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
                   <input type={type} required value={managerForm[field]}
                     onChange={(e) => setManagerForm({ ...managerForm, [field]: e.target.value })}
-                    className="w-full px-2.5 py-1.5 bg-white border border-[var(--color-border-default)] rounded text-sm focus:outline-none focus:border-[var(--color-border-focus)] transition-colors" />
+                    className="w-full px-3 py-2 bg-[var(--color-surface-panel)]/50 border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:bg-white focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all" />
                 </div>
               ))}
             </div>
             <div className="grid grid-cols-2 gap-3">
               {[['Email *', 'email', 'email'], ['Club Location *', 'club', 'text']].map(([label, field, type]) => (
                 <div key={field}>
-                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-0.5">{label}</label>
+                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
                   <input type={type} required value={managerForm[field]}
                     onChange={(e) => setManagerForm({ ...managerForm, [field]: e.target.value })}
-                    className="w-full px-2.5 py-1.5 bg-white border border-[var(--color-border-default)] rounded text-sm focus:outline-none focus:border-[var(--color-border-focus)] transition-colors" />
+                    className="w-full px-3 py-2 bg-[var(--color-surface-panel)]/50 border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:bg-white focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all" />
                 </div>
               ))}
             </div>
           </div>
-          <div className="space-y-3">
-            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Person Details</span>
-            <div className="grid grid-cols-2 gap-3">
-              {[['First Name *', 'firstName', 'text'], ['Last Name *', 'lastName', 'text']].map(([label, field, type]) => (
-                <div key={field}>
-                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-0.5">{label}</label>
-                  <input type={type} required value={personForm[field]}
-                    onChange={(e) => setPersonForm({ ...personForm, [field]: e.target.value })}
-                    className="w-full px-2.5 py-1.5 bg-white border border-[var(--color-border-default)] rounded text-sm focus:outline-none focus:border-[var(--color-border-focus)] transition-colors" />
-                </div>
-              ))}
+
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                People ({personForms.length})
+              </span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              {[['Email *', 'email', 'email'], ['Location *', 'location', 'text']].map(([label, field, type]) => (
-                <div key={field}>
-                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-0.5">{label}</label>
-                  <input type={type} required value={personForm[field]}
-                    onChange={(e) => setPersonForm({ ...personForm, [field]: e.target.value })}
-                    className="w-full px-2.5 py-1.5 bg-white border border-[var(--color-border-default)] rounded text-sm focus:outline-none focus:border-[var(--color-border-focus)] transition-colors" />
+
+            <div className="max-h-[40vh] overflow-y-auto overscroll-contain space-y-2.5 pr-1">
+            {personForms.map((person, index) => (
+              <div
+                key={person.id}
+                className="space-y-2.5 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 p-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-bold text-[var(--color-text-primary)]">
+                    Person {index + 1}
+                  </span>
+                  {personForms.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removePersonForm(index)}
+                      aria-label={`Remove person ${index + 1}`}
+                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-[var(--color-text-secondary)] hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Delete</span>
+                    </button>
+                  )}
                 </div>
-              ))}
+                <div className="grid grid-cols-2 gap-3">
+                  {[['First Name *', 'firstName', 'text'], ['Last Name *', 'lastName', 'text']].map(([label, field, type]) => (
+                    <div key={field}>
+                      <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
+                      <input
+                        type={type}
+                        required
+                        value={person[field]}
+                        onChange={(e) => updatePersonForm(index, field, e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {[['Email *', 'email', 'email'], ['Location *', 'location', 'text']].map(([label, field, type]) => (
+                    <div key={field}>
+                      <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
+                      <input
+                        type={type}
+                        required
+                        value={person[field]}
+                        onChange={(e) => updatePersonForm(index, field, e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
             </div>
+
+            <button
+              type="button"
+              onClick={addPersonForm}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-[var(--color-border-default)] text-sm font-semibold text-[var(--color-brand-primary)] bg-[var(--color-surface-panel)]/40 hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add one more</span>
+            </button>
           </div>
+
           <div className="space-y-1.5">
-            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Action *</span>
-            <div className="flex items-center gap-4">
-              {[['Add', 'Add Person'], ['Remove', 'Remove Person']].map(([val, label]) => (
-                <label key={val} className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer select-none">
-                  <input type="radio" name="modalAction" checked={action === val} onChange={() => setAction(val)} className="w-3.5 h-3.5 cursor-pointer" />
-                  <span className="font-medium">{label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="space-y-1">
             <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Additional Notes</span>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any additional notes..."
-              className="w-full h-14 px-2.5 py-1.5 bg-white border border-[var(--color-border-default)] rounded text-sm placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors resize-none" />
+              className="w-full h-16 px-3 py-2 bg-[var(--color-surface-panel)]/50 border border-[var(--color-border-default)] rounded-lg text-sm placeholder-[var(--color-text-muted)] focus:outline-none focus:bg-white focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all resize-none" />
           </div>
-          <div className="text-[11px] font-medium text-[var(--color-text-muted)] select-none pt-2 border-t border-[var(--color-border-default)]">
-            Created By: Andrea (Admin)
+          <div className="text-[11px] font-medium text-[var(--color-text-muted)] select-none pt-3 border-t border-[var(--color-border-default)]/80">
+            Created by Andrea (Admin)
           </div>
         </form>
+      </Modal>
+
+      {/* ── Confirm action modal (list + drawer) ── */}
+      <Modal
+        isOpen={confirmActionRequest !== null}
+        onClose={() => setConfirmActionRequest(null)}
+        title="Confirm action"
+        footer={
+          <>
+            <button
+              onClick={() => setConfirmActionRequest(null)}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => confirmActionRequest && completeRequest(confirmActionRequest)}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)] shadow-sm cursor-pointer"
+            >
+              Confirm
+            </button>
+          </>
+        }
+      >
+        {confirmActionRequest && (
+          <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed text-left">
+            Confirm you have {confirmActionRequest.action === 'Add' ? 'added' : 'removed'}{' '}
+            <strong className="text-[var(--color-text-primary)] font-bold">
+              {confirmActionRequest.person.firstName} {confirmActionRequest.person.lastName}
+            </strong>{' '}
+            in Power Music before continuing. This cannot be undone.
+          </p>
+        )}
       </Modal>
 
       {/* ── New Request Detail Drawer ── */}
@@ -626,75 +866,9 @@ export default function Requests() {
         isOpen={selectedNewRequest !== null}
         onClose={() => setSelectedNewRequest(null)}
         ledger={userLedger}
-        onAction={(id, actionType) => {
-          setNewRequests((prev) => prev.filter((r) => r.id !== id));
-          showToast(
-            `${selectedNewRequest.person.firstName} ${selectedNewRequest.person.lastName} marked as ${actionType === 'Add' ? 'Added' : 'Removed'}.`,
-            'success'
-          );
-          setSelectedNewRequest(null);
-        }}
+        onConfirmAction={(req) => setConfirmActionRequest(req)}
       />
 
-      {/* ── Handled Request Read-Only Drawer ── */}
-      <Drawer
-        isOpen={selectedHandledRequest !== null}
-        onClose={() => setSelectedHandledRequest(null)}
-        title="Request Record"
-      >
-        {selectedHandledRequest && (
-          <div className="space-y-6 text-left select-none">
-            <div className="flex items-start justify-between border-b border-[var(--color-border-default)] pb-4">
-              <div className="text-xs text-[var(--color-text-secondary)] font-medium space-y-0.5">
-                <div>Submitted: {formatDateTime(selectedHandledRequest.receivedAt)}</div>
-                <div>Handled: {formatDateTime(selectedHandledRequest.handledAt)}</div>
-              </div>
-              <div className="flex flex-wrap gap-1.5 shrink-0 max-w-[200px] justify-end">
-                {selectedHandledRequest.tags.map((t) => (
-                  <Tag key={t} variant={t === 'Added' ? 'added' : t === 'Removed' ? 'removed' : 'already-exists'} label={t} />
-                ))}
-              </div>
-            </div>
-            <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Manager Details</span>
-              <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {selectedHandledRequest.submittedBy.club === 'Manual entry' ? 'Andrea (Admin)' : `${selectedHandledRequest.submittedBy.firstName} ${selectedHandledRequest.submittedBy.lastName || ''}`.trim()}
-              </div>
-              <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
-                {selectedHandledRequest.submittedBy.email && <div>Email: {selectedHandledRequest.submittedBy.email}</div>}
-                <div>Club: {selectedHandledRequest.submittedBy.club}</div>
-              </div>
-            </div>
-            <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                Person to {selectedHandledRequest.action === 'Add' ? 'Add' : 'Remove'}
-              </span>
-              <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {selectedHandledRequest.person.firstName} {selectedHandledRequest.person.lastName}
-              </div>
-              <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
-                <div>Email: {selectedHandledRequest.person.email}</div>
-                {selectedHandledRequest.person.location && <div>Location: {selectedHandledRequest.person.location}</div>}
-              </div>
-            </div>
-            <div className="space-y-3 pt-3 border-t border-[var(--color-border-default)]">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Activity Log</span>
-              <div className="divide-y divide-[var(--color-border-default)] font-medium text-xs">
-                <div className="py-2 flex items-start gap-3">
-                  <span className="text-[var(--color-text-secondary)] font-semibold shrink-0">{format(parseISO(selectedHandledRequest.receivedAt), 'HH:mm')}</span>
-                  <span className="text-[var(--color-text-primary)]">
-                    Request submitted by {selectedHandledRequest.submittedBy.club === 'Manual entry' ? 'Andrea (Admin)' : `${selectedHandledRequest.submittedBy.firstName} ${selectedHandledRequest.submittedBy.lastName || ''}`.trim()}
-                  </span>
-                </div>
-                <div className="py-2 flex items-start gap-3">
-                  <span className="text-[var(--color-text-secondary)] font-semibold shrink-0">{format(parseISO(selectedHandledRequest.handledAt), 'HH:mm')}</span>
-                  <span className="text-[var(--color-text-primary)]">Marked as {selectedHandledRequest.action === 'Add' ? 'Added' : 'Removed'} by Andrea</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </Drawer>
     </div>
   );
 }

@@ -9,7 +9,11 @@
   --color-surface-card: #ffffff;
   --color-surface-sidebar: #1a1a2e;
   --color-surface-sidebar-hover: #252542;
-  --color-surface-sidebar-active: #e94560;
+  --color-surface-sidebar-active: rgba(255, 255, 255, 0.1);
+  --color-surface-panel: #f7f8fc;
+  --color-surface-highlight: #eceef6;
+  --color-surface-highlight-strong: #dfe3f0;
+  --color-surface-highlight-text: #1a1a2e;
 
   /* Text */
   --color-text-primary: #1a1a2e;

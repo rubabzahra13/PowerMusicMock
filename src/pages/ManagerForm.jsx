@@ -143,29 +143,23 @@ export default function ManagerForm() {
             <form onSubmit={handleSubmit} className="bg-white border border-[var(--color-border-default)] rounded-lg shadow-[var(--shadow-card)] p-6 space-y-6">
               {/* Top Toggle & Dynamic Title */}
               <div className="flex flex-col gap-4 border-b border-[var(--color-border-default)] pb-4">
-                <div className="flex bg-gray-100 p-1 rounded-lg">
-                  <button
-                    type="button"
-                    onClick={() => setAction('Add')}
-                    className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all cursor-pointer ${
-                      action === 'Add'
-                        ? 'bg-white shadow-sm text-[var(--color-text-primary)]'
-                        : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                    }`}
-                  >
-                    Person to Add
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAction('Remove')}
-                    className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all cursor-pointer ${
-                      action === 'Remove'
-                        ? 'bg-white shadow-sm text-[var(--color-text-primary)]'
-                        : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                    }`}
-                  >
-                    Person to Remove
-                  </button>
+                <div className="flex items-center bg-white rounded-lg p-0.5 gap-0.5 ring-1 ring-[rgba(26,26,46,0.08)] shadow-sm w-fit">
+                  {[['Add', 'Add'], ['Remove', 'Remove']].map(([val, label]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setAction(val)}
+                      className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-all cursor-pointer ${
+                        action === val
+                          ? val === 'Add'
+                            ? 'bg-[var(--color-tag-add-action-bg)] text-[var(--color-tag-add-action-text)] shadow-sm'
+                            : 'bg-[var(--color-tag-remove-action-bg)] text-[var(--color-tag-remove-action-text)] shadow-sm'
+                          : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
                 <div>
                   <h2 className="text-[15px] font-bold text-[var(--color-text-primary)]">
@@ -240,16 +234,9 @@ export default function ManagerForm() {
 
               {/* Section 2: PERSON TO ADD / REMOVE — label is dynamic */}
               <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <span className="block text-[11px] font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                    {action === 'Add' ? 'Person to add' : 'Person to remove'}
-                  </span>
-                  {action === 'Add' ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#dcfce7] text-[#166534] leading-none">Adding</span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#fee2e2] text-[#991b1b] leading-none">Removing</span>
-                  )}
-                </div>
+                <span className="block text-[11px] font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                  {action === 'Add' ? 'Person to add' : 'Person to remove'}
+                </span>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">

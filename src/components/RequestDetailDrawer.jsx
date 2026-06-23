@@ -1,15 +1,17 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format, parseISO } from 'date-fns';
-import { X, Check } from 'lucide-react';
-import { Drawer, Modal } from './ui';
+import { Check } from 'lucide-react';
+import { Drawer } from './ui';
+import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 
-export default function RequestDetailDrawer({ request, isOpen, onClose, onAction, ledger = [] }) {
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
+const panelClass =
+  'bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg p-3 flex flex-col gap-1.5 min-h-0';
+
+export default function RequestDetailDrawer({ request, isOpen, onClose, onConfirmAction, ledger = [] }) {
   const [log, setLog] = useState([]);
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [noteText, setNoteText] = useState('');
 
-  // Reset states when a new request is selected
   useEffect(() => {
     if (!request) {
       setLog([]);
@@ -19,15 +21,16 @@ export default function RequestDetailDrawer({ request, isOpen, onClose, onAction
     }
 
     const timeStr = format(parseISO(request.receivedAt), 'HH:mm');
+    const managerName = getManagerDisplayName(request.submittedBy);
     const initialEntries = [
       {
         id: 'sub',
         time: timeStr,
-        text: `Request submitted by ${request.submittedBy.firstName} ${request.submittedBy.lastName}`
+        text: `Request submitted by ${managerName}`
       }
     ];
 
-    if (request.tags && request.tags.includes('Already Exists')) {
+    if (request.tags?.includes('Already Exists')) {
       initialEntries.push({
         id: 'ae',
         time: timeStr,
@@ -40,7 +43,6 @@ export default function RequestDetailDrawer({ request, isOpen, onClose, onAction
     setNoteText('');
   }, [request]);
 
-  // Date parsing formatting
   const formatDateTime = (isoString) => {
     if (!isoString) return '';
     try {
@@ -59,9 +61,8 @@ export default function RequestDetailDrawer({ request, isOpen, onClose, onAction
     }
   };
 
-  // Find duplicates in user ledger
   const matchedLedgerRecord = useMemo(() => {
-    if (!request || !ledger || !request.tags.includes('Already Exists')) return null;
+    if (!request || !ledger || !request.tags?.includes('Already Exists')) return null;
     return ledger.find(
       (record) => record.email.toLowerCase() === request.person.email.toLowerCase()
     );
@@ -69,7 +70,8 @@ export default function RequestDetailDrawer({ request, isOpen, onClose, onAction
 
   if (!request) return null;
 
-  // Add notes triggers
+  const managerName = getManagerDisplayName(request.submittedBy);
+
   const handleNoteKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -91,195 +93,130 @@ export default function RequestDetailDrawer({ request, isOpen, onClose, onAction
   };
 
   const handleConfirmAction = () => {
-    onAction(request.id, request.action);
-    setShowConfirmModal(false);
-    onClose();
+    onConfirmAction(request);
   };
 
   return (
-    <>
-      <Drawer isOpen={isOpen} onClose={onClose} title="Request Detail">
-        <div className="space-y-6 text-left select-none">
-          {/* Section 1: Meta row */}
-          <div className="text-xs text-[var(--color-text-secondary)] font-medium space-y-0.5 border-b border-[var(--color-border-default)] pb-3">
-            <div>Received: {formatDateTime(request.receivedAt)}</div>
-            <div>Created by: {request.createdBy}</div>
-          </div>
+    <Drawer isOpen={isOpen} onClose={onClose} title="Request Detail" fill>
+      <div className="flex flex-col flex-1 min-h-0 gap-3 text-left select-none">
+        <div className="shrink-0 text-xs text-[var(--color-text-secondary)] font-medium flex flex-wrap gap-x-4 gap-y-1 border-b border-[var(--color-border-default)] pb-2.5">
+          <span>Received: {formatDateTime(request.receivedAt)}</span>
+          <span>Created by: {request.createdBy}</span>
+        </div>
 
-          {/* Section 2: MANAGER DETAILS card */}
-          <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
+        <div className="shrink-0 grid grid-cols-2 gap-3 items-stretch">
+          <div className={panelClass}>
             <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
               Manager Details
             </span>
-            <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-              {request.submittedBy.firstName} {request.submittedBy.lastName}
-            </div>
-            <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
+            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{managerName}</div>
+            <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium mt-auto">
               <div>Email: {request.submittedBy.email}</div>
-              <div>Club: {request.submittedBy.club}</div>
+              <div>Club: {isManualEntry(request.submittedBy) ? 'Manual entry' : request.submittedBy.club}</div>
             </div>
           </div>
 
-          {/* Section 3: PERSON DETAILS card */}
-          <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
+          <div className={panelClass}>
             <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
               Person to {request.action === 'Add' ? 'Add' : 'Remove'}
             </span>
             <div className="text-sm font-semibold text-[var(--color-text-primary)]">
               {request.person.firstName} {request.person.lastName}
             </div>
-            <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
+            <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium mt-auto">
               <div>Email: {request.person.email}</div>
               <div>Location: {request.person.location}</div>
             </div>
           </div>
+        </div>
 
-          {/* Section 4: NOTES section */}
-          {request.notes && (
-            <div className="space-y-1.5 px-1">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                Notes
-              </span>
-              <p className="text-sm italic text-[var(--color-text-primary)] leading-normal bg-gray-50 border border-dashed border-[var(--color-border-default)] rounded-md p-3">
-                "{request.notes}"
-              </p>
+        <div className={`flex-1 min-h-[72px] ${panelClass}`}>
+          <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+            Notes
+          </span>
+          <p className="text-sm text-[var(--color-text-primary)] leading-snug whitespace-pre-wrap flex-1">
+            {request.notes?.trim() ? request.notes : 'No notes provided.'}
+          </p>
+        </div>
+
+        {request.tags?.includes('Already Exists') && matchedLedgerRecord && (
+          <div className="shrink-0 bg-[#fef3c7] border border-amber-300 border-l-4 border-l-[var(--color-already-exists-border)] rounded-lg p-3 space-y-1.5">
+            <span className="block text-xs font-bold text-[#92400e]">Already exists in ledger</span>
+            <div className="text-xs text-amber-900 font-medium leading-snug">
+              {matchedLedgerRecord.firstName} {matchedLedgerRecord.lastName} · {matchedLedgerRecord.email}
             </div>
-          )}
+            <div className="text-[11px] text-amber-800">
+              Added: {formatDate(matchedLedgerRecord.dateAdded)} · {matchedLedgerRecord.location}
+            </div>
+          </div>
+        )}
 
-          {/* Section 5: ALREADY EXISTS WARNING */}
-          {request.tags && request.tags.includes('Already Exists') && matchedLedgerRecord && (
-            <div className="bg-[#fef3c7] border border-amber-300 border-l-4 border-l-[var(--color-already-exists-border)] rounded-md p-4 space-y-2">
-              <span className="block text-sm font-bold text-[#92400e]">
-                ⚠️ ALREADY EXISTS
-              </span>
-              <p className="text-xs text-amber-800 font-semibold leading-normal">
-                A person matching this name and email was found in the User Ledger.
-              </p>
-              <div className="bg-amber-100/60 rounded border border-amber-250 p-2.5 space-y-0.5 text-xs text-amber-900 font-medium">
-                <div>
-                  {matchedLedgerRecord.firstName} {matchedLedgerRecord.lastName} · {matchedLedgerRecord.email}
-                </div>
-                <div className="text-amber-800 font-normal">
-                  Added: {formatDate(matchedLedgerRecord.dateAdded)} · {matchedLedgerRecord.location}
+        <div className="shrink-0 rounded-lg border border-[var(--color-border-default)] p-3 space-y-2.5">
+          <div>
+            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+              Action Required
+            </span>
+            <span className="block text-sm font-semibold text-[var(--color-text-primary)] mt-0.5">
+              {request.action === 'Add' ? 'Add Person' : 'Remove Person'}
+            </span>
+          </div>
+          <button
+            onClick={handleConfirmAction}
+            className={`w-full h-10 flex items-center justify-center gap-1.5 text-white font-bold text-sm rounded-lg transition-colors shadow-sm select-none cursor-pointer focus:outline-none ${
+              request.action === 'Add'
+                ? 'bg-[#16a34a] hover:bg-[#15803d]'
+                : 'bg-[#dc2626] hover:bg-[#b91c1c]'
+            }`}
+          >
+            <Check className="w-4 h-4" />
+            <span>{request.action === 'Add' ? 'Mark as Added' : 'Mark as Removed'}</span>
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-[100px] flex flex-col gap-2 pt-1 border-t border-[var(--color-border-default)] overflow-hidden">
+          <span className="shrink-0 block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+            Activity Log
+          </span>
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain divide-y divide-[var(--color-border-default)] font-medium">
+            {log.map((entry) => (
+              <div key={entry.id} className="py-1.5 flex items-start gap-2.5 text-xs leading-snug">
+                <span className="text-[var(--color-text-secondary)] shrink-0 font-semibold">{entry.time}</span>
+                <span className="text-[var(--color-text-primary)]">{entry.text}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="shrink-0 pt-1">
+            {showNoteInput ? (
+              <div className="space-y-2">
+                <textarea
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  onKeyDown={handleNoteKeyPress}
+                  placeholder="Type note and press Enter to save..."
+                  className="w-full h-14 px-2.5 py-1.5 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors resize-none"
+                  autoFocus
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => { setShowNoteInput(false); setNoteText(''); }}
+                    className="px-2.5 py-1 border border-[var(--color-border-default)] text-[11px] font-semibold text-[var(--color-text-secondary)] rounded-lg hover:bg-gray-50 focus:outline-none"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
+            ) : (
               <button
-                onClick={() => alert('This would navigate to the User Ledger record.')}
-                className="text-xs font-semibold text-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent-hover)] underline block mt-2 focus:outline-none"
+                onClick={() => setShowNoteInput(true)}
+                className="text-xs font-semibold text-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent-hover)] hover:underline focus:outline-none"
               >
-                [View Record →]
+                + Add Note
               </button>
-            </div>
-          )}
-
-          {/* Section 6 & 7: ACTION REQUIRED section */}
-          <div className="space-y-4 pt-2">
-            <div className="h-[1px] bg-[var(--color-border-default)]"></div>
-            <div className="space-y-1">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                Action Required in Power Music
-              </span>
-              <span className="block text-base font-semibold text-[var(--color-text-primary)]">
-                {request.action === 'Add' ? 'Add Person' : 'Remove Person'}
-              </span>
-            </div>
-            <div className="h-[1px] bg-[var(--color-border-default)]"></div>
-            <p className="text-xs text-[var(--color-text-secondary)] leading-normal font-medium">
-              Once you have completed the action in Power Music, click the button below. This cannot be undone.
-            </p>
-
-            {/* Action button trigger confirmation */}
-            <button
-              onClick={() => setShowConfirmModal(true)}
-              className={`w-full h-11 flex items-center justify-center gap-1.5 text-white font-bold text-sm rounded-md transition-colors shadow-sm select-none cursor-pointer focus:outline-none ${
-                request.action === 'Add'
-                  ? 'bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)]'
-                  : 'bg-[#374151] hover:bg-gray-800'
-              }`}
-            >
-              <Check className="w-4 h-4" />
-              <span>{request.action === 'Add' ? 'Mark as Added' : 'Mark as Removed'}</span>
-            </button>
-          </div>
-
-          {/* Section 8: ACTIVITY LOG section */}
-          <div className="space-y-3 pt-3 border-t border-[var(--color-border-default)]">
-            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-              Activity Log
-            </span>
-            <div className="divide-y divide-[var(--color-border-default)] font-medium">
-              {log.map((entry) => (
-                <div key={entry.id} className="py-2 flex items-start gap-3 text-xs leading-normal">
-                  <span className="text-[var(--color-text-secondary)] shrink-0 font-semibold">{entry.time}</span>
-                  <span className="text-[var(--color-text-primary)]">{entry.text}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Add Note Trigger */}
-            <div className="pt-1.5">
-              {showNoteInput ? (
-                <div className="space-y-2">
-                  <textarea
-                    value={noteText}
-                    onChange={(e) => setNoteText(e.target.value)}
-                    onKeyDown={handleNoteKeyPress}
-                    placeholder="Type note and press Enter to save..."
-                    className="w-full h-16 px-2.5 py-1.5 bg-white border border-[var(--color-border-default)] rounded text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors resize-none"
-                    autoFocus
-                  />
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      onClick={() => { setShowNoteInput(false); setNoteText(''); }}
-                      className="px-2.5 py-1 border border-[var(--color-border-default)] text-[11px] font-semibold text-[var(--color-text-secondary)] rounded hover:bg-gray-50 focus:outline-none"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowNoteInput(true)}
-                  className="text-xs font-semibold text-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent-hover)] hover:underline focus:outline-none"
-                >
-                  + Add Note
-                </button>
-              )}
-            </div>
+            )}
           </div>
         </div>
-      </Drawer>
-
-      {/* Confirmation Modal */}
-      <Modal
-        isOpen={showConfirmModal}
-        onClose={() => setShowConfirmModal(false)}
-        title="Confirm action"
-        footer={
-          <>
-            <button
-              onClick={() => setShowConfirmModal(false)}
-              className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium text-[var(--color-text-primary)] hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleConfirmAction}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)] shadow-sm cursor-pointer"
-            >
-              Confirm
-            </button>
-          </>
-        }
-      >
-        <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed text-left">
-          Confirm you have {request.action === 'Add' ? 'added' : 'removed'}{' '}
-          <strong className="text-[var(--color-text-primary)] font-bold">
-            {request.person.firstName} {request.person.lastName}
-          </strong>{' '}
-          in Power Music before continuing. This cannot be undone.
-        </p>
-      </Modal>
-    </>
+      </div>
+    </Drawer>
   );
 }

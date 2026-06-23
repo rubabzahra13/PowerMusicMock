@@ -1,125 +1,173 @@
-import { useState, useMemo } from 'react';
-import { Search, Download, Info, SortAsc, SortDesc, ChevronDown, Filter } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { userLedger } from '../data/mockData';
 import { DataTable, Tag, Drawer } from '../components/ui';
 
-// ─── Shared Controls Bar ──────────────────────────────────────────────────────
+const SORT_PRESETS = [
+  { value: 'displayId-asc', label: 'ID (oldest first)' },
+  { value: 'displayId-desc', label: 'ID (newest first)' },
+  { value: 'dateAdded-desc', label: 'Timestamp (newest first)' },
+  { value: 'dateAdded-asc', label: 'Timestamp (oldest first)' },
+  { value: 'personName-asc', label: 'Person name (A–Z)' },
+  { value: 'personName-desc', label: 'Person name (Z–A)' },
+  { value: 'managerName-asc', label: 'Manager name (A–Z)' },
+  { value: 'managerName-desc', label: 'Manager name (Z–A)' }
+];
+
+const DEFAULT_SORT = 'displayId-asc';
+
+function parseSortPreset(preset) {
+  const match = preset.match(/^(.+)-(asc|desc)$/);
+  if (!match) return { field: 'displayId', dir: 'asc' };
+  return { field: match[1], dir: match[2] };
+}
+
+// ─── Controls Bar ─────────────────────────────────────────────────────────────
 function ControlsBar({
   searchQuery, setSearchQuery,
   filterOpen, setFilterOpen,
-  sortOpen, setSortOpen,
   filterSlots,
-  sortFields,
-  sortField, setSortField,
-  sortDir, setSortDir,
+  sortPreset, setSortPreset,
   activeFilterCount
 }) {
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef(null);
+  const isSortCustom = sortPreset !== DEFAULT_SORT;
+  const activeSortLabel = SORT_PRESETS.find((o) => o.value === sortPreset)?.label ?? 'Sort';
+
+  useEffect(() => {
+    if (!sortOpen) return;
+    const onClickOutside = (e) => {
+      if (sortRef.current && !sortRef.current.contains(e.target)) {
+        setSortOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [sortOpen]);
+
+  const toolbarBtnClass = (active) =>
+    `flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+      active
+        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] shadow-sm ring-1 ring-[rgba(26,26,46,0.06)]'
+        : 'text-[var(--color-text-secondary)] hover:bg-white hover:text-[var(--color-text-primary)]'
+    }`;
+
   return (
-    <div className="w-full bg-white rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm">
-      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-0 divide-y md:divide-y-0 md:divide-x divide-[var(--color-border-default)]">
-        <div className="flex items-center gap-2 px-4 py-3 flex-1">
-          <Search className="h-4 w-4 text-[var(--color-text-muted)] shrink-0" />
-          <input
-            type="text"
-            placeholder="Search name, email, club or location..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="flex-1 bg-transparent text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none"
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')}
-              className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs leading-none cursor-pointer">✕</button>
-          )}
+    <div className="w-full rounded-2xl border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-card)]">
+      <div
+        className={`bg-[var(--color-surface-panel)] ${
+          filterOpen ? 'border-b border-[var(--color-border-default)] rounded-t-2xl' : 'rounded-2xl'
+        }`}
+      >
+        <div className="flex flex-col md:flex-row items-stretch gap-2 p-2">
+          <div className="flex items-center gap-2.5 px-3 py-2 flex-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-sm focus-within:ring-2 focus-within:ring-[rgba(26,26,46,0.08)] focus-within:border-transparent transition-shadow">
+            <Search className="h-4 w-4 text-[var(--color-text-muted)] shrink-0" />
+            <input
+              type="text"
+              placeholder="Search name, email, club or location..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="flex-1 bg-transparent text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs leading-none cursor-pointer"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => { setFilterOpen((o) => !o); setSortOpen(false); }}
+              className={toolbarBtnClass(filterOpen || activeFilterCount > 0)}
+            >
+              <Filter className="h-4 w-4" />
+              <span>Filter</span>
+              {activeFilterCount > 0 && (
+                <span className="ml-0.5 bg-[var(--color-brand-primary)] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                  {activeFilterCount}
+                </span>
+              )}
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${filterOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            <div className="relative" ref={sortRef}>
+              <button
+                onClick={() => setSortOpen((o) => !o)}
+                className={toolbarBtnClass(sortOpen || isSortCustom)}
+              >
+                <SortAsc className="h-4 w-4" />
+                <span className="max-w-[120px] truncate">{isSortCustom ? activeSortLabel : 'Sort'}</span>
+                <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${sortOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {sortOpen && (
+                <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-56 max-h-72 overflow-y-auto py-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-[var(--shadow-modal)]">
+                  {SORT_PRESETS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => { setSortPreset(opt.value); setSortOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
+                        sortPreset === opt.value
+                          ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                          : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                  {isSortCustom && (
+                    <>
+                      <div className="my-1 h-px bg-[var(--color-border-default)]" />
+                      <button
+                        type="button"
+                        onClick={() => { setSortPreset(DEFAULT_SORT); setSortOpen(false); }}
+                        className="w-full text-left px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-brand-accent)] transition-colors cursor-pointer"
+                      >
+                        Reset sort
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-
-        <button
-          onClick={() => { setFilterOpen(o => !o); setSortOpen(false); }}
-          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold transition-colors cursor-pointer ${
-            filterOpen || activeFilterCount > 0
-              ? 'bg-[var(--color-brand-accent)] text-white'
-              : 'bg-white text-[var(--color-text-primary)] hover:bg-gray-50'
-          }`}
-        >
-          <Filter className="h-4 w-4" />
-          <span>Filter</span>
-          {activeFilterCount > 0 && (
-            <span className="ml-0.5 bg-white/30 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-              {activeFilterCount}
-            </span>
-          )}
-          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${filterOpen ? 'rotate-180' : ''}`} />
-        </button>
-
-        <button
-          onClick={() => { setSortOpen(o => !o); setFilterOpen(false); }}
-          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold transition-colors cursor-pointer ${
-            sortOpen ? 'bg-[var(--color-brand-accent)] text-white' : 'bg-white text-[var(--color-text-primary)] hover:bg-gray-50'
-          }`}
-        >
-          {sortDir === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
-          <span>Sort</span>
-          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${sortOpen ? 'rotate-180' : ''}`} />
-        </button>
       </div>
 
       {filterOpen && (
-        <div className="border-t border-[var(--color-border-default)] bg-gray-50 px-4 py-3 flex flex-wrap items-center gap-4">
-          {filterSlots.map((slot) => (
-            <div key={slot.label} className="flex items-center gap-2">
-              <span className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">{slot.label}</span>
-              <div className="flex gap-1 flex-wrap">
-                {slot.options.map(opt => (
-                  <button key={opt.value} onClick={() => slot.onChange(opt.value)}
-                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                      slot.value === opt.value
-                        ? 'bg-[var(--color-brand-accent)] text-white'
-                        : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent)]'
-                    }`}
-                  >{opt.label}</button>
-                ))}
+        <div className="bg-[var(--color-surface-highlight)]/50 px-4 py-4 rounded-b-2xl">
+          <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
+            {filterSlots.map((slot) => (
+              <div key={slot.label} className="flex flex-col gap-1 min-w-[140px]">
+                <label className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                  {slot.label}
+                </label>
+                <select
+                  value={slot.value}
+                  onChange={(e) => slot.onChange(e.target.value)}
+                  className="h-9 px-3 rounded-md border border-[var(--color-border-default)] bg-white text-sm font-medium text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer"
+                >
+                  {slot.options.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
-            </div>
-          ))}
-          {activeFilterCount > 0 && (
-            <button onClick={() => filterSlots.forEach(s => s.onChange(s.options[0].value))}
-              className="ml-auto text-xs font-semibold text-[var(--color-text-secondary)] hover:text-red-500 transition-colors cursor-pointer">
-              Clear filters
-            </button>
-          )}
-        </div>
-      )}
-
-      {sortOpen && (
-        <div className="border-t border-[var(--color-border-default)] bg-gray-50 px-4 py-3 flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Sort by</span>
-            <div className="flex gap-1 flex-wrap">
-              {sortFields.map(opt => (
-                <button key={opt.value} onClick={() => setSortField(opt.value)}
-                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                    sortField === opt.value
-                      ? 'bg-[var(--color-brand-accent)] text-white'
-                      : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent)]'
-                  }`}
-                >{opt.label}</button>
-              ))}
-            </div>
-          </div>
-          <div className="h-5 w-px bg-[var(--color-border-default)] hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Direction</span>
-            <div className="flex gap-1">
-              {[{ value: 'asc', label: 'Ascending', Icon: SortAsc }, { value: 'desc', label: 'Descending', Icon: SortDesc }].map(({ value, label, Icon }) => (
-                <button key={value} onClick={() => setSortDir(value)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                    sortDir === value
-                      ? 'bg-[var(--color-brand-accent)] text-white'
-                      : 'bg-white border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent)]'
-                  }`}
-                ><Icon className="h-3 w-3" />{label}</button>
-              ))}
-            </div>
+            ))}
+            {activeFilterCount > 0 && (
+              <button
+                onClick={() => filterSlots.forEach((s) => s.onChange(s.options[0].value))}
+                className="ml-auto text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-brand-accent)] transition-colors cursor-pointer pb-2"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -127,31 +175,52 @@ function ControlsBar({
   );
 }
 
+const buildFilterOptions = (values) => [
+  { value: 'All', label: 'All' },
+  ...values.map((v) => ({ value: v, label: v }))
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const formatDisplayId = (displayId) => `R-${String(displayId).padStart(2, '0')}`;
+
+const TimestampCell = ({ val }) => {
+  try {
+    const d = parseISO(val);
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">{format(d, 'dd MMM yyyy')}</span>
+        <span className="text-xs text-[var(--color-text-muted)]">{format(d, 'hh:mm a')}</span>
+      </div>
+    );
+  } catch {
+    return <span className="text-xs text-[var(--color-text-secondary)]">{val}</span>;
+  }
+};
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function UserLedger() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState('All');
+  const [statusTab, setStatusTab] = useState('All');
+  const [filterLocation, setFilterLocation] = useState('All');
+  const [filterClub, setFilterClub] = useState('All');
   const [selectedUser, setSelectedUser] = useState(null);
+  const [sortPreset, setSortPreset] = useState(DEFAULT_SORT);
+  const [filterOpen, setFilterOpen] = useState(true);
 
-  // Sort states
-  const [sortField, setSortField] = useState('displayId');
-  const [sortDir, setSortDir] = useState('asc');
-
-  // Panel open states
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
-
-  // ── Formatters ──
-  const formatTimestamp = (iso) => {
-    try {
-      const d = parseISO(iso);
-      return { date: format(d, 'dd MMM yyyy'), time: format(d, 'hh:mm a') };
-    } catch { return { date: iso, time: '' }; }
+  const handleStatusTabSwitch = (tab) => {
+    setStatusTab(tab);
+    setSearchQuery('');
+    setFilterLocation('All');
+    setFilterClub('All');
+    setSortPreset(DEFAULT_SORT);
+    setFilterOpen(true);
   };
+
   const formatDate = (iso) => {
     try { return format(parseISO(iso), 'dd MMM yyyy'); }
     catch { return iso; }
   };
+
   const getEarlierDateStr = (iso) => {
     try {
       const d = parseISO(iso);
@@ -159,10 +228,35 @@ export default function UserLedger() {
     } catch { return iso; }
   };
 
-  // ── Filter + Sort ──
+  const addedCount = userLedger.filter((u) => u.status === 'Added').length;
+  const removedCount = userLedger.filter((u) => u.status === 'Removed').length;
+  const allCount = userLedger.length;
+
+  const statusTabRows = useMemo(
+    () => (statusTab === 'All' ? userLedger : userLedger.filter((u) => u.status === statusTab)),
+    [statusTab]
+  );
+
+  const locationOptions = useMemo(
+    () => buildFilterOptions(
+      [...new Set(statusTabRows.map((u) => u.location).filter(Boolean))].sort()
+    ),
+    [statusTabRows]
+  );
+
+  const clubOptions = useMemo(
+    () => buildFilterOptions(
+      [...new Set(statusTabRows.map((u) => u.club).filter(Boolean))].sort()
+    ),
+    [statusTabRows]
+  );
+
   const filteredLedger = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    const filtered = userLedger.filter((user) => {
+    const { field, dir } = parseSortPreset(sortPreset);
+    const sortDir = dir === 'asc' ? 1 : -1;
+
+    const filtered = statusTabRows.filter((user) => {
       const fullName = `${user.firstName} ${user.lastName}`.toLowerCase();
       const matchesSearch =
         query === '' ||
@@ -171,31 +265,35 @@ export default function UserLedger() {
         user.location.toLowerCase().includes(query) ||
         user.addedBy.toLowerCase().includes(query) ||
         (user.managerEmail && user.managerEmail.toLowerCase().includes(query)) ||
-        user.club.toLowerCase().includes(query);
-      const matchesStatus = filterStatus === 'All' || user.status === filterStatus;
-      return matchesSearch && matchesStatus;
+        user.club.toLowerCase().includes(query) ||
+        (user.notes && user.notes.toLowerCase().includes(query));
+      const matchesLocation = filterLocation === 'All' || user.location === filterLocation;
+      const matchesClub = filterClub === 'All' || user.club === filterClub;
+      return matchesSearch && matchesLocation && matchesClub;
     });
 
-    const dir = sortDir === 'asc' ? 1 : -1;
     return [...filtered].sort((a, b) => {
-      if (sortField === 'managerName') return a.addedBy.localeCompare(b.addedBy) * dir;
-      if (sortField === 'personName') {
+      if (field === 'managerName') return a.addedBy.localeCompare(b.addedBy) * sortDir;
+      if (field === 'personName') {
         const nA = `${a.firstName} ${a.lastName}`.toLowerCase();
         const nB = `${b.firstName} ${b.lastName}`.toLowerCase();
-        return nA.localeCompare(nB) * dir;
+        return nA.localeCompare(nB) * sortDir;
       }
-      if (sortField === 'dateAdded') return (new Date(a.dateAdded) - new Date(b.dateAdded)) * dir;
-      // default: displayId
-      return (a.displayId - b.displayId) * dir;
+      if (field === 'dateAdded') return (new Date(a.dateAdded) - new Date(b.dateAdded)) * sortDir;
+      return (a.displayId - b.displayId) * sortDir;
     });
-  }, [searchQuery, filterStatus, sortField, sortDir]);
+  }, [statusTabRows, searchQuery, filterLocation, filterClub, sortPreset]);
 
-  // ── CSV Export ──
+  const activeFilterCount = [
+    filterLocation !== 'All',
+    filterClub !== 'All'
+  ].filter(Boolean).length;
+
   const handleExportCSV = () => {
-    const headers = ['#', 'Person Name', 'Person Email', 'Location', 'Status', 'Date Added', 'Manager Name', 'Manager Email', 'Club'];
+    const headers = ['ID', 'Person Name', 'Person Email', 'Location', 'Status', 'Date Added', 'Manager Name', 'Manager Email', 'Club', 'Notes'];
     const csvRows = filteredLedger.map((user) =>
       [
-        user.displayId,
+        formatDisplayId(user.displayId),
         `${user.firstName} ${user.lastName}`,
         user.email,
         user.location,
@@ -203,7 +301,8 @@ export default function UserLedger() {
         formatDate(user.dateAdded),
         user.addedBy,
         user.managerEmail || '',
-        user.club
+        user.club,
+        user.notes || ''
       ].map((val) => `"${String(val).replace(/"/g, '""')}"`).join(',')
     );
     const blob = new Blob([[headers.join(','), ...csvRows].join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -217,36 +316,31 @@ export default function UserLedger() {
     document.body.removeChild(link);
   };
 
-  const activeFilterCount = [filterStatus !== 'All'].filter(Boolean).length;
-
-  // ── Column definitions ──
   const columns = [
     {
       key: 'displayId',
       label: '#',
-      render: (val) => <span className="text-xs font-bold text-[var(--color-text-muted)]">{val}</span>
+      width: '60px',
+      render: (val) => (
+        <span className="text-xs font-bold text-[var(--color-text-muted)]">{formatDisplayId(val)}</span>
+      )
     },
     {
       key: 'dateAdded',
       label: 'Timestamp',
-      render: (val) => {
-        const { date, time } = formatTimestamp(val);
-        return (
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">{date}</span>
-            <span className="text-xs text-[var(--color-text-muted)]">{time}</span>
-          </div>
-        );
-      }
+      width: '130px',
+      render: (val) => <TimestampCell val={val} />
     },
     {
       key: 'status',
       label: 'Status',
+      width: '80px',
       render: (val) => <Tag variant={val === 'Added' ? 'added' : 'removed'} label={val} />
     },
     {
       key: 'personName',
       label: 'Person Name',
+      width: '110px',
       render: (_, row) => (
         <span className="font-semibold text-sm text-[var(--color-text-primary)]">
           {row.firstName} {row.lastName}
@@ -256,16 +350,19 @@ export default function UserLedger() {
     {
       key: 'email',
       label: 'Person Email',
+      width: '150px',
       render: (val) => <span className="text-xs text-[var(--color-text-secondary)]">{val}</span>
     },
     {
       key: 'location',
       label: 'Location',
+      width: '95px',
       render: (val) => <span className="text-xs text-[var(--color-text-secondary)]">{val}</span>
     },
     {
       key: 'managerName',
       label: 'Manager Name',
+      width: '120px',
       render: (_, row) => (
         <span className="font-semibold text-sm text-[var(--color-text-primary)]">{row.addedBy}</span>
       )
@@ -273,6 +370,7 @@ export default function UserLedger() {
     {
       key: 'managerEmail',
       label: 'Manager Email',
+      width: '155px',
       render: (_, row) => (
         <span className="text-xs text-[var(--color-text-secondary)]">{row.managerEmail || '—'}</span>
       )
@@ -280,31 +378,79 @@ export default function UserLedger() {
     {
       key: 'club',
       label: 'Manager Club',
+      width: '130px',
+      cellClassName: 'align-middle whitespace-normal break-words leading-snug',
       render: (val) => <span className="text-xs text-[var(--color-text-secondary)]">{val}</span>
     },
     {
-      key: 'sourceRequest',
-      label: 'Source',
+      key: 'notes',
+      label: 'Notes',
+      cellClassName: 'align-middle whitespace-normal break-words leading-snug',
+      render: (val) => (
+        <span className="text-xs text-[var(--color-text-secondary)]">
+          {val?.trim() || ''}
+        </span>
+      )
+    },
+    {
+      key: 'actions',
+      label: '',
+      width: '48px',
+      headerClassName: 'text-center',
+      cellClassName: 'text-center align-middle whitespace-nowrap',
       render: (_, row) => (
         <button
-          onClick={(e) => { e.stopPropagation(); alert(`This would navigate to request ${row.sourceRequestId}.`); }}
-          className="text-xs font-semibold text-[var(--color-brand-accent)] hover:underline focus:outline-none cursor-pointer bg-transparent border-0"
-        >View →</button>
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setSelectedUser(row); }}
+          aria-label="View user details"
+          className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer"
+        >
+          <Eye className="h-4 w-4" />
+        </button>
       )
     }
+  ];
+
+  const statusTabs = [
+    { key: 'All', label: 'All', count: allCount },
+    { key: 'Added', label: 'Added', count: addedCount },
+    { key: 'Removed', label: 'Removed', count: removedCount }
   ];
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 select-none">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--color-border-default)] pb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <h2 className="text-xl font-bold text-[var(--color-text-primary)]">User Ledger</h2>
-          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">47 records</span>
+
+          <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)]">
+            {statusTabs.map(({ key, label, count }) => (
+              <button
+                key={key}
+                onClick={() => handleStatusTabSwitch(key)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+                  statusTab === key
+                    ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] shadow-sm'
+                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                }`}
+              >
+                {label}
+                <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  statusTab === key
+                    ? 'bg-[var(--color-brand-primary)] text-white'
+                    : 'bg-[var(--color-surface-highlight)] text-[var(--color-text-secondary)]'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
+
         <button
           onClick={handleExportCSV}
-          className="inline-flex items-center gap-1.5 px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-semibold bg-white hover:bg-gray-50 transition-colors shadow-sm focus:outline-none cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
         >
           <Download className="w-4 h-4" />
           <span>Export CSV</span>
@@ -313,24 +459,27 @@ export default function UserLedger() {
 
       {/* Controls Bar */}
       <ControlsBar
-        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
-        filterOpen={filterOpen} setFilterOpen={setFilterOpen}
-        sortOpen={sortOpen} setSortOpen={setSortOpen}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        filterOpen={filterOpen}
+        setFilterOpen={setFilterOpen}
         activeFilterCount={activeFilterCount}
         filterSlots={[
           {
-            label: 'Status', value: filterStatus, onChange: setFilterStatus,
-            options: [{ value: 'All', label: 'All' }, { value: 'Added', label: 'Added' }, { value: 'Removed', label: 'Removed' }]
+            label: 'User Location',
+            value: filterLocation,
+            onChange: setFilterLocation,
+            options: locationOptions
+          },
+          {
+            label: 'Manager Club',
+            value: filterClub,
+            onChange: setFilterClub,
+            options: clubOptions
           }
         ]}
-        sortFields={[
-          { value: 'displayId', label: 'ID' },
-          { value: 'dateAdded', label: 'Timestamp' },
-          { value: 'personName', label: 'Person Name' },
-          { value: 'managerName', label: 'Manager Name' }
-        ]}
-        sortField={sortField} setSortField={setSortField}
-        sortDir={sortDir} setSortDir={setSortDir}
+        sortPreset={sortPreset}
+        setSortPreset={setSortPreset}
       />
 
       {/* Table */}
@@ -339,13 +488,15 @@ export default function UserLedger() {
           columns={columns}
           rows={filteredLedger}
           onRowClick={(row) => setSelectedUser(row)}
-          emptyMessage="No users matching your search."
+          emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
+          compact
+          centerHeaders
         />
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between px-2 text-xs font-semibold text-[var(--color-text-secondary)]">
-        <span>{filteredLedger.length} records shown</span>
+      <div className="px-2 text-xs font-medium text-[var(--color-text-secondary)]">
+        {filteredLedger.length} records
       </div>
 
       {/* History Drawer */}
@@ -356,7 +507,6 @@ export default function UserLedger() {
       >
         {selectedUser && (
           <div className="space-y-6 text-left select-none">
-            {/* Person Details */}
             <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
               <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Person Details</span>
               <div className="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -368,7 +518,6 @@ export default function UserLedger() {
               </div>
             </div>
 
-            {/* Manager Details */}
             <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
               <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Manager Details</span>
               <div className="text-sm font-semibold text-[var(--color-text-primary)]">{selectedUser.addedBy}</div>
@@ -378,24 +527,30 @@ export default function UserLedger() {
               </div>
             </div>
 
-            {/* Ledger Status */}
+            <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Notes</span>
+              <p className="text-sm text-[var(--color-text-primary)] leading-normal whitespace-pre-wrap">
+                {selectedUser.notes?.trim() ? selectedUser.notes : '—'}
+              </p>
+            </div>
+
             <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
               <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Ledger Status</span>
               <div className="flex items-center gap-2 mb-1">
                 <Tag variant={selectedUser.status === 'Added' ? 'added' : 'removed'} label={selectedUser.status} />
               </div>
               <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
+                <div>ID: {formatDisplayId(selectedUser.displayId)}</div>
                 <div>Date: {formatDate(selectedUser.dateAdded)}</div>
                 <div>Added By: {selectedUser.addedBy}</div>
               </div>
             </div>
 
-            {/* Request History */}
             <div className="space-y-3 pt-3 border-t border-[var(--color-border-default)]">
               <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Request History</span>
               <div className="relative pl-6 border-l border-[var(--color-border-default)] space-y-5 py-1">
                 <div className="relative">
-                  <div className="absolute -left-[29px] top-1 w-3.5 h-3.5 rounded-full border-2 border-white bg-[var(--color-brand-accent)] shadow-sm shrink-0" />
+                  <div className="absolute -left-[29px] top-1 w-3.5 h-3.5 rounded-full border-2 border-white bg-[var(--color-brand-primary)] shadow-sm shrink-0" />
                   <div className="text-[11px] font-semibold text-[var(--color-text-secondary)]">{formatDate(selectedUser.dateAdded)}</div>
                   <div className="text-xs font-semibold text-[var(--color-text-primary)] mt-0.5">
                     Marked as {selectedUser.status} by {selectedUser.addedBy}
@@ -411,11 +566,10 @@ export default function UserLedger() {
               </div>
             </div>
 
-            {/* Duplicate Check Note */}
             {selectedUser.status === 'Added' && (
-              <div className="bg-[#eff6ff] border border-[#bfdbfe] rounded-md p-4 flex items-start gap-2.5">
-                <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-                <span className="text-xs text-blue-800 font-semibold leading-normal">
+              <div className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-md p-4 flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-[var(--color-brand-primary)] shrink-0 mt-0.5" />
+                <span className="text-xs text-[var(--color-text-secondary)] font-semibold leading-normal">
                   This user will trigger a duplicate warning on new Manager Form submissions.
                 </span>
               </div>
