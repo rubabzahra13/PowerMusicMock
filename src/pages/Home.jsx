@@ -108,8 +108,8 @@ export default function Home() {
   const alerts = [...flaggedEmailAlerts, ...duplicateAlerts];
 
   const handleAlertClick = (alert) => {
-    if (alert.type === 'critical') navigate('/flagged-emails');
-    else navigate('/new-requests');
+    if (alert.type === 'critical') return;
+    navigate('/new-requests');
   };
 
   return (
@@ -142,14 +142,13 @@ export default function Home() {
 
         {/* Flagged Emails */}
         <div 
-          onClick={() => navigate('/flagged-emails')}
-          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors group"
+          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm"
         >
           <div>
             <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Flagged Emails</h3>
-            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5 group-hover:text-[var(--color-brand-primary)] transition-colors">{kpiData.flaggedEmails}</p>
+            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5">{kpiData.flaggedEmails}</p>
           </div>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] transition-colors">
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)]">
             <Flag className="w-6 h-6 text-[var(--color-brand-primary)]" />
           </div>
         </div>
@@ -219,12 +218,19 @@ export default function Home() {
                 </p>
               </div>
             ) : (
-              alerts.map((alert) => (
+              alerts.map((alert) => {
+                const isClickable = alert.type !== 'critical';
+
+                return (
                 <button
                   key={alert.id}
                   type="button"
-                  onClick={() => handleAlertClick(alert)}
-                  className={`w-full text-left rounded-xl border border-[var(--color-border-default)] p-4 transition-all cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] group ${
+                  onClick={isClickable ? () => handleAlertClick(alert) : undefined}
+                  className={`w-full text-left rounded-xl border border-[var(--color-border-default)] p-4 transition-all ${
+                    isClickable
+                      ? 'cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] group'
+                      : 'cursor-default'
+                  } ${
                     alert.type === 'critical'
                       ? 'border-l-[3px] border-l-[var(--color-signal-red)]'
                       : 'border-l-[3px] border-l-[var(--color-already-exists-border)]'
@@ -254,7 +260,9 @@ export default function Home() {
                             </span>
                           )}
                         </div>
-                        <ChevronRight className="w-4 h-4 text-[var(--color-text-muted)] shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                        <ChevronRight className={`w-4 h-4 text-[var(--color-text-muted)] shrink-0 mt-0.5 transition-all ${
+                          isClickable ? 'opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5' : 'hidden'
+                        }`} />
                       </div>
                       <p className="text-xs text-[var(--color-text-secondary)] mt-1 leading-relaxed">
                         {alert.subtitle}
@@ -265,7 +273,8 @@ export default function Home() {
                     </div>
                   </div>
                 </button>
-              ))
+                );
+              })
             )}
           </div>
         </div>
