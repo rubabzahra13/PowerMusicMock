@@ -342,7 +342,7 @@ export default function ManagerForm() {
                 disabled={!isFormValid}
                 className={`w-full h-11 flex items-center justify-center font-semibold text-white rounded-md transition-all shadow-[var(--shadow-card)] ${
                   isFormValid
-                    ? 'bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)] cursor-pointer'
+                    ? 'bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] cursor-pointer'
                     : 'bg-gray-300 cursor-not-allowed'
                 }`}
               >
