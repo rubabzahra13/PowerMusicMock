@@ -1,16 +1,32 @@
-export default function DataTable({ columns, rows, onRowClick, emptyMessage = 'No data available' }) {
+export default function DataTable({
+  columns,
+  rows,
+  onRowClick,
+  emptyMessage = 'No data available',
+  compact = false,
+  centerHeaders = false
+}) {
   const isRowClickable = typeof onRowClick === 'function';
 
   return (
-    <div className="w-full overflow-x-auto border border-[var(--color-border-default)] rounded-md bg-[var(--color-surface-card)]">
-      <table className="w-full border-collapse text-left">
+    <div
+      className={`w-full border border-[var(--color-border-default)] rounded-md bg-[var(--color-surface-card)] ${
+        compact ? 'overflow-hidden' : 'overflow-x-auto'
+      }`}
+    >
+      <table className={`w-full border-collapse text-left ${compact ? 'table-fixed' : ''}`}>
         <thead>
           <tr className="bg-[#f9fafb] border-b border-[var(--color-border-default)]">
             {columns.map((column) => (
               <th
                 key={column.key}
-                className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] select-none"
-                style={{ fontSize: 'var(--font-size-xs)' }}
+                className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] select-none ${
+                  centerHeaders ? 'text-center' : ''
+                } ${column.headerClassName || ''}`}
+                style={{
+                  fontSize: 'var(--font-size-xs)',
+                  ...(column.width ? { width: column.width } : {})
+                }}
               >
                 {column.label}
               </th>
@@ -43,7 +59,9 @@ export default function DataTable({ columns, rows, onRowClick, emptyMessage = 'N
                     <td
                       key={column.key}
                       style={cellStyle}
-                      className="px-4 py-3 text-sm text-[var(--color-text-primary)] align-middle whitespace-nowrap"
+                      className={`px-3 py-2.5 text-sm text-[var(--color-text-primary)] ${
+                        column.cellClassName ?? 'whitespace-nowrap align-middle'
+                      }`}
                     >
                       {renderedValue !== undefined && renderedValue !== null
                         ? renderedValue

@@ -5,8 +5,6 @@ import {
   Inbox,
   Users,
   FileText,
-  Settings,
-  Sparkles,
   Mail
 } from 'lucide-react';
 
@@ -14,12 +12,12 @@ export default function Sidebar() {
   const navItemClass = ({ isActive }) =>
     `flex items-center gap-3 h-9 px-3 rounded-md transition-all duration-200 text-sm font-medium ${
       isActive
-        ? 'bg-[var(--color-brand-accent)] text-white opacity-100 shadow-sm'
+        ? 'bg-[var(--color-surface-sidebar-active)] text-white opacity-100'
         : 'text-white/85 hover:bg-[var(--color-surface-sidebar-hover)] hover:text-white hover:opacity-100'
     }`;
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-[240px] bg-[var(--color-surface-sidebar)] flex flex-col border-r border-white/5 z-20 text-white select-none">
+    <aside className="fixed left-0 top-0 bottom-0 w-[200px] bg-[var(--color-surface-sidebar)] flex flex-col border-r border-white/5 z-20 text-white select-none">
       {/* Logo Section */}
       <div className="h-14 flex items-center gap-2 px-4">
         <Zap className="w-5 h-5 text-[var(--color-brand-accent)] fill-[var(--color-brand-accent)] animate-pulse" />
@@ -38,18 +36,18 @@ export default function Sidebar() {
         <div className="space-y-1">
           <NavLink to="/" className={navItemClass}>
             <Home className="w-4 h-4 shrink-0" />
-            <span>Home</span>
+            <span>Dashboard</span>
           </NavLink>
         </div>
 
-        {/* Group 2: Pilot 1 — Partner Onboarding */}
+        {/* Group 2: Partner Onboarding */}
         <div className="space-y-1">
           <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
-            Pilot 1 — Onboarding
+            Partner onboarding
           </span>
           <NavLink to="/new-requests" className={navItemClass}>
             <Inbox className="w-4 h-4 shrink-0" />
-            <span>Requests</span>
+            <span>New requests</span>
           </NavLink>
           <NavLink to="/user-ledger" className={navItemClass}>
             <Users className="w-4 h-4 shrink-0" />
@@ -57,30 +55,25 @@ export default function Sidebar() {
           </NavLink>
         </div>
 
-        {/* Group 3: Pilot 2 — Template Management */}
+        {/* Group 3: Template Management */}
         <div className="space-y-1">
           <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
-            Pilot 2 — Templates
+            Template
           </span>
           <NavLink to="/templates" className={navItemClass}>
             <FileText className="w-4 h-4 shrink-0" />
-            <span>Template Management</span>
+            <span>Manage templates</span>
           </NavLink>
         </div>
 
-        {/* Group 4: Settings & Pilots */}
+        {/* Group 4: Gmail Accounts */}
         <div className="space-y-1">
+          <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
+            Gmail Accounts
+          </span>
           <NavLink to="/gmail-accounts" className={navItemClass}>
             <Mail className="w-4 h-4 shrink-0" />
-            <span>Gmail Accounts</span>
-          </NavLink>
-          <NavLink to="/settings" className={navItemClass}>
-            <Settings className="w-4 h-4 shrink-0" />
-            <span>Settings</span>
-          </NavLink>
-          <NavLink to="/future-pilots" className={navItemClass}>
-            <Sparkles className="w-4 h-4 shrink-0" />
-            <span>Future Pilots</span>
+            <span>Manage Gmail</span>
           </NavLink>
         </div>
       </div>

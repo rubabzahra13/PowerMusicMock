@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Search, FileText, Trash2, Save, X, ChevronDown, Plus } from 'lucide-react';
+import { Search, FileText, Trash2, Save, X, ChevronDown, Plus, Pencil } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { templates as mockTemplates } from '../data/mockData';
 import { Toast, useToast, Modal } from '../components/ui';
@@ -53,13 +53,13 @@ function TemplateListItem({ template, isSelected, onClick }) {
       onClick={onClick}
       className={`w-full text-left px-4 py-3.5 flex items-start gap-3 transition-colors border-b border-[var(--color-border-default)] last:border-b-0 cursor-pointer ${
         isSelected
-          ? 'bg-[var(--color-brand-accent)]/8 border-l-2 border-l-[var(--color-brand-accent)]'
+          ? 'bg-[var(--color-surface-highlight)] border-l-2 border-l-[var(--color-brand-primary)]'
           : 'hover:bg-gray-50'
       }`}
     >
-      <FileText className={`w-4 h-4 shrink-0 mt-0.5 ${isSelected ? 'text-[var(--color-brand-accent)]' : 'text-gray-400'}`} />
+      <FileText className={`w-4 h-4 shrink-0 mt-0.5 ${isSelected ? 'text-[var(--color-brand-primary)]' : 'text-gray-400'}`} />
       <div className="flex-1 min-w-0">
-        <div className={`text-sm font-semibold truncate ${isSelected ? 'text-[var(--color-brand-accent)]' : 'text-[var(--color-text-primary)]'}`}>
+        <div className={`text-sm font-semibold truncate ${isSelected ? 'text-[var(--color-brand-primary)]' : 'text-[var(--color-text-primary)]'}`}>
           {template.name}
         </div>
         <div className="text-xs text-[var(--color-text-muted)] truncate mt-0.5 font-normal">
@@ -103,6 +103,7 @@ export default function TemplateManagement() {
   const [selectedId, setSelectedId] = useState(null);
   const [editForm, setEditForm] = useState(null);   // { name, subject, body, language }
   const [isDirty, setIsDirty] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   // Delete confirm modal
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -134,13 +135,27 @@ export default function TemplateManagement() {
   const handleSelectTemplate = (tmpl) => {
     setIsCreatingNew(false);
     setIsDirty(false);
+    setIsEditing(false);
     setSelectedId(tmpl.id);
     setEditForm({ name: tmpl.name, subject: tmpl.subject, body: tmpl.body, language: 'English' });
+  };
+
+  const handleStartEditing = () => {
+    if (!selectedTemplate) return;
+    setIsEditing(true);
+    setIsDirty(false);
+    setEditForm({
+      name: selectedTemplate.name,
+      subject: selectedTemplate.subject,
+      body: selectedTemplate.body,
+      language: editForm?.language || 'English'
+    });
   };
 
   // ── Start creating a new template ──
   const handleNewTemplate = () => {
     setIsCreatingNew(true);
+    setIsEditing(true);
     setSelectedId(null);
     setIsDirty(false);
     setEditForm({
@@ -194,6 +209,7 @@ export default function TemplateManagement() {
       setTemplates(prev => [...prev, newTemplate]);
       setSelectedId(newTemplate.id);
       setIsCreatingNew(false);
+      setIsEditing(false);
       setIsDirty(false);
       showToast('Template created successfully.', 'success');
       return;
@@ -207,6 +223,7 @@ export default function TemplateManagement() {
         : t
     ));
     setIsDirty(false);
+    setIsEditing(false);
     showToast('Template saved successfully.', 'success');
   };
 
@@ -214,13 +231,20 @@ export default function TemplateManagement() {
   const handleCancel = () => {
     if (isCreatingNew) {
       setIsCreatingNew(false);
+      setIsEditing(false);
       setEditForm(null);
       setIsDirty(false);
       return;
     }
     if (!selectedTemplate) return;
-    setEditForm({ name: selectedTemplate.name, subject: selectedTemplate.subject, body: selectedTemplate.body, language: 'English' });
+    setEditForm({
+      name: selectedTemplate.name,
+      subject: selectedTemplate.subject,
+      body: selectedTemplate.body,
+      language: 'English'
+    });
     setIsDirty(false);
+    setIsEditing(false);
   };
 
   // ── Delete ──
@@ -229,6 +253,7 @@ export default function TemplateManagement() {
     setSelectedId(null);
     setEditForm(null);
     setIsDirty(false);
+    setIsEditing(false);
     setShowDeleteModal(false);
     showToast('Template deleted.', 'success');
   };
@@ -247,7 +272,7 @@ export default function TemplateManagement() {
         </div>
         <button
           onClick={handleNewTemplate}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)] transition-colors shadow-sm cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           New Template
@@ -329,10 +354,17 @@ export default function TemplateManagement() {
         <div className="flex-1 flex flex-col">
           {!selectedTemplate && !isCreatingNew ? (
             /* Empty state */
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[var(--color-text-muted)] p-10">
-              <FileText className="w-12 h-12 text-gray-200" />
-              <p className="text-sm font-semibold">Select a template to edit</p>
-              <p className="text-xs text-center max-w-[220px]">Choose a template from the list on the left, or click <strong>New Template</strong> to create one from scratch.</p>
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--color-text-muted)] p-10 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-[var(--color-surface-highlight)] flex items-center justify-center">
+                <FileText className="w-7 h-7 text-[var(--color-brand-primary)]/40" />
+              </div>
+              <div className="space-y-2 max-w-sm">
+                <p className="text-sm font-bold text-[var(--color-text-primary)]">No template selected</p>
+                <p className="text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                  Click any template in the list on the left to preview its details here.
+                  To start fresh, use <strong className="text-[var(--color-text-primary)]">New Template</strong> in the top right.
+                </p>
+              </div>
             </div>
           ) : (
             <>
@@ -354,42 +386,66 @@ export default function TemplateManagement() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0 ml-4">
-                  {/* Delete — hidden in creation mode */}
-                  {!isCreatingNew && (
-                    <button
-                      onClick={() => setShowDeleteModal(true)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer border border-transparent hover:border-red-200"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Delete
-                    </button>
+                  {!isCreatingNew && !isEditing && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleStartEditing}
+                        aria-label="Edit template"
+                        className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-brand-primary)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteModal(true)}
+                        aria-label="Delete template"
+                        className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
                   )}
-                  {/* Cancel */}
-                  <button
-                    onClick={handleCancel}
-                    disabled={!isDirty && !isCreatingNew}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
-                      isDirty || isCreatingNew
-                        ? 'border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:bg-gray-50 cursor-pointer'
-                        : 'border-gray-100 text-gray-300 cursor-not-allowed'
-                    }`}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    {isCreatingNew ? 'Discard' : 'Cancel'}
-                  </button>
-                  {/* Save */}
-                  <button
-                    onClick={handleSave}
-                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-semibold text-white bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)] transition-colors shadow-sm cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    {isCreatingNew ? 'Create Template' : 'Save'}
-                  </button>
+                  {(isEditing || isCreatingNew) && (
+                    <>
+                      {!isCreatingNew && (
+                        <button
+                          type="button"
+                          onClick={() => setShowDeleteModal(true)}
+                          aria-label="Delete template"
+                          className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleCancel}
+                        aria-label={isCreatingNew ? 'Discard new template' : 'Cancel editing'}
+                        className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSave}
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        {isCreatingNew ? 'Create Template' : 'Save'}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* Editor form */}
               <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+                {!(isEditing || isCreatingNew) && (
+                  <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-3 text-xs text-[var(--color-text-secondary)]">
+                    Preview mode. Click the pencil icon above to edit this template.
+                  </div>
+                )}
 
                 {/* Category + Status — only shown when creating */}
                 {isCreatingNew && (
@@ -430,27 +486,35 @@ export default function TemplateManagement() {
                   </div>
                 )}
 
-                {/* Language — only shown when editing existing (translation not relevant during creation) */}
+                {/* Language — only shown when editing existing */}
                 {!isCreatingNew && (
                   <div className="space-y-1.5">
                     <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
                       Translation / Language
                     </label>
-                    <div className="relative inline-block">
-                      <select
-                        value={editForm?.language || 'English'}
-                        onChange={(e) => handleLanguageChange(e.target.value)}
-                        className="appearance-none pl-3 pr-8 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm font-semibold text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer transition-colors"
-                      >
-                        {['English', 'German', 'Spanish', 'Japanese'].map(l => (
-                          <option key={l} value={l}>{l}</option>
-                        ))}
-                      </select>
-                      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" />
-                    </div>
-                    <p className="text-xs text-[var(--color-text-muted)]">
-                      Switching language swaps subject and body with translated mock content.
-                    </p>
+                    {isEditing ? (
+                      <>
+                        <div className="relative inline-block">
+                          <select
+                            value={editForm?.language || 'English'}
+                            onChange={(e) => handleLanguageChange(e.target.value)}
+                            className="appearance-none pl-3 pr-8 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm font-semibold text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer transition-colors"
+                          >
+                            {['English', 'German', 'Spanish', 'Japanese'].map(l => (
+                              <option key={l} value={l}>{l}</option>
+                            ))}
+                          </select>
+                          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" />
+                        </div>
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          Switching language swaps subject and body with translated mock content.
+                        </p>
+                      </>
+                    ) : (
+                      <div className="px-3 py-2.5 bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)]">
+                        {editForm?.language || 'English'}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -459,12 +523,18 @@ export default function TemplateManagement() {
                   <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
                     Template Name
                   </label>
-                  <input
-                    type="text"
-                    value={editForm?.name || ''}
-                    onChange={(e) => handleFieldChange('name', e.target.value)}
-                    className="w-full px-3 py-2.5 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
-                  />
+                  {isEditing || isCreatingNew ? (
+                    <input
+                      type="text"
+                      value={editForm?.name || ''}
+                      onChange={(e) => handleFieldChange('name', e.target.value)}
+                      className="w-full px-3 py-2.5 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
+                    />
+                  ) : (
+                    <div className="px-3 py-2.5 bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)]">
+                      {editForm?.name || ''}
+                    </div>
+                  )}
                 </div>
 
                 {/* Field 3: Email Subject */}
@@ -472,12 +542,18 @@ export default function TemplateManagement() {
                   <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
                     Email Subject
                   </label>
-                  <input
-                    type="text"
-                    value={editForm?.subject || ''}
-                    onChange={(e) => handleFieldChange('subject', e.target.value)}
-                    className="w-full px-3 py-2.5 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
-                  />
+                  {isEditing || isCreatingNew ? (
+                    <input
+                      type="text"
+                      value={editForm?.subject || ''}
+                      onChange={(e) => handleFieldChange('subject', e.target.value)}
+                      className="w-full px-3 py-2.5 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
+                    />
+                  ) : (
+                    <div className="px-3 py-2.5 bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)]">
+                      {editForm?.subject || ''}
+                    </div>
+                  )}
                 </div>
 
                 {/* Field 4: Email Body */}
@@ -486,26 +562,37 @@ export default function TemplateManagement() {
                     <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
                       Email Body
                     </label>
-                    <div className="flex gap-1.5">
-                      {['{{first_name}}', '{{club_name}}', '{{membership_type}}'].map(v => (
-                        <button
-                          key={v}
-                          onClick={() => handleFieldChange('body', (editForm?.body || '') + v)}
-                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-[var(--color-brand-accent)]/10 hover:text-[var(--color-brand-accent)] transition-colors cursor-pointer font-mono"
-                        >{v}</button>
-                      ))}
-                    </div>
+                    {(isEditing || isCreatingNew) && (
+                      <div className="flex gap-1.5">
+                        {['{{first_name}}', '{{club_name}}', '{{membership_type}}'].map(v => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => handleFieldChange('body', (editForm?.body || '') + v)}
+                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-brand-primary)] transition-colors cursor-pointer font-mono"
+                          >{v}</button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <textarea
-                    value={editForm?.body || ''}
-                    onChange={(e) => handleFieldChange('body', e.target.value)}
-                    rows={16}
-                    className="w-full px-4 py-3 bg-[#fafafa] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors resize-y font-mono leading-relaxed"
-                    placeholder="Enter your email template here. Use {{first_name}}, {{club_name}}, {{membership_type}} as variables."
-                  />
-                  <p className="text-[11px] text-[var(--color-text-muted)]">
-                    Click a variable chip above to insert it at the end of the body, or type it manually.
-                  </p>
+                  {isEditing || isCreatingNew ? (
+                    <>
+                      <textarea
+                        value={editForm?.body || ''}
+                        onChange={(e) => handleFieldChange('body', e.target.value)}
+                        rows={16}
+                        className="w-full px-4 py-3 bg-[#fafafa] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors resize-y font-mono leading-relaxed"
+                        placeholder="Enter your email template here. Use {{first_name}}, {{club_name}}, {{membership_type}} as variables."
+                      />
+                      <p className="text-[11px] text-[var(--color-text-muted)]">
+                        Click a variable chip above to insert it at the end of the body, or type it manually.
+                      </p>
+                    </>
+                  ) : (
+                    <pre className="w-full px-4 py-3 bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono leading-relaxed whitespace-pre-wrap">
+                      {editForm?.body || ''}
+                    </pre>
+                  )}
                 </div>
               </div>
             </>

@@ -1,9 +1,8 @@
 import { X } from 'lucide-react';
 
-export default function Drawer({ isOpen, onClose, title, children }) {
+export default function Drawer({ isOpen, onClose, title, children, fill = false }) {
   return (
     <>
-      {/* Dark Backdrop Overlay */}
       {isOpen && (
         <div
           onClick={onClose}
@@ -11,14 +10,12 @@ export default function Drawer({ isOpen, onClose, title, children }) {
         />
       )}
 
-      {/* Drawer Container Panel */}
       <div
-        className={`fixed right-0 top-0 bottom-0 w-full max-w-[480px] bg-white shadow-[var(--shadow-drawer)] z-50 flex flex-col transform transition-transform duration-300 ease-in-out ${
+        className={`fixed inset-y-0 right-0 h-dvh w-full max-w-[480px] bg-white shadow-[var(--shadow-drawer)] z-50 flex flex-col transform transition-transform duration-300 ease-in-out ${
           isOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
-        {/* Drawer Header */}
-        <div className="h-14 border-b border-[var(--color-border-default)] px-6 flex items-center justify-between shrink-0 select-none">
+        <div className="h-14 border-b border-[var(--color-border-default)] px-6 flex items-center justify-between shrink-0 select-none bg-white">
           <h2
             className="font-semibold text-[var(--color-text-primary)]"
             style={{ fontSize: 'var(--font-size-md)' }}
@@ -34,8 +31,9 @@ export default function Drawer({ isOpen, onClose, title, children }) {
           </button>
         </div>
 
-        {/* Drawer Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-6 bg-white">
+        <div className={`flex-1 min-h-0 flex flex-col p-5 bg-white ${
+          fill ? 'overflow-hidden' : 'overflow-y-auto overscroll-contain'
+        }`}>
           {children}
         </div>
       </div>

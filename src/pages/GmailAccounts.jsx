@@ -49,19 +49,22 @@ export default function GmailAccounts() {
 
       <div className="flex flex-col gap-6">
         {accounts.map((account) => (
-          <div key={account.id} className="bg-white border border-[var(--color-border-default)] rounded-xl shadow-sm p-6 flex flex-col hover:border-[var(--color-border-focus)] transition-colors">
+          <div
+            key={account.id}
+            className="group bg-white border border-[var(--color-border-default)] rounded-xl shadow-sm p-6 flex flex-col hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors"
+          >
             {/* Top Section */}
             <div className="flex items-start justify-between mb-5">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-green-50 rounded-xl flex items-center justify-center shrink-0">
-                  <Mail className="w-6 h-6 text-green-600" />
+                <div className="w-12 h-12 bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] rounded-xl flex items-center justify-center shrink-0 transition-colors">
+                  <Mail className="w-6 h-6 text-[var(--color-brand-primary)]" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-[var(--color-text-primary)] leading-tight">{account.title}</h2>
+                  <h2 className="text-lg font-bold text-[var(--color-text-primary)] leading-tight group-hover:text-[var(--color-brand-primary)] transition-colors">{account.title}</h2>
                   <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Connect the Gmail inbox used for this vertical</p>
                 </div>
               </div>
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-green-100 text-green-700">
+              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]">
                 {account.status}
               </span>
             </div>

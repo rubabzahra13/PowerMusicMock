@@ -1,4 +1,4 @@
-export default function Tag({ variant, label }) {
+export default function Tag({ variant, label, compact = false }) {
   let bgClass = '';
   let textClass = '';
   let prefix = '';
@@ -46,8 +46,8 @@ export default function Tag({ variant, label }) {
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold select-none ${bgClass} ${textClass}`}
-      style={{ fontSize: 'var(--font-size-xs)' }}
+      className={`inline-flex items-center rounded-full font-semibold select-none ${compact ? 'px-1.5 py-0.5 text-[10px] leading-tight' : 'px-2 py-0.5 text-xs'} ${bgClass} ${textClass}`}
+      style={compact ? undefined : { fontSize: 'var(--font-size-xs)' }}
     >
       {prefix}
       {label}

@@ -61,6 +61,7 @@ export const handledRequests = [
     },
     person: { firstName: "Sarah", lastName: "Cole", email: "s.cole@puregym.com", location: "Leeds" },
     action: "Remove",
+    notes: "Sarah no longer works at this location.",
     tags: ["Removed"]
   },
   {
@@ -69,11 +70,12 @@ export const handledRequests = [
     receivedAt: "2026-06-21T13:30:00",
     handledAt:  "2026-06-21T14:15:00",
     submittedBy: {
-      firstName: "Andrea", lastName: "",
+      firstName: "Admin", lastName: "",
       email: "andrea@powermusic.com", club: "Manual entry"
     },
     person: { firstName: "Tom", lastName: "Briggs", email: "t.briggs@fitlife.com", location: "Bristol" },
     action: "Add",
+    notes: "Manual admin entry: no manager form on file.",
     tags: ["Added"]
   },
   {
@@ -87,6 +89,7 @@ export const handledRequests = [
     },
     person: { firstName: "Priya", lastName: "Sharma", email: "p.sharma@puregym.com", location: "Manchester" },
     action: "Add",
+    notes: "",
     tags: ["Added", "Already Exists"]
   },
   {
@@ -100,6 +103,7 @@ export const handledRequests = [
     },
     person: { firstName: "Kevin", lastName: "Osei", email: "k.osei@anytime.com", location: "Birmingham" },
     action: "Add",
+    notes: "Approved by regional manager.",
     tags: ["Added"]
   },
   {
@@ -113,6 +117,7 @@ export const handledRequests = [
     },
     person: { firstName: "Nina", lastName: "Bell", email: "n.bell@fitlife.com", location: "Bristol" },
     action: "Add",
+    notes: "Awaiting template assignment for Bristol rollout.",
     tags: ["Added"]
   }
 ];
@@ -127,7 +132,8 @@ export const userLedger = [
     email: "j.walsh@puregym.com", location: "Manchester",
     status: "Added", dateAdded: "2026-06-22T08:30:00",
     addedBy: "Claire Hodges", managerEmail: "c.hodges@puregym.com", club: "PureGym Leeds",
-    sourceRequestId: "req-h-legacy-01"
+    sourceRequestId: "req-h-legacy-01",
+    notes: "Transferred from legacy system. Verified club access on 22 Jun."
   },
   {
     id: "ul-002", displayId: 2,
@@ -135,7 +141,8 @@ export const userLedger = [
     email: "m.hassan@anytime.com", location: "Birmingham",
     status: "Added", dateAdded: "2026-06-21T14:15:00",
     addedBy: "Deven Patel", managerEmail: "d.patel@anytime.com", club: "Anytime Birmingham",
-    sourceRequestId: "req-002"
+    sourceRequestId: "req-002",
+    notes: ""
   },
   {
     id: "ul-003", displayId: 3,
@@ -143,7 +150,8 @@ export const userLedger = [
     email: "t.briggs@fitlife.com", location: "Bristol",
     status: "Added", dateAdded: "2026-06-21T14:15:00",
     addedBy: "Andrea (Admin)", managerEmail: "andrea@powermusic.com", club: "Manual entry",
-    sourceRequestId: "req-h-002"
+    sourceRequestId: "req-h-002",
+    notes: "Manual admin entry: no manager form on file."
   },
   {
     id: "ul-004", displayId: 4,
@@ -151,7 +159,8 @@ export const userLedger = [
     email: "p.sharma@puregym.com", location: "Manchester",
     status: "Added", dateAdded: "2026-06-18T11:02:00",
     addedBy: "Rachel Clarke", managerEmail: "r.clarke@puregym.com", club: "PureGym Manchester",
-    sourceRequestId: "req-h-003"
+    sourceRequestId: "req-h-003",
+    notes: ""
   },
   {
     id: "ul-005", displayId: 5,
@@ -159,7 +168,8 @@ export const userLedger = [
     email: "l.park@puregym.com", location: "Leeds",
     status: "Removed", dateAdded: "2026-06-22T09:00:00",
     addedBy: "Rachel Clarke", managerEmail: "r.clarke@puregym.com", club: "PureGym Manchester",
-    sourceRequestId: "req-h-legacy-02"
+    sourceRequestId: "req-h-legacy-02",
+    notes: "Left club: access revoked per manager request."
   },
   {
     id: "ul-006", displayId: 6,
@@ -167,7 +177,8 @@ export const userLedger = [
     email: "s.cole@puregym.com", location: "Leeds",
     status: "Removed", dateAdded: "2026-06-22T08:30:00",
     addedBy: "Deven Patel", managerEmail: "d.patel@puregym.com", club: "PureGym Leeds",
-    sourceRequestId: "req-h-legacy-03"
+    sourceRequestId: "req-h-legacy-03",
+    notes: "Duplicate entry removed. Primary record kept under R-04."
   },
   {
     id: "ul-007", displayId: 7,
@@ -175,7 +186,8 @@ export const userLedger = [
     email: "k.osei@anytime.com", location: "Birmingham",
     status: "Added", dateAdded: "2026-06-16T09:15:00",
     addedBy: "Claire Hodges", managerEmail: "c.hodges@puregym.com", club: "PureGym Leeds",
-    sourceRequestId: "req-h-004"
+    sourceRequestId: "req-h-004",
+    notes: ""
   },
   {
     id: "ul-008", displayId: 8,
@@ -183,7 +195,8 @@ export const userLedger = [
     email: "n.bell@fitlife.com", location: "Bristol",
     status: "Added", dateAdded: "2026-06-13T17:00:00",
     addedBy: "Deven Patel", managerEmail: "d.patel@anytime.com", club: "Anytime Birmingham",
-    sourceRequestId: "req-h-005"
+    sourceRequestId: "req-h-005",
+    notes: "Awaiting template assignment for new Bristol rollout."
   },
   {
     id: "ul-009", displayId: 9,
@@ -191,7 +204,8 @@ export const userLedger = [
     email: "a.okonkwo@fitlife.com", location: "London",
     status: "Added", dateAdded: "2026-05-28T10:45:00",
     addedBy: "Claire Hodges", managerEmail: "c.hodges@puregym.com", club: "PureGym Leeds",
-    sourceRequestId: "req-h-legacy-04"
+    sourceRequestId: "req-h-legacy-04",
+    notes: ""
   },
   {
     id: "ul-010", displayId: 10,
@@ -199,7 +213,8 @@ export const userLedger = [
     email: "d.ferreira@anytime.com", location: "Bristol",
     status: "Added", dateAdded: "2026-05-20T14:30:00",
     addedBy: "Deven Patel", managerEmail: "d.patel@anytime.com", club: "Anytime Birmingham",
-    sourceRequestId: "req-h-legacy-05"
+    sourceRequestId: "req-h-legacy-05",
+    notes: "Regional manager approved. Onboarding email sent 20 May."
   }
   // Note: In demo, display "47 records total" — the 10 above are the visible sample
 ];
@@ -219,11 +234,11 @@ export const kpiData = {
 //  RECENT ACTIVITY
 // ─────────────────────────────────────────────────────────────
 export const recentActivity = [
-  { id: "act-001", timestamp: "2026-06-23T09:41:00", type: "request_submitted", description: "New request — James Walsh", link: "req-001" },
+  { id: "act-001", timestamp: "2026-06-23T09:41:00", type: "request_submitted", description: "New request: James Walsh", link: "req-001" },
   { id: "act-002", timestamp: "2026-06-23T09:41:00", type: "tag_applied", description: "⚠ Already Exists tag applied", link: "req-001" },
-  { id: "act-003", timestamp: "2026-06-22T08:30:00", type: "marked_removed", description: "Removed — Sarah Cole", link: "req-h-001" },
-  { id: "act-004", timestamp: "2026-06-21T14:15:00", type: "marked_added", description: "Added — Tom Briggs", link: "req-h-002" },
-  { id: "act-005", timestamp: "2026-06-21T11:00:00", type: "template_updated", description: "Template updated — Membership Enquiry v2", link: null }
+  { id: "act-003", timestamp: "2026-06-22T08:30:00", type: "marked_removed", description: "Removed: Sarah Cole", link: "req-h-001" },
+  { id: "act-004", timestamp: "2026-06-21T14:15:00", type: "marked_added", description: "Added: Tom Briggs", link: "req-h-002" },
+  { id: "act-005", timestamp: "2026-06-21T11:00:00", type: "template_updated", description: "Template updated: Membership Enquiry v2", link: null }
 ];
 
 // ─────────────────────────────────────────────────────────────
