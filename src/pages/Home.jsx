@@ -31,12 +31,14 @@ const COLUMN_THEMES = {
     panelHeader: 'bg-[#edf4fc] border-[#c5daf3]',
     panelTitle: 'text-[var(--color-text-primary)]',
     panelSubtitle: 'text-[var(--color-text-secondary)]',
-    panelIconWell: 'bg-[#d4e4f7]',
-    panelIconColor: 'text-[#4a7eb8]',
+    panelIconWell: 'bg-[var(--color-surface-highlight)]',
+    panelIconColor: 'text-[var(--color-text-muted)]',
     dot: 'bg-[#6baff0]',
-    iconWell: 'bg-[#e8f1fc]',
-    iconColor: 'text-[#4a7eb8]',
-    badge: 'bg-[#4a7eb8]',
+    kpiIconWell: 'bg-[var(--color-surface-highlight)]',
+    kpiIconColor: 'text-[var(--color-text-muted)]',
+    iconWell: 'bg-[var(--color-surface-highlight)]',
+    iconColor: 'text-[var(--color-text-muted)]',
+    badge: 'bg-[var(--color-brand-accent)]',
     kpiValueHover: 'group-hover:text-[#4a7eb8]',
     kpiCardHover: 'hover:border-[#c5daf3] hover:bg-[#f5f9fd]',
     alertCardHover: 'hover:border-[#c5daf3] hover:bg-[#f5f9fd]',
@@ -100,8 +102,8 @@ function KpiCard({ label, value, icon: Icon, onClick, theme }) {
           {value}
         </p>
       </div>
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${theme.iconWell}`}>
-        <Icon className={`w-5 h-5 ${theme.iconColor}`} />
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${theme.kpiIconWell || theme.iconWell}`}>
+        <Icon className={`w-5 h-5 ${theme.kpiIconColor || theme.iconColor}`} />
       </div>
     </Tag>
   );
