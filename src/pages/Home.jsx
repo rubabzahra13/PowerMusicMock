@@ -1,354 +1,499 @@
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { format, isToday, isYesterday, parseISO } from 'date-fns';
+import { format, isToday, parseISO, subDays } from 'date-fns';
 import {
-  ArrowRight,
-  Clock,
-  AlertTriangle,
-  Inbox,
-  Flag,
-  Users,
-  FileText,
-  CheckCircle,
-  UserPlus,
-  UserMinus,
-  ChevronRight
+  ChevronRight,
+  CalendarDays,
+  Headphones,
+  Handshake
 } from 'lucide-react';
-import { kpiData, recentActivity, pendingRequests } from '../data/mockData';
+import { pendingRequests, handledRequests } from '../data/mockData';
 
-const getActivityMeta = (type) => {
-  switch (type) {
-    case 'request_submitted':
-      return {
-        icon: Inbox,
-        iconBg: 'bg-[var(--color-surface-highlight)]',
-        iconColor: 'text-[var(--color-brand-primary)]'
-      };
-    case 'tag_applied':
-      return {
-        icon: AlertTriangle,
-        iconBg: 'bg-[var(--color-tag-already-exists-bg)]',
-        iconColor: 'text-[var(--color-tag-already-exists-text)]'
-      };
-    case 'marked_removed':
-      return {
-        icon: UserMinus,
-        iconBg: 'bg-[var(--color-tag-remove-action-bg)]',
-        iconColor: 'text-[var(--color-tag-remove-action-text)]'
-      };
-    case 'marked_added':
-      return {
-        icon: UserPlus,
-        iconBg: 'bg-[var(--color-tag-add-action-bg)]',
-        iconColor: 'text-[var(--color-tag-add-action-text)]'
-      };
-    case 'template_updated':
-      return {
-        icon: FileText,
-        iconBg: 'bg-[var(--color-surface-highlight)]',
-        iconColor: 'text-[var(--color-brand-primary)]'
-      };
-    default:
-      return {
-        icon: Clock,
-        iconBg: 'bg-[var(--color-surface-highlight)]',
-        iconColor: 'text-[var(--color-text-secondary)]'
-      };
+// Mock emails for Customer Service
+const mockEmails = [
+  // Today (2026-06-24)
+  { id: 'e1', receivedAt: '2026-06-24T08:15:00', flagged: false },
+  { id: 'e2', receivedAt: '2026-06-24T09:30:00', flagged: true },
+  { id: 'e3', receivedAt: '2026-06-24T10:45:00', flagged: false },
+  { id: 'e4', receivedAt: '2026-06-24T11:20:00', flagged: false },
+  { id: 'e5', receivedAt: '2026-06-24T13:10:00', flagged: false },
+  { id: 'e6', receivedAt: '2026-06-24T14:40:00', flagged: false },
+  { id: 'e7', receivedAt: '2026-06-24T16:05:00', flagged: false },
+  
+  // Yesterday (2026-06-23)
+  { id: 'e8', receivedAt: '2026-06-23T08:00:00', flagged: false },
+  { id: 'e9', receivedAt: '2026-06-23T10:00:00', flagged: false },
+  { id: 'e10', receivedAt: '2026-06-23T11:30:00', flagged: true },
+  { id: 'e11', receivedAt: '2026-06-23T14:00:00', flagged: false },
+  { id: 'e12', receivedAt: '2026-06-23T15:30:00', flagged: false },
+  { id: 'e13', receivedAt: '2026-06-23T16:45:00', flagged: false },
+  
+  // June 22
+  { id: 'e14', receivedAt: '2026-06-22T09:00:00', flagged: false },
+  { id: 'e15', receivedAt: '2026-06-22T11:00:00', flagged: false },
+  { id: 'e16', receivedAt: '2026-06-22T13:00:00', flagged: false },
+  { id: 'e17', receivedAt: '2026-06-22T15:00:00', flagged: true },
+  
+  // June 21
+  { id: 'e18', receivedAt: '2026-06-21T10:00:00', flagged: false },
+  { id: 'e19', receivedAt: '2026-06-21T14:00:00', flagged: false },
+  
+  // June 20
+  { id: 'e20', receivedAt: '2026-06-20T11:00:00', flagged: false },
+  { id: 'e21', receivedAt: '2026-06-20T16:00:00', flagged: false },
+  
+  // June 19
+  { id: 'e22', receivedAt: '2026-06-19T09:00:00', flagged: false },
+  { id: 'e23', receivedAt: '2026-06-19T14:00:00', flagged: true },
+  
+  // June 18
+  { id: 'e24', receivedAt: '2026-06-18T10:00:00', flagged: false },
+  { id: 'e25', receivedAt: '2026-06-18T15:00:00', flagged: false },
+  
+  // Older dates for 30d
+  { id: 'e26', receivedAt: '2026-06-15T12:00:00', flagged: false },
+  { id: 'e27', receivedAt: '2026-06-12T12:00:00', flagged: false },
+  { id: 'e28', receivedAt: '2026-06-10T12:00:00', flagged: true },
+  { id: 'e29', receivedAt: '2026-06-05T12:00:00', flagged: false },
+  { id: 'e30', receivedAt: '2026-05-30T12:00:00', flagged: false }
+];
+
+// Helper to determine start and end date of period
+const getRangeInterval = (rangeType, customStart, customEnd) => {
+  const now = new Date();
+  let start, end;
+  end = now;
+  
+  if (rangeType === 'today') {
+    start = new Date();
+    start.setHours(0, 0, 0, 0);
+    end = new Date();
+    end.setHours(23, 59, 59, 999);
+  } else if (rangeType === '7d') {
+    start = subDays(now, 6);
+    start.setHours(0, 0, 0, 0);
+    end = new Date();
+    end.setHours(23, 59, 59, 999);
+  } else if (rangeType === '30d') {
+    start = subDays(now, 29);
+    start.setHours(0, 0, 0, 0);
+    end = new Date();
+    end.setHours(23, 59, 59, 999);
+  } else if (rangeType === 'custom') {
+    start = customStart ? new Date(customStart + 'T00:00:00') : subDays(now, 6);
+    end = customEnd ? new Date(customEnd + 'T23:59:59') : now;
   }
+  return { start, end };
 };
+
+function TrendChart({ title, data, labels, color = 'violet' }) {
+  const maxVal = Math.max(...data, 1);
+  const height = 160;
+  const width = 500;
+  const paddingLeft = 32;
+  const paddingRight = 10;
+  const paddingTop = 20;
+  const paddingBottom = 30;
+  
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+  
+  const points = data.map((val, idx) => {
+    const x = paddingLeft + (idx / (data.length - 1 || 1)) * chartWidth;
+    const y = paddingTop + chartHeight - (val / maxVal) * chartHeight;
+    return { x, y };
+  });
+  
+  const linePath = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  const areaPath = points.length > 0 
+    ? `${linePath} L ${points[points.length - 1].x} ${paddingTop + chartHeight} L ${points[0].x} ${paddingTop + chartHeight} Z`
+    : '';
+
+  const strokeColor = color === 'violet' ? 'var(--color-brand-primary, #7c3aed)' : 'var(--color-brand-accent, #2563eb)';
+  const gradientId = `chart-grad-${color}`;
+  const labelInterval = data.length > 10 ? Math.ceil(data.length / 5) : 1;
+
+  return (
+    <div className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)]">{title}</h4>
+      </div>
+      
+      <div className="relative">
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible select-none">
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={strokeColor} stopOpacity="0.15" />
+              <stop offset="100%" stopColor={strokeColor} stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+          
+          {/* Horizontal Grid Lines */}
+          {[0, 0.5, 1].map((ratio, idx) => {
+            const y = paddingTop + ratio * chartHeight;
+            const gridVal = ratio === 0 ? maxVal : ratio === 0.5 ? Math.round(maxVal / 2) : 0;
+            return (
+              <g key={idx}>
+                <line 
+                  x1={paddingLeft} 
+                  y1={y} 
+                  x2={width - paddingRight} 
+                  y2={y} 
+                  stroke="var(--color-border-default)" 
+                  strokeWidth="1" 
+                  strokeDasharray="4 4" 
+                />
+                <text 
+                  x={paddingLeft - 8} 
+                  y={y + 4} 
+                  textAnchor="end" 
+                  className="text-[10px] font-semibold fill-[var(--color-text-muted)] font-sans"
+                >
+                  {gridVal}
+                </text>
+              </g>
+            );
+          })}
+          
+          {/* Chart Line & Fill */}
+          {points.length > 0 && (
+            <>
+              <path d={areaPath} fill={`url(#${gradientId})`} />
+              <path d={linePath} fill="none" stroke={strokeColor} strokeWidth="2" />
+            </>
+          )}
+          
+          {/* Points */}
+          {points.map((p, idx) => (
+            <circle 
+              key={idx} 
+              cx={p.x} 
+              cy={p.y} 
+              r={data.length > 15 ? "2" : "3.5"} 
+              className="fill-white cursor-pointer hover:r-5 transition-all"
+              stroke={strokeColor}
+              strokeWidth="2"
+            >
+              <title>{`${labels[idx]}: ${data[idx]}`}</title>
+            </circle>
+          ))}
+          
+          {/* X Axis Labels */}
+          {labels.map((lbl, idx) => {
+            if (idx % labelInterval !== 0 && idx !== labels.length - 1) return null;
+            const p = points[idx];
+            if (!p) return null;
+            return (
+              <text 
+                key={idx} 
+                x={p.x} 
+                y={height - 8} 
+                textAnchor="middle" 
+                className="text-[9px] font-semibold fill-[var(--color-text-muted)] font-sans"
+              >
+                {lbl}
+              </text>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const navigate = useNavigate();
-
-  // Dynamic activity date formatting
-  const formatActivityDate = (isoString) => {
-    try {
-      const date = parseISO(isoString);
-      if (isToday(date)) return `Today, ${format(date, 'HH:mm')}`;
-      if (isYesterday(date)) return `Yesterday, ${format(date, 'HH:mm')}`;
-      return format(date, 'dd MMM yyyy, HH:mm');
-    } catch {
-      return isoString;
-    }
-  };
-
-  // Activity click handler
-  const handleActivityClick = (link) => {
-    if (!link) return;
-    if (link.startsWith('req-h')) {
-      navigate('/new-requests'); // Redirects to handled via unified page but user will use toggle
-    } else {
-      navigate('/new-requests');
-    }
-  };
-
-  const visibleActivity = recentActivity.slice(0, 8);
+  const [dateRange, setDateRange] = useState('7d');
   
-  // Priority Alerts derived from mockData
-  const duplicateAlerts = pendingRequests
-    .filter(req => req.tags?.includes('Already Exists'))
-    .map(req => ({
-      id: req.id,
-      title: 'Potential Duplicate Entry',
-      subtitle: `${req.person.firstName} ${req.person.lastName} (${req.person.email})`,
-      time: formatActivityDate(req.receivedAt),
-      type: 'warning',
-      isNew: true,
-    }));
+  // Custom Date Range Pickers (default to last 7 days)
+  const [customStartDate, setCustomStartDate] = useState(() => 
+    format(subDays(new Date(), 6), 'yyyy-MM-dd')
+  );
+  const [customEndDate, setCustomEndDate] = useState(() => 
+    format(new Date(), 'yyyy-MM-dd')
+  );
 
-  // Mock flagged email alert for dashboard purposes
-  const flaggedEmailAlerts = kpiData.flaggedEmails > 0 ? [{
-    id: 'flag-001',
-    title: 'Flagged Email Requires Review',
-    subtitle: 'System detected aggressive or unhandled intent',
-    time: 'Today, 08:30',
-    type: 'critical',
-    isNew: true,
-  }] : [];
+  // Combine and format requests
+  const mockRequests = useMemo(() => [
+    // Today (2026-06-24)
+    { id: 'req-today-1', receivedAt: '2026-06-24T08:30:00', status: 'Pending' },
+    { id: 'req-today-2', receivedAt: '2026-06-24T10:15:00', status: 'Handled' },
+    { id: 'req-today-3', receivedAt: '2026-06-24T14:20:00', status: 'Pending' },
+    
+    // From mockData
+    ...pendingRequests.map(r => ({ ...r, status: 'Pending' })),
+    ...handledRequests.map(r => ({ ...r, status: 'Handled' })),
+    
+    // Extra older requests for 30d trend
+    { id: 'req-old-1', receivedAt: '2026-06-15T09:00:00', status: 'Handled' },
+    { id: 'req-old-2', receivedAt: '2026-06-12T14:30:00', status: 'Handled' },
+    { id: 'req-old-3', receivedAt: '2026-06-08T11:00:00', status: 'Handled' },
+    { id: 'req-old-4', receivedAt: '2026-06-05T16:00:00', status: 'Handled' },
+    { id: 'req-old-5', receivedAt: '2026-06-01T10:00:00', status: 'Handled' },
+    { id: 'req-old-6', receivedAt: '2026-05-28T09:00:00', status: 'Handled' }
+  ], [pendingRequests, handledRequests]);
 
-  const alerts = [...flaggedEmailAlerts, ...duplicateAlerts];
+  // Compute metrics based on selected range
+  const filteredEmails = useMemo(() => {
+    const { start, end } = getRangeInterval(dateRange, customStartDate, customEndDate);
+    return mockEmails.filter(e => {
+      const d = new Date(e.receivedAt);
+      return d >= start && d <= end;
+    });
+  }, [dateRange, customStartDate, customEndDate]);
 
-  const handleAlertClick = (alert) => {
-    if (alert.type === 'critical') return;
-    navigate('/new-requests');
-  };
+  const filteredRequests = useMemo(() => {
+    const { start, end } = getRangeInterval(dateRange, customStartDate, customEndDate);
+    return mockRequests.filter(r => {
+      const d = new Date(r.receivedAt);
+      return d >= start && d <= end;
+    });
+  }, [dateRange, customStartDate, customEndDate]);
+
+  // Metric calculation values
+  const emailsReceivedCount = filteredEmails.length;
+  const flaggedEmailsCount = filteredEmails.filter(e => e.flagged).length;
+  
+  const newRequestsCount = filteredRequests.length;
+  const pendingRequestsCount = filteredRequests.filter(r => r.status === 'Pending').length;
+
+  // Trend chart groupings
+  const chartData = useMemo(() => {
+    const { start, end } = getRangeInterval(dateRange, customStartDate, customEndDate);
+    const diffTime = Math.abs(end - start);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (dateRange === 'today') {
+      const hours = [8, 10, 12, 14, 16, 18, 20];
+      const labels = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00'];
+      
+      const emailData = hours.map(hour => {
+        return mockEmails.filter(e => {
+          const d = new Date(e.receivedAt);
+          if (!isToday(d)) return false;
+          const h = d.getHours();
+          return h >= hour && h < hour + 2;
+        }).length;
+      });
+      
+      const requestData = hours.map(hour => {
+        return mockRequests.filter(r => {
+          const d = new Date(r.receivedAt);
+          if (!isToday(d)) return false;
+          const h = d.getHours();
+          return h >= hour && h < hour + 2;
+        }).length;
+      });
+      
+      return { labels, emailData, requestData };
+    } else {
+      const numDays = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : Math.max(1, diffDays);
+      const labels = [];
+      const emailData = [];
+      const requestData = [];
+      
+      for (let i = numDays - 1; i >= 0; i--) {
+        const dayDate = subDays(end, i);
+        const dayStr = format(dayDate, 'yyyy-MM-dd');
+        
+        labels.push(format(dayDate, 'dd MMM'));
+        
+        const dayEmailsCount = mockEmails.filter(e => {
+          const d = new Date(e.receivedAt);
+          return format(d, 'yyyy-MM-dd') === dayStr;
+        }).length;
+        emailData.push(dayEmailsCount);
+        
+        const dayRequestsCount = mockRequests.filter(r => {
+          const d = new Date(r.receivedAt);
+          return format(d, 'yyyy-MM-dd') === dayStr;
+        }).length;
+        requestData.push(dayRequestsCount);
+      }
+      
+      return { labels, emailData, requestData };
+    }
+  }, [dateRange, customStartDate, customEndDate, mockRequests]);
+
+  const now = new Date();
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8 select-none pb-12">
-      {/* Welcome Title */}
-      <div>
-        <h2 className="text-2xl font-bold text-[var(--color-text-primary)]">
-          Good morning, Andrea.
-        </h2>
-        <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-          Here's your operational overview for today.
-        </p>
+    <div className="max-w-[1200px] mx-auto select-none pb-12 space-y-8">
+      {/* Welcome Header */}
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Good morning, Andrea.</h1>
+          <p className="text-sm text-[var(--color-text-secondary)] mt-1">Here is your operational overview for today.</p>
+        </div>
+        <p className="text-xs font-medium text-[var(--color-text-muted)]">{format(now, 'EEEE, d MMMM yyyy')}</p>
       </div>
 
-      {/* Quick Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Pending Requests */}
-        <div 
-          onClick={() => navigate('/new-requests')}
-          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors group"
-        >
-          <div>
-            <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Pending Requests</h3>
-            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5 group-hover:text-[var(--color-brand-primary)] transition-colors">{kpiData.pendingRequests}</p>
+      {/* Global Filter Bar */}
+      <div className="bg-white border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 shrink-0">
+            <CalendarDays className="w-4 h-4 text-[var(--color-text-muted)]" />
+            <span className="text-sm font-bold text-[var(--color-text-primary)]">Viewing period:</span>
           </div>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] transition-colors">
-            <Inbox className="w-6 h-6 text-[var(--color-brand-primary)]" />
-          </div>
-        </div>
-
-        {/* Flagged Emails */}
-        <div 
-          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm"
-        >
-          <div>
-            <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Flagged Emails</h3>
-            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5">{kpiData.flaggedEmails}</p>
-          </div>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)]">
-            <Flag className="w-6 h-6 text-[var(--color-brand-primary)]" />
-          </div>
-        </div>
-
-        {/* Active Templates */}
-        <div 
-          onClick={() => navigate('/templates')}
-          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors group"
-        >
-          <div>
-            <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Active Templates</h3>
-            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5 group-hover:text-[var(--color-brand-primary)] transition-colors">{kpiData.templatesActive}</p>
-          </div>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] transition-colors">
-            <FileText className="w-6 h-6 text-[var(--color-brand-primary)]" />
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { key: 'today', label: 'Today' },
+              { key: '7d', label: 'Last 7 Days' },
+              { key: '30d', label: 'Last 30 Days' },
+              { key: 'custom', label: 'Custom Range' },
+            ].map(opt => (
+              <button
+                key={opt.key}
+                onClick={() => setDateRange(opt.key)}
+                className={`px-4 py-1.5 text-sm font-semibold rounded-lg border transition-all cursor-pointer ${
+                  dateRange === opt.key
+                    ? 'bg-[var(--color-text-primary)] text-white border-[var(--color-text-primary)] shadow-sm'
+                    : 'bg-white border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-secondary)]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Users In Ledger */}
-        <div 
-          onClick={() => navigate('/user-ledger')}
-          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors group"
-        >
-          <div>
-            <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Users In Ledger</h3>
-            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5 group-hover:text-[var(--color-brand-primary)] transition-colors">{kpiData.usersInLedger}</p>
-          </div>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] transition-colors">
-            <Users className="w-6 h-6 text-[var(--color-brand-primary)]" />
-          </div>
-        </div>
-      </div>
-
-      {/* Main Dashboard Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-
-        {/* Priority Alerts */}
-        <div className="lg:col-span-1 bg-white border border-[var(--color-border-default)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col">
-          <div className="px-5 py-4 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)] flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-[var(--color-surface-highlight-strong)] flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-4 h-4 text-[var(--color-brand-primary)]" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-[var(--color-text-primary)]">Priority Alerts</h3>
-                <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                  {alerts.length === 0 ? 'Nothing urgent right now' : `${alerts.length} item${alerts.length === 1 ? '' : 's'} need attention`}
-                </p>
-              </div>
+        {/* Custom Range Date Pickers */}
+        {dateRange === 'custom' && (
+          <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-lg border border-[var(--color-border-default)] shrink-0 self-start md:self-auto">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase">Start:</span>
+              <input 
+                type="date" 
+                value={customStartDate} 
+                onChange={(e) => setCustomStartDate(e.target.value)} 
+                className="bg-white border border-[var(--color-border-default)] rounded px-2.5 py-1 text-xs font-semibold text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-text-secondary)]"
+              />
             </div>
-            {alerts.length > 0 && (
-              <span className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full bg-[var(--color-brand-primary)] text-white">
-                {alerts.length}
-              </span>
-            )}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase">End:</span>
+              <input 
+                type="date" 
+                value={customEndDate} 
+                onChange={(e) => setCustomEndDate(e.target.value)} 
+                className="bg-white border border-[var(--color-border-default)] rounded px-2.5 py-1 text-xs font-semibold text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-text-secondary)]"
+              />
+            </div>
           </div>
+        )}
+      </div>
 
-          <div className="p-3 flex flex-col gap-2 flex-1">
-            {alerts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center px-4 py-10">
-                <div className="w-12 h-12 rounded-2xl bg-[var(--color-surface-highlight)] flex items-center justify-center mb-3">
-                  <CheckCircle className="w-6 h-6 text-[var(--color-signal-green)]" />
-                </div>
-                <h4 className="text-sm font-bold text-[var(--color-text-primary)]">All caught up</h4>
-                <p className="text-xs text-[var(--color-text-secondary)] mt-1 max-w-[200px]">
-                  No pending warnings or flagged items.
-                </p>
-              </div>
-            ) : (
-              alerts.map((alert) => {
-                const isClickable = alert.type !== 'critical';
-
-                return (
-                <button
-                  key={alert.id}
-                  type="button"
-                  onClick={isClickable ? () => handleAlertClick(alert) : undefined}
-                  className={`w-full text-left rounded-xl border border-[var(--color-border-default)] p-4 transition-all ${
-                    isClickable
-                      ? 'cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] group'
-                      : 'cursor-default'
-                  } ${
-                    alert.type === 'critical'
-                      ? 'border-l-[3px] border-l-[var(--color-signal-red)]'
-                      : 'border-l-[3px] border-l-[var(--color-already-exists-border)]'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                      alert.type === 'critical'
-                        ? 'bg-[var(--color-tag-remove-action-bg)]'
-                        : 'bg-[var(--color-tag-already-exists-bg)]'
-                    }`}>
-                      {alert.type === 'critical' ? (
-                        <Flag className="w-4 h-4 text-[var(--color-tag-remove-action-text)]" />
-                      ) : (
-                        <Users className="w-4 h-4 text-[var(--color-tag-already-exists-text)]" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                          <h4 className="text-sm font-semibold text-[var(--color-text-primary)] leading-snug">
-                            {alert.title}
-                          </h4>
-                          {alert.isNew && (
-                            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] leading-none">
-                              New
-                            </span>
-                          )}
-                        </div>
-                        <ChevronRight className={`w-4 h-4 text-[var(--color-text-muted)] shrink-0 mt-0.5 transition-all ${
-                          isClickable ? 'opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5' : 'hidden'
-                        }`} />
-                      </div>
-                      <p className="text-xs text-[var(--color-text-secondary)] mt-1 leading-relaxed">
-                        {alert.subtitle}
-                      </p>
-                      <p className="text-[10px] font-semibold text-[var(--color-text-muted)] mt-2">
-                        {alert.time}
-                      </p>
-                    </div>
-                  </div>
-                </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Activity Summary */}
-        <div className="lg:col-span-2 bg-white border border-[var(--color-border-default)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col">
-          <div className="px-5 py-4 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)] flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-[var(--color-surface-highlight-strong)] flex items-center justify-center shrink-0">
-                <Clock className="w-4 h-4 text-[var(--color-brand-primary)]" />
-              </div>
+      {/* Two Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
+        
+        {/* Customer Service Card Container */}
+        <div className="bg-white border border-[var(--color-border-default)] rounded-xl p-6 shadow-sm flex flex-col justify-between space-y-6">
+          <div className="space-y-6">
+            {/* Typography Header */}
+            <div className="border-b border-[var(--color-border-default)] pb-4 flex items-start justify-between">
               <div>
-                <h3 className="text-sm font-bold text-[var(--color-text-primary)]">Activity Summary</h3>
-                <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">Recent operational events</p>
+                <h2 className="text-xl font-bold text-[var(--color-text-primary)] flex items-center gap-2">
+                  <Headphones className="w-5 h-5 text-[var(--color-brand-primary)]" />
+                  Customer Service
+                </h2>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-1 uppercase tracking-wider">
+                  Email Operations
+                </p>
+              </div>
+              <button
+                onClick={() => navigate('/templates')}
+                className="text-xs font-semibold text-[var(--color-brand-primary)] hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                Manage Templates <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Metric Cards Grid */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col shadow-sm">
+                <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Emails Received</span>
+                <span className="text-3xl font-extrabold text-[var(--color-text-primary)] mt-1">{emailsReceivedCount}</span>
+                <span className="text-[10px] font-medium text-[var(--color-text-muted)] mt-1.5">AI processed this period</span>
+              </div>
+              
+              <div 
+                onClick={() => navigate('/gmail-accounts')}
+                className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col shadow-sm cursor-pointer hover:border-[var(--color-brand-primary)] transition-all group"
+              >
+                <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Flagged Emails</span>
+                <span className="text-3xl font-extrabold text-[var(--color-text-primary)] mt-1 group-hover:text-[var(--color-brand-primary)] transition-colors">{flaggedEmailsCount}</span>
+                <span className="text-[10px] font-medium text-[var(--color-text-muted)] mt-1.5">Require review</span>
               </div>
             </div>
-            <span className="text-[11px] font-semibold text-[var(--color-text-muted)]">
-              Last {visibleActivity.length} events
-            </span>
           </div>
 
-          {visibleActivity.length === 0 ? (
-            <div className="p-10 text-center">
-              <p className="text-sm font-medium text-[var(--color-text-muted)]">No recent activity to display.</p>
+          {/* Email Volume Trend Chart */}
+          <div className="pt-2">
+            <TrendChart 
+              title="Email Volume Trend" 
+              data={chartData.emailData} 
+              labels={chartData.labels}
+              color="violet"
+            />
+          </div>
+        </div>
+
+        {/* Partner Management Card Container */}
+        <div className="bg-white border border-[var(--color-border-default)] rounded-xl p-6 shadow-sm flex flex-col justify-between space-y-6">
+          <div className="space-y-6">
+            {/* Typography Header */}
+            <div className="border-b border-[var(--color-border-default)] pb-4 flex items-start justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-[var(--color-text-primary)] flex items-center gap-2">
+                  <Handshake className="w-5 h-5 text-blue-600" />
+                  Partner Management
+                </h2>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-1 uppercase tracking-wider">
+                  Member Access Requests
+                </p>
+              </div>
+              <button
+                onClick={() => navigate('/new-requests')}
+                className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                View Requests <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-          ) : (
-            <div className="p-4">
-              {visibleActivity.map((activity, index) => {
-                const isClickable = !!activity.link;
-                const meta = getActivityMeta(activity.type);
-                const Icon = meta.icon;
-                const isLast = index === visibleActivity.length - 1;
 
-                return (
-                  <div
-                    key={activity.id}
-                    onClick={() => isClickable && handleActivityClick(activity.link)}
-                    className={`relative flex gap-4 ${isLast ? '' : 'pb-5'} ${
-                      isClickable ? 'cursor-pointer group' : ''
-                    }`}
-                  >
-                    {!isLast && (
-                      <div className="absolute left-[18px] top-10 bottom-0 w-px bg-[var(--color-border-default)]" />
-                    )}
-
-                    <div className={`relative z-10 w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${meta.iconBg} ${
-                      isClickable ? 'group-hover:ring-2 group-hover:ring-[rgba(26,26,46,0.08)] transition-shadow' : ''
-                    }`}>
-                      <Icon className={`w-4 h-4 ${meta.iconColor}`} />
-                    </div>
-
-                    <div className={`flex-1 min-w-0 rounded-xl px-3 py-2 -mx-1 transition-colors ${
-                      isClickable ? 'group-hover:bg-[var(--color-surface-panel)]' : ''
-                    }`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-semibold text-[var(--color-text-primary)] leading-snug">
-                          {activity.description}
-                        </p>
-                        {isClickable && (
-                          <ArrowRight className="w-4 h-4 text-[var(--color-text-muted)] shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 group-hover:text-[var(--color-brand-primary)] transition-all" />
-                        )}
-                      </div>
-                      <p className="text-xs font-medium text-[var(--color-text-muted)] mt-1">
-                        {formatActivityDate(activity.timestamp)}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
+            {/* Metric Cards Grid */}
+            <div className="grid grid-cols-2 gap-4">
+              <div 
+                onClick={() => navigate('/new-requests')}
+                className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col shadow-sm cursor-pointer hover:border-blue-600 transition-all group"
+              >
+                <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">New Requests</span>
+                <span className="text-3xl font-extrabold text-[var(--color-text-primary)] mt-1 group-hover:text-blue-600 transition-colors">{newRequestsCount}</span>
+                <span className="text-[10px] font-medium text-[var(--color-text-muted)] mt-1.5">Submitted in period</span>
+              </div>
+              
+              <div 
+                onClick={() => navigate('/user-ledger')}
+                className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col shadow-sm cursor-pointer hover:border-blue-600 transition-all group"
+              >
+                <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Pending Requests</span>
+                <span className="text-3xl font-extrabold text-[var(--color-text-primary)] mt-1 group-hover:text-blue-600 transition-colors">{pendingRequestsCount}</span>
+                <span className="text-[10px] font-medium text-[var(--color-text-muted)] mt-1.5">Awaiting ledger entry</span>
+              </div>
             </div>
-          )}
+          </div>
+
+          {/* Request Volume Trend Chart */}
+          <div className="pt-2">
+            <TrendChart 
+              title="Request Volume Trend" 
+              data={chartData.requestData} 
+              labels={chartData.labels}
+              color="blue"
+            />
+          </div>
         </div>
 
       </div>
     </div>
   );
 }
+

@@ -57,19 +57,27 @@ export default function ManagerForm() {
     setPersonForm((prev) => ({ ...prev, [field]: val }));
   };
 
+  // Manager email domain validation — must be @puregym.com
+  const managerEmailValid = useMemo(() => {
+    const email = managerForm.email.trim();
+    if (email === '') return true; // don't show error until something is typed
+    return email.toLowerCase().endsWith('@puregym.com');
+  }, [managerForm.email]);
+
   // Submit check
   const isFormValid = useMemo(() => {
     return (
       managerForm.firstName.trim() !== '' &&
       managerForm.lastName.trim() !== '' &&
       managerForm.email.trim() !== '' &&
+      managerEmailValid &&
       managerForm.club.trim() !== '' &&
       personForm.firstName.trim() !== '' &&
       personForm.lastName.trim() !== '' &&
       personForm.email.trim() !== '' &&
       personForm.location.trim() !== ''
     );
-  }, [managerForm, personForm]);
+  }, [managerForm, personForm, managerEmailValid]);
 
   // Form submit trigger
   const handleSubmit = (e) => {
@@ -214,9 +222,19 @@ export default function ManagerForm() {
                       required
                       value={managerForm.email}
                       onChange={(e) => handleManagerChange('email', e.target.value)}
-                      className="w-full px-3 py-1.5 bg-white border border-[var(--color-border-default)] rounded-md text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
+                      className={`w-full px-3 py-1.5 bg-white border rounded-md text-sm text-[var(--color-text-primary)] focus:outline-none transition-colors ${
+                        !managerEmailValid && managerForm.email.trim() !== ''
+                          ? 'border-red-400 focus:border-red-500 bg-red-50'
+                          : 'border-[var(--color-border-default)] focus:border-[var(--color-border-focus)]'
+                      }`}
                     />
+                    {!managerEmailValid && managerForm.email.trim() !== '' && (
+                      <p className="mt-1 text-[11px] font-medium text-red-600 leading-snug">
+                        Manager email address must use a @puregym.com domain. Other domains are not permitted.
+                      </p>
+                    )}
                   </div>
+
                   <div>
                     <label className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1">
                       Club Location *
