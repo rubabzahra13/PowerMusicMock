@@ -1,5 +1,6 @@
 import React from 'react';
 import { Mail, Link2, Unlink } from 'lucide-react';
+import PageHeader from '../components/layout/PageHeader';
 
 const accounts = [
   {
@@ -41,26 +42,28 @@ const accounts = [
 
 export default function GmailAccounts() {
   return (
-    <div className="max-w-4xl mx-auto py-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gmail Account Management</h1>
-        <p className="text-sm text-[var(--color-text-secondary)] mt-1">Manage connected Gmail inboxes for each vertical.</p>
-      </div>
+    <div className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden">
+      <PageHeader
+        section="Customer service"
+        title="Gmail accounts"
+        description="Manage connected Gmail inboxes for each vertical."
+        className="mb-4 shrink-0"
+      />
 
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto pr-1">
         {accounts.map((account) => (
           <div
             key={account.id}
-            className="group bg-white border border-[var(--color-border-default)] rounded-xl shadow-sm p-6 flex flex-col hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors"
+            className="group bg-white border border-[var(--color-border-default)] rounded-xl shadow-sm p-5 flex flex-col hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors shrink-0"
           >
             {/* Top Section */}
-            <div className="flex items-start justify-between mb-5">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] rounded-xl flex items-center justify-center shrink-0 transition-colors">
-                  <Mail className="w-6 h-6 text-[var(--color-brand-primary)]" />
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] rounded-xl flex items-center justify-center shrink-0 transition-colors">
+                  <Mail className="w-5 h-5 text-[var(--color-brand-primary)]" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-[var(--color-text-primary)] leading-tight group-hover:text-[var(--color-brand-primary)] transition-colors">{account.title}</h2>
+                  <h2 className="text-base font-bold text-[var(--color-text-primary)] leading-tight group-hover:text-[var(--color-brand-primary)] transition-colors">{account.title}</h2>
                   <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Connect the Gmail inbox used for this vertical</p>
                 </div>
               </div>
@@ -70,10 +73,10 @@ export default function GmailAccounts() {
             </div>
 
             {/* Divider */}
-            <div className="h-px bg-[var(--color-border-default)] w-full mb-5" />
+            <div className="h-px bg-[var(--color-border-default)] w-full mb-4" />
 
             {/* Bottom Section */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="text-sm font-bold text-[var(--color-text-primary)]">{account.email}</div>
                 <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Connected {account.date}</div>
