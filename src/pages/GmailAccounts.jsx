@@ -1,6 +1,7 @@
 import React from 'react';
 import { Mail, Link2, Unlink } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
+import DottedScroll from '../components/ui/DottedScroll';
 
 const accounts = [
   {
@@ -50,7 +51,7 @@ export default function GmailAccounts() {
         className="mb-4 shrink-0"
       />
 
-      <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto pr-1">
+      <DottedScroll>
         {accounts.map((account) => (
           <div
             key={account.id}
@@ -94,7 +95,7 @@ export default function GmailAccounts() {
             </div>
           </div>
         ))}
-      </div>
+      </DottedScroll>
     </div>
   );
 }
