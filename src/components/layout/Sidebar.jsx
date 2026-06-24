@@ -32,18 +32,33 @@ export default function Sidebar() {
       {/* Navigation Groups Container */}
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
 
-        {/* Group 1: General Navigation */}
+        {/* Overview */}
         <div className="space-y-1">
           <NavLink to="/" className={navItemClass}>
             <Home className="w-4 h-4 shrink-0" />
-            <span>Dashboard</span>
+            <span>Overview</span>
           </NavLink>
         </div>
 
-        {/* Group 2: Partner Onboarding */}
+        {/* Customer Service */}
         <div className="space-y-1">
           <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
-            Partner onboarding
+            Customer service
+          </span>
+          <NavLink to="/templates" className={navItemClass}>
+            <FileText className="w-4 h-4 shrink-0" />
+            <span>Gmail templates</span>
+          </NavLink>
+          <NavLink to="/gmail-accounts" className={navItemClass}>
+            <Mail className="w-4 h-4 shrink-0" />
+            <span>Gmail accounts</span>
+          </NavLink>
+        </div>
+
+        {/* Partner Service */}
+        <div className="space-y-1">
+          <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
+            Partner service
           </span>
           <NavLink to="/new-requests" className={navItemClass}>
             <Inbox className="w-4 h-4 shrink-0" />
@@ -51,29 +66,7 @@ export default function Sidebar() {
           </NavLink>
           <NavLink to="/user-ledger" className={navItemClass}>
             <Users className="w-4 h-4 shrink-0" />
-            <span>User Ledger</span>
-          </NavLink>
-        </div>
-
-        {/* Group 3: Template Management */}
-        <div className="space-y-1">
-          <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
-            Template
-          </span>
-          <NavLink to="/templates" className={navItemClass}>
-            <FileText className="w-4 h-4 shrink-0" />
-            <span>Manage templates</span>
-          </NavLink>
-        </div>
-
-        {/* Group 4: Gmail Accounts */}
-        <div className="space-y-1">
-          <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
-            Gmail Accounts
-          </span>
-          <NavLink to="/gmail-accounts" className={navItemClass}>
-            <Mail className="w-4 h-4 shrink-0" />
-            <span>Manage Gmail</span>
+            <span>User ledger</span>
           </NavLink>
         </div>
       </div>

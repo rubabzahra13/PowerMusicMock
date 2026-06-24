@@ -3,6 +3,7 @@ import { Search, FileText, Trash2, Save, X, ChevronDown, Plus, Pencil } from 'lu
 import { format, parseISO } from 'date-fns';
 import { templates as mockTemplates } from '../data/mockData';
 import { Toast, useToast, Modal } from '../components/ui';
+import PageHeader from '../components/layout/PageHeader';
 
 // ─── Language content swapper ──────────────────────────────────────────────────
 const LANG_VARIANTS = {
@@ -259,31 +260,35 @@ export default function TemplateManagement() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto select-none">
+    <div className="max-w-7xl mx-auto select-none flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden">
       <Toast />
 
-      {/* Page header */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border-default)] pb-4 mb-6">
-        <div className="flex items-center gap-3">
-          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Template Management</h2>
-          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
+      <PageHeader
+        section="Customer service"
+        title="Manage gmail templates"
+        description="Create, edit, and preview reply templates used in Gmail."
+        className="mb-4 shrink-0"
+        meta={
+          <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--color-surface-highlight)] text-[var(--color-text-secondary)]">
             {templates.length} templates
           </span>
-        </div>
-        <button
-          onClick={handleNewTemplate}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          New Template
-        </button>
-      </div>
+        }
+        actions={
+          <button
+            onClick={handleNewTemplate}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            New Template
+          </button>
+        }
+      />
 
       {/* Master-Detail container */}
-      <div className="flex rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white" style={{ minHeight: '72vh' }}>
+      <div className="flex flex-1 min-h-0 rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white">
 
         {/* ── LEFT PANE ─────────────────────────────────────────── */}
-        <div className="w-[37%] flex flex-col border-r border-[var(--color-border-default)] shrink-0">
+        <div className="w-[37%] flex flex-col border-r border-[var(--color-border-default)] shrink-0 min-h-0">
 
           {/* Left pane controls */}
           <div className="p-4 border-b border-[var(--color-border-default)] space-y-3 bg-gray-50">
@@ -351,10 +356,9 @@ export default function TemplateManagement() {
         </div>
 
         {/* ── RIGHT PANE ────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
           {!selectedTemplate && !isCreatingNew ? (
-            /* Empty state */
-            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--color-text-muted)] p-10 text-center">
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--color-text-muted)] p-8 text-center min-h-0">
               <div className="w-14 h-14 rounded-2xl bg-[var(--color-surface-highlight)] flex items-center justify-center">
                 <FileText className="w-7 h-7 text-[var(--color-brand-primary)]/40" />
               </div>
@@ -369,7 +373,7 @@ export default function TemplateManagement() {
           ) : (
             <>
               {/* Editor header */}
-              <div className="flex items-start justify-between px-6 py-4 border-b border-[var(--color-border-default)]">
+              <div className="flex items-start justify-between px-6 py-4 border-b border-[var(--color-border-default)] shrink-0">
                 <div>
                   <h3 className="text-base font-bold text-[var(--color-text-primary)] leading-snug">
                     {isCreatingNew
@@ -440,7 +444,7 @@ export default function TemplateManagement() {
               </div>
 
               {/* Editor form */}
-              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-5">
                 {!(isEditing || isCreatingNew) && (
                   <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-3 text-xs text-[var(--color-text-secondary)]">
                     Preview mode. Click the pencil icon above to edit this template.

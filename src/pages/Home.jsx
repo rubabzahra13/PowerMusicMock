@@ -1,65 +1,274 @@
 import { useNavigate } from 'react-router-dom';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 import {
-  ArrowRight,
-  Clock,
   AlertTriangle,
-  Inbox,
-  Flag,
-  Users,
-  FileText,
+  ArrowRight,
   CheckCircle,
-  UserPlus,
+  Clock,
+  FileText,
+  Flag,
+  Inbox,
   UserMinus,
-  ChevronRight
+  UserPlus,
+  Users
 } from 'lucide-react';
+import PageHeader from '../components/layout/PageHeader';
 import { kpiData, recentActivity, pendingRequests } from '../data/mockData';
 
-const getActivityMeta = (type) => {
-  switch (type) {
-    case 'request_submitted':
-      return {
-        icon: Inbox,
-        iconBg: 'bg-[var(--color-surface-highlight)]',
-        iconColor: 'text-[var(--color-brand-primary)]'
-      };
-    case 'tag_applied':
-      return {
-        icon: AlertTriangle,
-        iconBg: 'bg-[var(--color-tag-already-exists-bg)]',
-        iconColor: 'text-[var(--color-tag-already-exists-text)]'
-      };
-    case 'marked_removed':
-      return {
-        icon: UserMinus,
-        iconBg: 'bg-[var(--color-tag-remove-action-bg)]',
-        iconColor: 'text-[var(--color-tag-remove-action-text)]'
-      };
-    case 'marked_added':
-      return {
-        icon: UserPlus,
-        iconBg: 'bg-[var(--color-tag-add-action-bg)]',
-        iconColor: 'text-[var(--color-tag-add-action-text)]'
-      };
-    case 'template_updated':
-      return {
-        icon: FileText,
-        iconBg: 'bg-[var(--color-surface-highlight)]',
-        iconColor: 'text-[var(--color-brand-primary)]'
-      };
-    default:
-      return {
-        icon: Clock,
-        iconBg: 'bg-[var(--color-surface-highlight)]',
-        iconColor: 'text-[var(--color-text-secondary)]'
-      };
+const CUSTOMER_ACTIVITY_TYPES = new Set(['template_updated']);
+const PARTNER_ACTIVITY_TYPES = new Set([
+  'request_submitted',
+  'tag_applied',
+  'marked_added',
+  'marked_removed'
+]);
+
+const PANEL = 'bg-white border border-[var(--color-border-default)]';
+
+const COLUMN_THEMES = {
+  customer: {
+    shell: 'bg-white border-[var(--color-border-default)]',
+    panelHeader: 'bg-[#edf4fc] border-[#c5daf3]',
+    panelTitle: 'text-[var(--color-text-primary)]',
+    panelSubtitle: 'text-[var(--color-text-secondary)]',
+    panelIconWell: 'bg-[#d4e4f7]',
+    panelIconColor: 'text-[#4a7eb8]',
+    dot: 'bg-[#6baff0]',
+    iconWell: 'bg-[#e8f1fc]',
+    iconColor: 'text-[#4a7eb8]',
+    badge: 'bg-[#4a7eb8]',
+    kpiValueHover: 'group-hover:text-[#4a7eb8]',
+    kpiCardHover: 'hover:border-[#c5daf3] hover:bg-[#f5f9fd]',
+    alertCardHover: 'hover:border-[#c5daf3] hover:bg-[#f5f9fd]',
+    activityHover: 'group-hover:bg-[#f5f9fd]',
+    alertBorder: {
+      critical: 'border-l-[#4a7eb8]',
+      warning: 'border-l-[#8bb8e0]'
+    }
+  },
+  partner: {
+    shell: 'bg-white border-[#9fc0e3]',
+    panelHeader: 'bg-[var(--color-surface-sidebar)] border-white/10',
+    panelTitle: 'text-white',
+    panelSubtitle: 'text-white/65',
+    panelIconWell: 'bg-white/10',
+    panelIconColor: 'text-white',
+    dot: 'bg-[#252542]',
+    iconWell: 'bg-[#b8d4f0]',
+    iconColor: 'text-[#1e558f]',
+    badge: 'bg-[var(--color-brand-accent)]',
+    kpiValueHover: 'group-hover:text-[#1e558f]',
+    kpiCardHover: 'hover:border-[#9fc0e3] hover:bg-[#edf4fc]',
+    alertCardHover: 'hover:border-[#9fc0e3] hover:bg-[#edf4fc]',
+    activityHover: 'group-hover:bg-[#edf4fc]',
+    alertBorder: {
+      critical: 'border-l-[#1e558f]',
+      warning: 'border-l-[#2f5f94]'
+    }
   }
 };
+
+function getActivityMeta(type) {
+  const icons = {
+    request_submitted: Inbox,
+    tag_applied: AlertTriangle,
+    marked_removed: UserMinus,
+    marked_added: UserPlus,
+    template_updated: FileText,
+    default: Clock
+  };
+
+  return { icon: icons[type] || icons.default };
+}
+
+function KpiCard({ label, value, icon: Icon, onClick, theme }) {
+  const Tag = onClick ? 'button' : 'div';
+
+  return (
+    <Tag
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`${PANEL} rounded-xl p-3.5 flex items-center justify-between shadow-sm w-full text-left transition-colors ${
+        onClick ? `cursor-pointer group ${theme.kpiCardHover}` : ''
+      }`}
+    >
+      <div>
+        <h3 className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">{label}</h3>
+        <p className={`text-xl font-bold text-[var(--color-text-primary)] mt-0.5 tabular-nums ${
+          onClick ? `${theme.kpiValueHover} transition-colors` : ''
+        }`}>
+          {value}
+        </p>
+      </div>
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${theme.iconWell}`}>
+        <Icon className={`w-5 h-5 ${theme.iconColor}`} />
+      </div>
+    </Tag>
+  );
+}
+
+function ServiceColumn({
+  title,
+  description,
+  kpis,
+  alertsTitle,
+  alertsSubtitle,
+  alerts,
+  alertEmptyText,
+  onAlertClick,
+  activities,
+  activityEmptyText,
+  formatActivityDate,
+  onActivityClick,
+  themeKey
+}) {
+  const theme = COLUMN_THEMES[themeKey];
+
+  return (
+    <div className={`flex flex-col gap-3 h-full min-h-0 overflow-hidden rounded-2xl p-4 xl:p-5 border ${theme.shell}`}>
+      <div className="shrink-0">
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${theme.dot}`} />
+          <h2 className="text-base font-bold text-[var(--color-text-primary)]">{title}</h2>
+        </div>
+        <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 ml-4">{description}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2.5 shrink-0">
+        {kpis.map((kpi) => (
+          <KpiCard key={kpi.label} {...kpi} theme={theme} />
+        ))}
+      </div>
+
+      <div className="flex-1 flex flex-col gap-3 min-h-0">
+        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col flex-1 min-h-0`}>
+          <div className={`px-3.5 py-2.5 border-b flex items-center justify-between gap-3 shrink-0 ${theme.panelHeader}`}>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.panelIconWell}`}>
+                <AlertTriangle className={`w-4 h-4 ${theme.panelIconColor}`} />
+              </div>
+              <div className="min-w-0">
+                <h3 className={`text-sm font-bold ${theme.panelTitle}`}>{alertsTitle}</h3>
+                <p className={`text-xs truncate ${theme.panelSubtitle}`}>{alertsSubtitle}</p>
+              </div>
+            </div>
+            {alerts.length > 0 && (
+              <span className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full text-white ${theme.badge}`}>
+                {alerts.length}
+              </span>
+            )}
+          </div>
+
+          <div className="p-2.5 flex-1 min-h-0 overflow-y-auto">
+            {alerts.length === 0 ? (
+              <div className="h-full min-h-[72px] flex flex-col items-center justify-center text-center px-3 py-4">
+                <CheckCircle className="w-7 h-7 text-[var(--color-signal-green)] mb-1.5" />
+                <p className="text-sm font-medium text-[var(--color-text-secondary)]">{alertEmptyText}</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {alerts.map((alert) => {
+                  const isClickable = alert.type !== 'critical' && Boolean(onAlertClick);
+                  const alertBorder = theme.alertBorder[alert.type] || theme.alertBorder.warning;
+                  const AlertIcon = alert.type === 'critical' ? Flag : Users;
+
+                  return (
+                    <button
+                      key={alert.id}
+                      type="button"
+                      onClick={isClickable ? () => onAlertClick(alert) : undefined}
+                      className={`w-full text-left rounded-lg border border-[var(--color-border-default)] bg-white p-2.5 transition-all border-l-[3px] ${alertBorder} ${
+                        isClickable
+                          ? `cursor-pointer group ${theme.alertCardHover}`
+                          : 'cursor-default'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell}`}>
+                          <AlertIcon className={`w-4 h-4 ${theme.iconColor}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-[var(--color-text-primary)]">{alert.title}</p>
+                          <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 leading-relaxed">{alert.subtitle}</p>
+                          <p className="text-[10px] font-semibold text-[var(--color-text-muted)] mt-1.5">{alert.time}</p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col flex-1 min-h-0`}>
+          <div className={`px-3.5 py-2.5 border-b flex items-center gap-2.5 shrink-0 ${theme.panelHeader}`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.panelIconWell}`}>
+              <Clock className={`w-4 h-4 ${theme.panelIconColor}`} />
+            </div>
+            <div>
+              <h3 className={`text-sm font-bold ${theme.panelTitle}`}>Recent activity</h3>
+              <p className={`text-xs ${theme.panelSubtitle}`}>Latest events</p>
+            </div>
+          </div>
+
+          <div className="p-3 flex-1 min-h-0 overflow-y-auto">
+            {activities.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)] text-center py-4">{activityEmptyText}</p>
+            ) : (
+              <div className="space-y-0">
+                {activities.map((activity, index) => {
+                  const isClickable = Boolean(activity.link) || activity.type === 'template_updated';
+                  const meta = getActivityMeta(activity.type);
+                  const Icon = meta.icon;
+                  const isLast = index === activities.length - 1;
+
+                  return (
+                    <div
+                      key={activity.id}
+                      onClick={() => isClickable && onActivityClick(activity)}
+                      className={`relative flex gap-2.5 ${isLast ? '' : 'pb-3'} ${
+                        isClickable ? 'cursor-pointer group' : ''
+                      }`}
+                    >
+                      {!isLast && (
+                        <div className="absolute left-[15px] top-8 bottom-0 w-px bg-[var(--color-border-default)]" />
+                      )}
+                      <div className={`relative z-10 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell} ${
+                        isClickable ? 'group-hover:ring-2 group-hover:ring-[rgba(26,26,46,0.06)] transition-shadow' : ''
+                      }`}>
+                        <Icon className={`w-4 h-4 ${theme.iconColor}`} />
+                      </div>
+                      <div className={`flex-1 min-w-0 rounded-lg px-2 py-1 -mx-1 transition-colors ${
+                        isClickable ? theme.activityHover : ''
+                      }`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-semibold text-[var(--color-text-primary)] leading-snug">
+                            {activity.description}
+                          </p>
+                          {isClickable && (
+                            <ArrowRight className={`w-3.5 h-3.5 shrink-0 opacity-0 group-hover:opacity-100 transition-all ${theme.iconColor}`} />
+                          )}
+                        </div>
+                        <p className="text-xs font-medium text-[var(--color-text-muted)] mt-0.5">
+                          {formatActivityDate(activity.timestamp)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const navigate = useNavigate();
 
-  // Dynamic activity date formatting
   const formatActivityDate = (isoString) => {
     try {
       const date = parseISO(isoString);
@@ -71,283 +280,88 @@ export default function Home() {
     }
   };
 
-  // Activity click handler
-  const handleActivityClick = (link) => {
-    if (!link) return;
-    if (link.startsWith('req-h')) {
-      navigate('/new-requests'); // Redirects to handled via unified page but user will use toggle
-    } else {
-      navigate('/new-requests');
+  const handleActivityClick = (activity) => {
+    if (activity.type === 'template_updated') {
+      navigate('/templates');
+      return;
     }
+    if (activity.link) navigate('/new-requests');
   };
 
-  const visibleActivity = recentActivity.slice(0, 8);
-  
-  // Priority Alerts derived from mockData
   const duplicateAlerts = pendingRequests
-    .filter(req => req.tags?.includes('Already Exists'))
-    .map(req => ({
+    .filter((req) => req.tags?.includes('Already Exists'))
+    .map((req) => ({
       id: req.id,
-      title: 'Potential Duplicate Entry',
+      title: 'Potential duplicate entry',
       subtitle: `${req.person.firstName} ${req.person.lastName} (${req.person.email})`,
       time: formatActivityDate(req.receivedAt),
       type: 'warning',
-      isNew: true,
+      isNew: true
     }));
 
-  // Mock flagged email alert for dashboard purposes
   const flaggedEmailAlerts = kpiData.flaggedEmails > 0 ? [{
     id: 'flag-001',
-    title: 'Flagged Email Requires Review',
+    title: 'Flagged email requires review',
     subtitle: 'System detected aggressive or unhandled intent',
     time: 'Today, 08:30',
     type: 'critical',
-    isNew: true,
+    isNew: true
   }] : [];
 
-  const alerts = [...flaggedEmailAlerts, ...duplicateAlerts];
+  const customerActivity = recentActivity
+    .filter((a) => CUSTOMER_ACTIVITY_TYPES.has(a.type))
+    .slice(0, 4);
 
-  const handleAlertClick = (alert) => {
-    if (alert.type === 'critical') return;
-    navigate('/new-requests');
-  };
+  const partnerActivity = recentActivity
+    .filter((a) => PARTNER_ACTIVITY_TYPES.has(a.type))
+    .slice(0, 4);
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8 select-none pb-12">
-      {/* Welcome Title */}
-      <div>
-        <h2 className="text-2xl font-bold text-[var(--color-text-primary)]">
-          Good morning, Andrea.
-        </h2>
-        <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-          Here's your operational overview for today.
-        </p>
-      </div>
+    <div className="max-w-7xl mx-auto select-none flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden">
+      <PageHeader
+        section="Overview"
+        title="Good morning, Andrea."
+        description="Here's your operational overview for today."
+        className="mb-4 shrink-0"
+      />
 
-      {/* Quick Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Pending Requests */}
-        <div 
-          onClick={() => navigate('/new-requests')}
-          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors group"
-        >
-          <div>
-            <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Pending Requests</h3>
-            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5 group-hover:text-[var(--color-brand-primary)] transition-colors">{kpiData.pendingRequests}</p>
-          </div>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] transition-colors">
-            <Inbox className="w-6 h-6 text-[var(--color-brand-primary)]" />
-          </div>
-        </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 grid-rows-2 xl:grid-rows-1 gap-4 flex-1 min-h-0 items-stretch">
+        <ServiceColumn
+          themeKey="customer"
+          title="Customer service"
+          description="Gmail templates, connected inboxes, and flagged emails."
+          kpis={[
+            { label: 'Flagged emails', value: kpiData.flaggedEmails, icon: Flag },
+            { label: 'Active templates', value: kpiData.templatesActive, icon: FileText, onClick: () => navigate('/templates') }
+          ]}
+          alertsTitle="Flagged emails"
+          alertsSubtitle={flaggedEmailAlerts.length ? 'Requires review' : 'All clear'}
+          alerts={flaggedEmailAlerts}
+          alertEmptyText="No flagged emails to review."
+          activities={customerActivity}
+          activityEmptyText="No recent template activity."
+          formatActivityDate={formatActivityDate}
+          onActivityClick={handleActivityClick}
+        />
 
-        {/* Flagged Emails */}
-        <div 
-          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm"
-        >
-          <div>
-            <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Flagged Emails</h3>
-            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5">{kpiData.flaggedEmails}</p>
-          </div>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)]">
-            <Flag className="w-6 h-6 text-[var(--color-brand-primary)]" />
-          </div>
-        </div>
-
-        {/* Active Templates */}
-        <div 
-          onClick={() => navigate('/templates')}
-          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors group"
-        >
-          <div>
-            <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Active Templates</h3>
-            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5 group-hover:text-[var(--color-brand-primary)] transition-colors">{kpiData.templatesActive}</p>
-          </div>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] transition-colors">
-            <FileText className="w-6 h-6 text-[var(--color-brand-primary)]" />
-          </div>
-        </div>
-
-        {/* Users In Ledger */}
-        <div 
-          onClick={() => navigate('/user-ledger')}
-          className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 flex items-center justify-between shadow-sm cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] transition-colors group"
-        >
-          <div>
-            <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Users In Ledger</h3>
-            <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-1.5 group-hover:text-[var(--color-brand-primary)] transition-colors">{kpiData.usersInLedger}</p>
-          </div>
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[var(--color-surface-highlight)] group-hover:bg-[var(--color-surface-highlight-strong)] transition-colors">
-            <Users className="w-6 h-6 text-[var(--color-brand-primary)]" />
-          </div>
-        </div>
-      </div>
-
-      {/* Main Dashboard Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-
-        {/* Priority Alerts */}
-        <div className="lg:col-span-1 bg-white border border-[var(--color-border-default)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col">
-          <div className="px-5 py-4 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)] flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-[var(--color-surface-highlight-strong)] flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-4 h-4 text-[var(--color-brand-primary)]" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-[var(--color-text-primary)]">Priority Alerts</h3>
-                <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                  {alerts.length === 0 ? 'Nothing urgent right now' : `${alerts.length} item${alerts.length === 1 ? '' : 's'} need attention`}
-                </p>
-              </div>
-            </div>
-            {alerts.length > 0 && (
-              <span className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full bg-[var(--color-brand-primary)] text-white">
-                {alerts.length}
-              </span>
-            )}
-          </div>
-
-          <div className="p-3 flex flex-col gap-2 flex-1">
-            {alerts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center px-4 py-10">
-                <div className="w-12 h-12 rounded-2xl bg-[var(--color-surface-highlight)] flex items-center justify-center mb-3">
-                  <CheckCircle className="w-6 h-6 text-[var(--color-signal-green)]" />
-                </div>
-                <h4 className="text-sm font-bold text-[var(--color-text-primary)]">All caught up</h4>
-                <p className="text-xs text-[var(--color-text-secondary)] mt-1 max-w-[200px]">
-                  No pending warnings or flagged items.
-                </p>
-              </div>
-            ) : (
-              alerts.map((alert) => {
-                const isClickable = alert.type !== 'critical';
-
-                return (
-                <button
-                  key={alert.id}
-                  type="button"
-                  onClick={isClickable ? () => handleAlertClick(alert) : undefined}
-                  className={`w-full text-left rounded-xl border border-[var(--color-border-default)] p-4 transition-all ${
-                    isClickable
-                      ? 'cursor-pointer hover:border-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-panel)] group'
-                      : 'cursor-default'
-                  } ${
-                    alert.type === 'critical'
-                      ? 'border-l-[3px] border-l-[var(--color-signal-red)]'
-                      : 'border-l-[3px] border-l-[var(--color-already-exists-border)]'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                      alert.type === 'critical'
-                        ? 'bg-[var(--color-tag-remove-action-bg)]'
-                        : 'bg-[var(--color-tag-already-exists-bg)]'
-                    }`}>
-                      {alert.type === 'critical' ? (
-                        <Flag className="w-4 h-4 text-[var(--color-tag-remove-action-text)]" />
-                      ) : (
-                        <Users className="w-4 h-4 text-[var(--color-tag-already-exists-text)]" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                          <h4 className="text-sm font-semibold text-[var(--color-text-primary)] leading-snug">
-                            {alert.title}
-                          </h4>
-                          {alert.isNew && (
-                            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] leading-none">
-                              New
-                            </span>
-                          )}
-                        </div>
-                        <ChevronRight className={`w-4 h-4 text-[var(--color-text-muted)] shrink-0 mt-0.5 transition-all ${
-                          isClickable ? 'opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5' : 'hidden'
-                        }`} />
-                      </div>
-                      <p className="text-xs text-[var(--color-text-secondary)] mt-1 leading-relaxed">
-                        {alert.subtitle}
-                      </p>
-                      <p className="text-[10px] font-semibold text-[var(--color-text-muted)] mt-2">
-                        {alert.time}
-                      </p>
-                    </div>
-                  </div>
-                </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Activity Summary */}
-        <div className="lg:col-span-2 bg-white border border-[var(--color-border-default)] rounded-2xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col">
-          <div className="px-5 py-4 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)] flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-[var(--color-surface-highlight-strong)] flex items-center justify-center shrink-0">
-                <Clock className="w-4 h-4 text-[var(--color-brand-primary)]" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-[var(--color-text-primary)]">Activity Summary</h3>
-                <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">Recent operational events</p>
-              </div>
-            </div>
-            <span className="text-[11px] font-semibold text-[var(--color-text-muted)]">
-              Last {visibleActivity.length} events
-            </span>
-          </div>
-
-          {visibleActivity.length === 0 ? (
-            <div className="p-10 text-center">
-              <p className="text-sm font-medium text-[var(--color-text-muted)]">No recent activity to display.</p>
-            </div>
-          ) : (
-            <div className="p-4">
-              {visibleActivity.map((activity, index) => {
-                const isClickable = !!activity.link;
-                const meta = getActivityMeta(activity.type);
-                const Icon = meta.icon;
-                const isLast = index === visibleActivity.length - 1;
-
-                return (
-                  <div
-                    key={activity.id}
-                    onClick={() => isClickable && handleActivityClick(activity.link)}
-                    className={`relative flex gap-4 ${isLast ? '' : 'pb-5'} ${
-                      isClickable ? 'cursor-pointer group' : ''
-                    }`}
-                  >
-                    {!isLast && (
-                      <div className="absolute left-[18px] top-10 bottom-0 w-px bg-[var(--color-border-default)]" />
-                    )}
-
-                    <div className={`relative z-10 w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${meta.iconBg} ${
-                      isClickable ? 'group-hover:ring-2 group-hover:ring-[rgba(26,26,46,0.08)] transition-shadow' : ''
-                    }`}>
-                      <Icon className={`w-4 h-4 ${meta.iconColor}`} />
-                    </div>
-
-                    <div className={`flex-1 min-w-0 rounded-xl px-3 py-2 -mx-1 transition-colors ${
-                      isClickable ? 'group-hover:bg-[var(--color-surface-panel)]' : ''
-                    }`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-semibold text-[var(--color-text-primary)] leading-snug">
-                          {activity.description}
-                        </p>
-                        {isClickable && (
-                          <ArrowRight className="w-4 h-4 text-[var(--color-text-muted)] shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 group-hover:text-[var(--color-brand-primary)] transition-all" />
-                        )}
-                      </div>
-                      <p className="text-xs font-medium text-[var(--color-text-muted)] mt-1">
-                        {formatActivityDate(activity.timestamp)}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
+        <ServiceColumn
+          themeKey="partner"
+          title="Partner service"
+          description="New user requests and the partner user ledger."
+          kpis={[
+            { label: 'Pending requests', value: kpiData.pendingRequests, icon: Inbox, onClick: () => navigate('/new-requests') },
+            { label: 'Users in ledger', value: kpiData.usersInLedger, icon: Users, onClick: () => navigate('/user-ledger') }
+          ]}
+          alertsTitle="Priority alerts"
+          alertsSubtitle={duplicateAlerts.length ? 'Items need attention' : 'Nothing urgent'}
+          alerts={duplicateAlerts}
+          alertEmptyText="No duplicate warnings right now."
+          onAlertClick={() => navigate('/new-requests')}
+          activities={partnerActivity}
+          activityEmptyText="No recent partner activity."
+          formatActivityDate={formatActivityDate}
+          onActivityClick={handleActivityClick}
+        />
       </div>
     </div>
   );

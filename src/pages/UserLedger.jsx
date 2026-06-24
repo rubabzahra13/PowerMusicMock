@@ -3,6 +3,7 @@ import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucid
 import { format, parseISO } from 'date-fns';
 import { userLedger } from '../data/mockData';
 import { DataTable, Tag, Drawer } from '../components/ui';
+import PageHeader from '../components/layout/PageHeader';
 
 const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (oldest first)' },
@@ -419,12 +420,21 @@ export default function UserLedger() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 select-none">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border-default)] pb-4">
-        <div className="flex items-center gap-4">
-          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">User Ledger</h2>
-
-          <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)]">
+      <PageHeader
+        section="Partner service"
+        title="User ledger"
+        description="View and export the record of added and removed partner users."
+        actions={
+          <button
+            onClick={handleExportCSV}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export CSV</span>
+          </button>
+        }
+        footer={
+          <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] w-fit">
             {statusTabs.map(({ key, label, count }) => (
               <button
                 key={key}
@@ -446,16 +456,8 @@ export default function UserLedger() {
               </button>
             ))}
           </div>
-        </div>
-
-        <button
-          onClick={handleExportCSV}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
-        >
-          <Download className="w-4 h-4" />
-          <span>Export CSV</span>
-        </button>
-      </div>
+        }
+      />
 
       {/* Controls Bar */}
       <ControlsBar
