@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Search, Flag, Send, AlertTriangle, Inbox,
   ChevronLeft, ChevronRight, Mail, Sparkles, SlidersHorizontal,
@@ -19,6 +20,7 @@ const MAILBOXES = [
   { id: 'archive', label: 'Archive', shortLabel: 'Archive', icon: Archive },
   { id: 'sent', label: 'Sent', shortLabel: 'Sent', icon: Send },
 ];
+const MAILBOX_IDS = new Set(MAILBOXES.map((m) => m.id));
 
 const INTENTS = ['All', 'Enquiry', 'Cancellation', 'Renewal', 'Partnership', 'Finance', 'Events'];
 
@@ -212,8 +214,12 @@ function EmailListItem({ email, selected, checked, onClick, onCheck }) {
 
 export default function EmailQueue() {
   const { showToast } = useToast();
+  const [searchParams] = useSearchParams();
+  const mailboxFromUrl = searchParams.get('mailbox');
   const [emails, setEmails] = useState(emailQueue);
-  const [mailbox, setMailbox] = useState('inbox');
+  const [mailbox, setMailbox] = useState(() =>
+    MAILBOX_IDS.has(mailboxFromUrl) ? mailboxFromUrl : 'inbox'
+  );
   const [inboxFilter, setInboxFilter] = useState(() => connectedInboxes[0]?.email ?? '');
   const [intentFilter, setIntentFilter] = useState('All');
   const [search, setSearch] = useState('');
