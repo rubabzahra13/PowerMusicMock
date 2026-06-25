@@ -2,200 +2,270 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, isToday, parseISO, subDays } from 'date-fns';
 import {
-  ChevronRight,
-  CalendarDays,
-  Headphones,
-  Handshake
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle,
+  Clock,
+  FileText,
+  Flag,
+  Inbox,
+  Mail,
+  UserMinus,
+  UserPlus,
+  Users
 } from 'lucide-react';
-import { pendingRequests, handledRequests } from '../data/mockData';
+import PageHeader from '../components/layout/PageHeader';
+import { kpiData, recentActivity, pendingRequests } from '../data/mockData';
 
-// Mock emails for Customer Service
-const mockEmails = [
-  // Today (2026-06-24)
-  { id: 'e1', receivedAt: '2026-06-24T08:15:00', flagged: false },
-  { id: 'e2', receivedAt: '2026-06-24T09:30:00', flagged: true },
-  { id: 'e3', receivedAt: '2026-06-24T10:45:00', flagged: false },
-  { id: 'e4', receivedAt: '2026-06-24T11:20:00', flagged: false },
-  { id: 'e5', receivedAt: '2026-06-24T13:10:00', flagged: false },
-  { id: 'e6', receivedAt: '2026-06-24T14:40:00', flagged: false },
-  { id: 'e7', receivedAt: '2026-06-24T16:05:00', flagged: false },
-  
-  // Yesterday (2026-06-23)
-  { id: 'e8', receivedAt: '2026-06-23T08:00:00', flagged: false },
-  { id: 'e9', receivedAt: '2026-06-23T10:00:00', flagged: false },
-  { id: 'e10', receivedAt: '2026-06-23T11:30:00', flagged: true },
-  { id: 'e11', receivedAt: '2026-06-23T14:00:00', flagged: false },
-  { id: 'e12', receivedAt: '2026-06-23T15:30:00', flagged: false },
-  { id: 'e13', receivedAt: '2026-06-23T16:45:00', flagged: false },
-  
-  // June 22
-  { id: 'e14', receivedAt: '2026-06-22T09:00:00', flagged: false },
-  { id: 'e15', receivedAt: '2026-06-22T11:00:00', flagged: false },
-  { id: 'e16', receivedAt: '2026-06-22T13:00:00', flagged: false },
-  { id: 'e17', receivedAt: '2026-06-22T15:00:00', flagged: true },
-  
-  // June 21
-  { id: 'e18', receivedAt: '2026-06-21T10:00:00', flagged: false },
-  { id: 'e19', receivedAt: '2026-06-21T14:00:00', flagged: false },
-  
-  // June 20
-  { id: 'e20', receivedAt: '2026-06-20T11:00:00', flagged: false },
-  { id: 'e21', receivedAt: '2026-06-20T16:00:00', flagged: false },
-  
-  // June 19
-  { id: 'e22', receivedAt: '2026-06-19T09:00:00', flagged: false },
-  { id: 'e23', receivedAt: '2026-06-19T14:00:00', flagged: true },
-  
-  // June 18
-  { id: 'e24', receivedAt: '2026-06-18T10:00:00', flagged: false },
-  { id: 'e25', receivedAt: '2026-06-18T15:00:00', flagged: false },
-  
-  // Older dates for 30d
-  { id: 'e26', receivedAt: '2026-06-15T12:00:00', flagged: false },
-  { id: 'e27', receivedAt: '2026-06-12T12:00:00', flagged: false },
-  { id: 'e28', receivedAt: '2026-06-10T12:00:00', flagged: true },
-  { id: 'e29', receivedAt: '2026-06-05T12:00:00', flagged: false },
-  { id: 'e30', receivedAt: '2026-05-30T12:00:00', flagged: false }
-];
+const CUSTOMER_ACTIVITY_TYPES = new Set(['template_updated']);
+const PARTNER_ACTIVITY_TYPES = new Set([
+  'request_submitted',
+  'tag_applied',
+  'marked_added',
+  'marked_removed'
+]);
 
-// Helper to determine start and end date of period
-const getRangeInterval = (rangeType, customStart, customEnd) => {
-  const now = new Date();
-  let start, end;
-  end = now;
-  
-  if (rangeType === 'today') {
-    start = new Date();
-    start.setHours(0, 0, 0, 0);
-    end = new Date();
-    end.setHours(23, 59, 59, 999);
-  } else if (rangeType === '7d') {
-    start = subDays(now, 6);
-    start.setHours(0, 0, 0, 0);
-    end = new Date();
-    end.setHours(23, 59, 59, 999);
-  } else if (rangeType === '30d') {
-    start = subDays(now, 29);
-    start.setHours(0, 0, 0, 0);
-    end = new Date();
-    end.setHours(23, 59, 59, 999);
-  } else if (rangeType === 'custom') {
-    start = customStart ? new Date(customStart + 'T00:00:00') : subDays(now, 6);
-    end = customEnd ? new Date(customEnd + 'T23:59:59') : now;
+const PANEL = 'bg-white border border-[var(--color-border-default)]';
+
+const COLUMN_THEMES = {
+  customer: {
+    shell: 'bg-white border-[var(--color-border-default)]',
+    panelHeader: 'bg-[#edf4fc] border-[#c5daf3]',
+    panelTitle: 'text-[var(--color-text-primary)]',
+    panelSubtitle: 'text-[var(--color-text-secondary)]',
+    panelIconWell: 'bg-[var(--color-surface-highlight)]',
+    panelIconColor: 'text-[var(--color-text-muted)]',
+    dot: 'bg-[#6baff0]',
+    kpiIconWell: 'bg-[var(--color-surface-highlight)]',
+    kpiIconColor: 'text-[var(--color-text-muted)]',
+    iconWell: 'bg-[var(--color-surface-highlight)]',
+    iconColor: 'text-[var(--color-text-muted)]',
+    badge: 'bg-[var(--color-brand-accent)]',
+    kpiValueHover: 'group-hover:text-[#4a7eb8]',
+    kpiCardHover: 'hover:border-[#c5daf3] hover:bg-[#f5f9fd]',
+    alertCardHover: 'hover:border-[#c5daf3] hover:bg-[#f5f9fd]',
+    activityHover: 'group-hover:bg-[#f5f9fd]',
+    alertBorder: {
+      critical: 'border-l-[#4a7eb8]',
+      warning: 'border-l-[#8bb8e0]'
+    }
+  },
+  partner: {
+    shell: 'bg-white border-[#9fc0e3]',
+    panelHeader: 'bg-[var(--color-surface-sidebar)] border-white/10',
+    panelTitle: 'text-white',
+    panelSubtitle: 'text-white/65',
+    panelIconWell: 'bg-white/10',
+    panelIconColor: 'text-white',
+    dot: 'bg-[#252542]',
+    iconWell: 'bg-[#b8d4f0]',
+    iconColor: 'text-[#1e558f]',
+    badge: 'bg-[var(--color-brand-accent)]',
+    kpiValueHover: 'group-hover:text-[#1e558f]',
+    kpiCardHover: 'hover:border-[#9fc0e3] hover:bg-[#edf4fc]',
+    alertCardHover: 'hover:border-[#9fc0e3] hover:bg-[#edf4fc]',
+    activityHover: 'group-hover:bg-[#edf4fc]',
+    alertBorder: {
+      critical: 'border-l-[#1e558f]',
+      warning: 'border-l-[#2f5f94]'
+    }
   }
   return { start, end };
 };
 
-function TrendChart({ title, data, labels, color = 'violet' }) {
-  const maxVal = Math.max(...data, 1);
-  const height = 160;
-  const width = 500;
-  const paddingLeft = 32;
-  const paddingRight = 10;
-  const paddingTop = 20;
-  const paddingBottom = 30;
-  
-  const chartWidth = width - paddingLeft - paddingRight;
-  const chartHeight = height - paddingTop - paddingBottom;
-  
-  const points = data.map((val, idx) => {
-    const x = paddingLeft + (idx / (data.length - 1 || 1)) * chartWidth;
-    const y = paddingTop + chartHeight - (val / maxVal) * chartHeight;
-    return { x, y };
-  });
-  
-  const linePath = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const areaPath = points.length > 0 
-    ? `${linePath} L ${points[points.length - 1].x} ${paddingTop + chartHeight} L ${points[0].x} ${paddingTop + chartHeight} Z`
-    : '';
+function getActivityMeta(type) {
+  const icons = {
+    request_submitted: Inbox,
+    tag_applied: AlertTriangle,
+    marked_removed: UserMinus,
+    marked_added: UserPlus,
+    template_updated: FileText,
+    default: Clock
+  };
 
-  const strokeColor = color === 'violet' ? 'var(--color-brand-primary, #7c3aed)' : 'var(--color-brand-accent, #2563eb)';
-  const gradientId = `chart-grad-${color}`;
-  const labelInterval = data.length > 10 ? Math.ceil(data.length / 5) : 1;
+  return { icon: icons[type] || icons.default };
+}
+
+function KpiCard({ label, value, icon: Icon, onClick, theme }) {
+  const Tag = onClick ? 'button' : 'div';
 
   return (
-    <div className="bg-white border border-[var(--color-border-default)] rounded-xl p-5 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)]">{title}</h4>
+    <Tag
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`${PANEL} rounded-xl p-3.5 flex items-center justify-between shadow-sm w-full text-left transition-colors ${
+        onClick ? `cursor-pointer group ${theme.kpiCardHover}` : ''
+      }`}
+    >
+      <div>
+        <h3 className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">{label}</h3>
+        <p className={`text-xl font-bold text-[var(--color-text-primary)] mt-0.5 tabular-nums ${
+          onClick ? `${theme.kpiValueHover} transition-colors` : ''
+        }`}>
+          {value}
+        </p>
       </div>
-      
-      <div className="relative">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible select-none">
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={strokeColor} stopOpacity="0.15" />
-              <stop offset="100%" stopColor={strokeColor} stopOpacity="0.0" />
-            </linearGradient>
-          </defs>
-          
-          {/* Horizontal Grid Lines */}
-          {[0, 0.5, 1].map((ratio, idx) => {
-            const y = paddingTop + ratio * chartHeight;
-            const gridVal = ratio === 0 ? maxVal : ratio === 0.5 ? Math.round(maxVal / 2) : 0;
-            return (
-              <g key={idx}>
-                <line 
-                  x1={paddingLeft} 
-                  y1={y} 
-                  x2={width - paddingRight} 
-                  y2={y} 
-                  stroke="var(--color-border-default)" 
-                  strokeWidth="1" 
-                  strokeDasharray="4 4" 
-                />
-                <text 
-                  x={paddingLeft - 8} 
-                  y={y + 4} 
-                  textAnchor="end" 
-                  className="text-[10px] font-semibold fill-[var(--color-text-muted)] font-sans"
-                >
-                  {gridVal}
-                </text>
-              </g>
-            );
-          })}
-          
-          {/* Chart Line & Fill */}
-          {points.length > 0 && (
-            <>
-              <path d={areaPath} fill={`url(#${gradientId})`} />
-              <path d={linePath} fill="none" stroke={strokeColor} strokeWidth="2" />
-            </>
-          )}
-          
-          {/* Points */}
-          {points.map((p, idx) => (
-            <circle 
-              key={idx} 
-              cx={p.x} 
-              cy={p.y} 
-              r={data.length > 15 ? "2" : "3.5"} 
-              className="fill-white cursor-pointer hover:r-5 transition-all"
-              stroke={strokeColor}
-              strokeWidth="2"
-            >
-              <title>{`${labels[idx]}: ${data[idx]}`}</title>
-            </circle>
-          ))}
-          
-          {/* X Axis Labels */}
-          {labels.map((lbl, idx) => {
-            if (idx % labelInterval !== 0 && idx !== labels.length - 1) return null;
-            const p = points[idx];
-            if (!p) return null;
-            return (
-              <text 
-                key={idx} 
-                x={p.x} 
-                y={height - 8} 
-                textAnchor="middle" 
-                className="text-[9px] font-semibold fill-[var(--color-text-muted)] font-sans"
-              >
-                {lbl}
-              </text>
-            );
-          })}
-        </svg>
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${theme.kpiIconWell || theme.iconWell}`}>
+        <Icon className={`w-5 h-5 ${theme.kpiIconColor || theme.iconColor}`} />
+      </div>
+    </Tag>
+  );
+}
+
+function ServiceColumn({
+  title,
+  description,
+  kpis,
+  alertsTitle,
+  alertsSubtitle,
+  alerts,
+  alertEmptyText,
+  onAlertClick,
+  activities,
+  activityEmptyText,
+  formatActivityDate,
+  onActivityClick,
+  themeKey
+}) {
+  const theme = COLUMN_THEMES[themeKey];
+
+  return (
+    <div className={`flex flex-col gap-3 h-full min-h-0 overflow-hidden rounded-2xl p-4 xl:p-5 border ${theme.shell}`}>
+      <div className="shrink-0">
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${theme.dot}`} />
+          <h2 className="text-base font-bold text-[var(--color-text-primary)]">{title}</h2>
+        </div>
+        <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 ml-4">{description}</p>
+      </div>
+
+      <div className={`grid gap-2.5 shrink-0 ${kpis.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        {kpis.map((kpi) => (
+          <KpiCard key={kpi.label} {...kpi} theme={theme} />
+        ))}
+      </div>
+
+      <div className="flex-1 flex flex-col gap-3 min-h-0">
+        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col flex-1 min-h-0`}>
+          <div className={`px-3.5 py-2.5 border-b flex items-center justify-between gap-3 shrink-0 ${theme.panelHeader}`}>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.panelIconWell}`}>
+                <AlertTriangle className={`w-4 h-4 ${theme.panelIconColor}`} />
+              </div>
+              <div className="min-w-0">
+                <h3 className={`text-sm font-bold ${theme.panelTitle}`}>{alertsTitle}</h3>
+                <p className={`text-xs truncate ${theme.panelSubtitle}`}>{alertsSubtitle}</p>
+              </div>
+            </div>
+            {alerts.length > 0 && (
+              <span className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full text-white ${theme.badge}`}>
+                {alerts.length}
+              </span>
+            )}
+          </div>
+
+          <div className="p-2.5 flex-1 min-h-0 overflow-y-auto">
+            {alerts.length === 0 ? (
+              <div className="h-full min-h-[72px] flex flex-col items-center justify-center text-center px-3 py-4">
+                <CheckCircle className="w-7 h-7 text-[var(--color-signal-green)] mb-1.5" />
+                <p className="text-sm font-medium text-[var(--color-text-secondary)]">{alertEmptyText}</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {alerts.map((alert) => {
+                  const isClickable = Boolean(onAlertClick);
+                  const alertBorder = theme.alertBorder[alert.type] || theme.alertBorder.warning;
+                  const AlertIcon = alert.type === 'critical' ? Flag : Users;
+
+                  return (
+                    <button
+                      key={alert.id}
+                      type="button"
+                      onClick={isClickable ? () => onAlertClick(alert) : undefined}
+                      className={`w-full text-left rounded-lg border border-[var(--color-border-default)] bg-white p-2.5 transition-all border-l-[3px] ${alertBorder} ${
+                        isClickable
+                          ? `cursor-pointer group ${theme.alertCardHover}`
+                          : 'cursor-default'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell}`}>
+                          <AlertIcon className={`w-4 h-4 ${theme.iconColor}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-[var(--color-text-primary)]">{alert.title}</p>
+                          <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 leading-relaxed">{alert.subtitle}</p>
+                          <p className="text-[10px] font-semibold text-[var(--color-text-muted)] mt-1.5">{alert.time}</p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col flex-1 min-h-0`}>
+          <div className={`px-3.5 py-2.5 border-b flex items-center gap-2.5 shrink-0 ${theme.panelHeader}`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.panelIconWell}`}>
+              <Clock className={`w-4 h-4 ${theme.panelIconColor}`} />
+            </div>
+            <div>
+              <h3 className={`text-sm font-bold ${theme.panelTitle}`}>Recent activity</h3>
+              <p className={`text-xs ${theme.panelSubtitle}`}>Latest events</p>
+            </div>
+          </div>
+
+          <div className="p-3 flex-1 min-h-0 overflow-y-auto">
+            {activities.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)] text-center py-4">{activityEmptyText}</p>
+            ) : (
+              <div className="space-y-0">
+                {activities.map((activity, index) => {
+                  const isClickable = Boolean(activity.link) || activity.type === 'template_updated';
+                  const meta = getActivityMeta(activity.type);
+                  const Icon = meta.icon;
+                  const isLast = index === activities.length - 1;
+
+                  return (
+                    <div
+                      key={activity.id}
+                      onClick={() => isClickable && onActivityClick(activity)}
+                      className={`relative flex gap-2.5 ${isLast ? '' : 'pb-3'} ${
+                        isClickable ? 'cursor-pointer group' : ''
+                      }`}
+                    >
+                      {!isLast && (
+                        <div className="absolute left-[15px] top-8 bottom-0 w-px bg-[var(--color-border-default)]" />
+                      )}
+                      <div className={`relative z-10 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell} ${
+                        isClickable ? 'group-hover:ring-2 group-hover:ring-[rgba(26,26,46,0.06)] transition-shadow' : ''
+                      }`}>
+                        <Icon className={`w-4 h-4 ${theme.iconColor}`} />
+                      </div>
+                      <div className={`flex-1 min-w-0 rounded-lg px-2 py-1 -mx-1 transition-colors ${
+                        isClickable ? theme.activityHover : ''
+                      }`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-semibold text-[var(--color-text-primary)] leading-snug">
+                            {activity.description}
+                          </p>
+                          {isClickable && (
+                            <ArrowRight className={`w-3.5 h-3.5 shrink-0 opacity-0 group-hover:opacity-100 transition-all ${theme.iconColor}`} />
+                          )}
+                        </div>
+                        <p className="text-xs font-medium text-[var(--color-text-muted)] mt-0.5">
+                          {formatActivityDate(activity.timestamp)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -203,295 +273,104 @@ function TrendChart({ title, data, labels, color = 'violet' }) {
 
 export default function Home() {
   const navigate = useNavigate();
-  const [dateRange, setDateRange] = useState('7d');
-  
-  // Custom Date Range Pickers (default to last 7 days)
-  const [customStartDate, setCustomStartDate] = useState(() => 
-    format(subDays(new Date(), 6), 'yyyy-MM-dd')
-  );
-  const [customEndDate, setCustomEndDate] = useState(() => 
-    format(new Date(), 'yyyy-MM-dd')
-  );
 
-  // Combine and format requests
-  const mockRequests = useMemo(() => [
-    // Today (2026-06-24)
-    { id: 'req-today-1', receivedAt: '2026-06-24T08:30:00', status: 'Pending' },
-    { id: 'req-today-2', receivedAt: '2026-06-24T10:15:00', status: 'Handled' },
-    { id: 'req-today-3', receivedAt: '2026-06-24T14:20:00', status: 'Pending' },
-    
-    // From mockData
-    ...pendingRequests.map(r => ({ ...r, status: 'Pending' })),
-    ...handledRequests.map(r => ({ ...r, status: 'Handled' })),
-    
-    // Extra older requests for 30d trend
-    { id: 'req-old-1', receivedAt: '2026-06-15T09:00:00', status: 'Handled' },
-    { id: 'req-old-2', receivedAt: '2026-06-12T14:30:00', status: 'Handled' },
-    { id: 'req-old-3', receivedAt: '2026-06-08T11:00:00', status: 'Handled' },
-    { id: 'req-old-4', receivedAt: '2026-06-05T16:00:00', status: 'Handled' },
-    { id: 'req-old-5', receivedAt: '2026-06-01T10:00:00', status: 'Handled' },
-    { id: 'req-old-6', receivedAt: '2026-05-28T09:00:00', status: 'Handled' }
-  ], [pendingRequests, handledRequests]);
-
-  // Compute metrics based on selected range
-  const filteredEmails = useMemo(() => {
-    const { start, end } = getRangeInterval(dateRange, customStartDate, customEndDate);
-    return mockEmails.filter(e => {
-      const d = new Date(e.receivedAt);
-      return d >= start && d <= end;
-    });
-  }, [dateRange, customStartDate, customEndDate]);
-
-  const filteredRequests = useMemo(() => {
-    const { start, end } = getRangeInterval(dateRange, customStartDate, customEndDate);
-    return mockRequests.filter(r => {
-      const d = new Date(r.receivedAt);
-      return d >= start && d <= end;
-    });
-  }, [dateRange, customStartDate, customEndDate]);
-
-  // Metric calculation values
-  const emailsReceivedCount = filteredEmails.length;
-  const flaggedEmailsCount = filteredEmails.filter(e => e.flagged).length;
-  
-  const newRequestsCount = filteredRequests.length;
-  const pendingRequestsCount = filteredRequests.filter(r => r.status === 'Pending').length;
-
-  // Trend chart groupings
-  const chartData = useMemo(() => {
-    const { start, end } = getRangeInterval(dateRange, customStartDate, customEndDate);
-    const diffTime = Math.abs(end - start);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    if (dateRange === 'today') {
-      const hours = [8, 10, 12, 14, 16, 18, 20];
-      const labels = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00'];
-      
-      const emailData = hours.map(hour => {
-        return mockEmails.filter(e => {
-          const d = new Date(e.receivedAt);
-          if (!isToday(d)) return false;
-          const h = d.getHours();
-          return h >= hour && h < hour + 2;
-        }).length;
-      });
-      
-      const requestData = hours.map(hour => {
-        return mockRequests.filter(r => {
-          const d = new Date(r.receivedAt);
-          if (!isToday(d)) return false;
-          const h = d.getHours();
-          return h >= hour && h < hour + 2;
-        }).length;
-      });
-      
-      return { labels, emailData, requestData };
-    } else {
-      const numDays = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : Math.max(1, diffDays);
-      const labels = [];
-      const emailData = [];
-      const requestData = [];
-      
-      for (let i = numDays - 1; i >= 0; i--) {
-        const dayDate = subDays(end, i);
-        const dayStr = format(dayDate, 'yyyy-MM-dd');
-        
-        labels.push(format(dayDate, 'dd MMM'));
-        
-        const dayEmailsCount = mockEmails.filter(e => {
-          const d = new Date(e.receivedAt);
-          return format(d, 'yyyy-MM-dd') === dayStr;
-        }).length;
-        emailData.push(dayEmailsCount);
-        
-        const dayRequestsCount = mockRequests.filter(r => {
-          const d = new Date(r.receivedAt);
-          return format(d, 'yyyy-MM-dd') === dayStr;
-        }).length;
-        requestData.push(dayRequestsCount);
-      }
-      
-      return { labels, emailData, requestData };
+  const formatActivityDate = (isoString) => {
+    try {
+      const date = parseISO(isoString);
+      if (isToday(date)) return `Today, ${format(date, 'HH:mm')}`;
+      if (isYesterday(date)) return `Yesterday, ${format(date, 'HH:mm')}`;
+      return format(date, 'dd MMM yyyy, HH:mm');
+    } catch {
+      return isoString;
     }
-  }, [dateRange, customStartDate, customEndDate, mockRequests]);
+  };
 
-  const now = new Date();
+  const goToFlaggedEmails = () => navigate('/email-responses?mailbox=flagged');
+
+  const handleActivityClick = (activity) => {
+    if (activity.type === 'template_updated') {
+      navigate('/templates');
+      return;
+    }
+    if (activity.link) navigate('/new-requests');
+  };
+
+  const duplicateAlerts = pendingRequests
+    .filter((req) => req.tags?.includes('Already Exists'))
+    .map((req) => ({
+      id: req.id,
+      title: 'Potential duplicate entry',
+      subtitle: `${req.person.firstName} ${req.person.lastName} (${req.person.email})`,
+      time: formatActivityDate(req.receivedAt),
+      type: 'warning',
+      isNew: true
+    }));
+
+  const flaggedEmailAlerts = kpiData.flaggedEmails > 0 ? [{
+    id: 'flag-001',
+    title: 'Flagged email requires review',
+    subtitle: 'System detected aggressive or unhandled intent',
+    time: 'Today, 08:30',
+    type: 'critical',
+    isNew: true
+  }] : [];
+
+  const customerActivity = recentActivity
+    .filter((a) => CUSTOMER_ACTIVITY_TYPES.has(a.type))
+    .slice(0, 4);
+
+  const partnerActivity = recentActivity
+    .filter((a) => PARTNER_ACTIVITY_TYPES.has(a.type))
+    .slice(0, 4);
 
   return (
-    <div className="max-w-[1200px] mx-auto select-none pb-12 space-y-8">
-      {/* Welcome Header */}
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Good morning, Andrea.</h1>
-          <p className="text-sm text-[var(--color-text-secondary)] mt-1">Here is your operational overview for today.</p>
-        </div>
-        <p className="text-xs font-medium text-[var(--color-text-muted)]">{format(now, 'EEEE, d MMMM yyyy')}</p>
-      </div>
+    <div className="max-w-7xl mx-auto select-none flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden">
+      <PageHeader
+        section="Overview"
+        title="Good morning, Andrea."
+        description="Here's your operational overview for today."
+        className="mb-4 shrink-0"
+      />
 
-      {/* Global Filter Bar */}
-      <div className="bg-white border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 shrink-0">
-            <CalendarDays className="w-4 h-4 text-[var(--color-text-muted)]" />
-            <span className="text-sm font-bold text-[var(--color-text-primary)]">Viewing period:</span>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {[
-              { key: 'today', label: 'Today' },
-              { key: '7d', label: 'Last 7 Days' },
-              { key: '30d', label: 'Last 30 Days' },
-              { key: 'custom', label: 'Custom Range' },
-            ].map(opt => (
-              <button
-                key={opt.key}
-                onClick={() => setDateRange(opt.key)}
-                className={`px-4 py-1.5 text-sm font-semibold rounded-lg border transition-all cursor-pointer ${
-                  dateRange === opt.key
-                    ? 'bg-[var(--color-text-primary)] text-white border-[var(--color-text-primary)] shadow-sm'
-                    : 'bg-white border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-secondary)]'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 grid-rows-2 xl:grid-rows-1 gap-4 flex-1 min-h-0 items-stretch">
+        <ServiceColumn
+          themeKey="customer"
+          title="Customer service"
+          description="Gmail templates, connected inboxes, and flagged emails."
+          kpis={[
+            { label: 'New Emails', value: kpiData.newEmails, icon: Mail, onClick: () => navigate('/email-responses') },
+            { label: 'Flagged', value: kpiData.flaggedEmails, icon: Flag, onClick: goToFlaggedEmails },
+            { label: 'Active Templates', value: kpiData.templatesActive, icon: FileText, onClick: () => navigate('/templates') }
+          ]}
+          alertsTitle="Flagged emails"
+          alertsSubtitle={flaggedEmailAlerts.length ? 'Requires review' : 'All clear'}
+          alerts={flaggedEmailAlerts}
+          alertEmptyText="No flagged emails to review."
+          onAlertClick={goToFlaggedEmails}
+          activities={customerActivity}
+          activityEmptyText="No recent template activity."
+          formatActivityDate={formatActivityDate}
+          onActivityClick={handleActivityClick}
+        />
 
-        {/* Custom Range Date Pickers */}
-        {dateRange === 'custom' && (
-          <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-lg border border-[var(--color-border-default)] shrink-0 self-start md:self-auto">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase">Start:</span>
-              <input 
-                type="date" 
-                value={customStartDate} 
-                onChange={(e) => setCustomStartDate(e.target.value)} 
-                className="bg-white border border-[var(--color-border-default)] rounded px-2.5 py-1 text-xs font-semibold text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-text-secondary)]"
-              />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase">End:</span>
-              <input 
-                type="date" 
-                value={customEndDate} 
-                onChange={(e) => setCustomEndDate(e.target.value)} 
-                className="bg-white border border-[var(--color-border-default)] rounded px-2.5 py-1 text-xs font-semibold text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-text-secondary)]"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
-        
-        {/* Customer Service Card Container */}
-        <div className="bg-white border border-[var(--color-border-default)] rounded-xl p-6 shadow-sm flex flex-col justify-between space-y-6">
-          <div className="space-y-6">
-            {/* Typography Header */}
-            <div className="border-b border-[var(--color-border-default)] pb-4 flex items-start justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-[var(--color-text-primary)] flex items-center gap-2">
-                  <Headphones className="w-5 h-5 text-[var(--color-brand-primary)]" />
-                  Customer Service
-                </h2>
-                <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-1 uppercase tracking-wider">
-                  Email Operations
-                </p>
-              </div>
-              <button
-                onClick={() => navigate('/templates')}
-                className="text-xs font-semibold text-[var(--color-brand-primary)] hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                Manage Templates <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Metric Cards Grid */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col shadow-sm">
-                <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Emails Received</span>
-                <span className="text-3xl font-extrabold text-[var(--color-text-primary)] mt-1">{emailsReceivedCount}</span>
-                <span className="text-[10px] font-medium text-[var(--color-text-muted)] mt-1.5">AI processed this period</span>
-              </div>
-              
-              <div 
-                onClick={() => navigate('/gmail-accounts')}
-                className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col shadow-sm cursor-pointer hover:border-[var(--color-brand-primary)] transition-all group"
-              >
-                <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Flagged Emails</span>
-                <span className="text-3xl font-extrabold text-[var(--color-text-primary)] mt-1 group-hover:text-[var(--color-brand-primary)] transition-colors">{flaggedEmailsCount}</span>
-                <span className="text-[10px] font-medium text-[var(--color-text-muted)] mt-1.5">Require review</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Email Volume Trend Chart */}
-          <div className="pt-2">
-            <TrendChart 
-              title="Email Volume Trend" 
-              data={chartData.emailData} 
-              labels={chartData.labels}
-              color="violet"
-            />
-          </div>
-        </div>
-
-        {/* Partner Management Card Container */}
-        <div className="bg-white border border-[var(--color-border-default)] rounded-xl p-6 shadow-sm flex flex-col justify-between space-y-6">
-          <div className="space-y-6">
-            {/* Typography Header */}
-            <div className="border-b border-[var(--color-border-default)] pb-4 flex items-start justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-[var(--color-text-primary)] flex items-center gap-2">
-                  <Handshake className="w-5 h-5 text-blue-600" />
-                  Partner Management
-                </h2>
-                <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-1 uppercase tracking-wider">
-                  Member Access Requests
-                </p>
-              </div>
-              <button
-                onClick={() => navigate('/new-requests')}
-                className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                View Requests <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Metric Cards Grid */}
-            <div className="grid grid-cols-2 gap-4">
-              <div 
-                onClick={() => navigate('/new-requests')}
-                className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col shadow-sm cursor-pointer hover:border-blue-600 transition-all group"
-              >
-                <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">New Requests</span>
-                <span className="text-3xl font-extrabold text-[var(--color-text-primary)] mt-1 group-hover:text-blue-600 transition-colors">{newRequestsCount}</span>
-                <span className="text-[10px] font-medium text-[var(--color-text-muted)] mt-1.5">Submitted in period</span>
-              </div>
-              
-              <div 
-                onClick={() => navigate('/user-ledger')}
-                className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-xl p-4 flex flex-col shadow-sm cursor-pointer hover:border-blue-600 transition-all group"
-              >
-                <span className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Pending Requests</span>
-                <span className="text-3xl font-extrabold text-[var(--color-text-primary)] mt-1 group-hover:text-blue-600 transition-colors">{pendingRequestsCount}</span>
-                <span className="text-[10px] font-medium text-[var(--color-text-muted)] mt-1.5">Awaiting ledger entry</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Request Volume Trend Chart */}
-          <div className="pt-2">
-            <TrendChart 
-              title="Request Volume Trend" 
-              data={chartData.requestData} 
-              labels={chartData.labels}
-              color="blue"
-            />
-          </div>
-        </div>
-
+        <ServiceColumn
+          themeKey="partner"
+          title="Partner service"
+          description="New user requests and the partner user ledger."
+          kpis={[
+            { label: 'Pending requests', value: kpiData.pendingRequests, icon: Inbox, onClick: () => navigate('/new-requests') },
+            { label: 'Users in ledger', value: kpiData.usersInLedger, icon: Users, onClick: () => navigate('/user-ledger') }
+          ]}
+          alertsTitle="Priority alerts"
+          alertsSubtitle={duplicateAlerts.length ? 'Items need attention' : 'Nothing urgent'}
+          alerts={duplicateAlerts}
+          alertEmptyText="No duplicate warnings right now."
+          onAlertClick={() => navigate('/new-requests')}
+          activities={partnerActivity}
+          activityEmptyText="No recent partner activity."
+          formatActivityDate={formatActivityDate}
+          onActivityClick={handleActivityClick}
+        />
       </div>
     </div>
   );

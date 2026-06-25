@@ -2,7 +2,27 @@ import { useState, useMemo, useEffect } from 'react';
 import { Search, FileText, Trash2, Save, X, ChevronDown, Plus, Pencil } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { templates as mockTemplates } from '../data/mockData';
-import { Toast, useToast, Modal } from '../components/ui';
+import { Toast, useToast, Modal, SelectDropdown } from '../components/ui';
+import PageHeader from '../components/layout/PageHeader';
+
+const INBOXES = [
+  { email: 'cc@powermusic.com', title: 'Customer Care' },
+  { email: 'cc@powermusicapp.com', title: 'Music Apps' },
+  { email: 'info@powermusic.com', title: 'General Info' },
+  { email: 'tracks@powermusic.com', title: 'Tracks' },
+  { email: 'royaltyfree@powermusic.com', title: 'Royalty Free Music' }
+];
+
+function inboxLabel({ title, email }) {
+  return `${title} ${email}`;
+}
+
+function ensureTemplateInboxes(list) {
+  return list.map((template, index) => ({
+    ...template,
+    inbox: template.inbox || INBOXES[index % INBOXES.length].email
+  }));
+}
 
 // ─── Language content swapper ──────────────────────────────────────────────────
 const LANG_VARIANTS = {
@@ -87,8 +107,8 @@ export default function TemplateManagement() {
   // Template state (persisted in localStorage)
   const [templates, setTemplates] = useState(() => {
     const stored = localStorage.getItem('power_music_templates_v2');
-    if (stored) { try { return JSON.parse(stored); } catch { /* fallthrough */ } }
-    return mockTemplates;
+    if (stored) { try { return ensureTemplateInboxes(JSON.parse(stored)); } catch { /* fallthrough */ } }
+    return ensureTemplateInboxes(mockTemplates);
   });
   useEffect(() => {
     localStorage.setItem('power_music_templates_v2', JSON.stringify(templates));
@@ -96,6 +116,7 @@ export default function TemplateManagement() {
 
   // Left pane controls
   const [search, setSearch] = useState('');
+  const [inboxFilter, setInboxFilter] = useState('all');
   const [sortMode, setSortMode] = useState('alpha-asc'); // 'alpha-asc' | 'alpha-desc' | 'recent'
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
 
@@ -113,10 +134,31 @@ export default function TemplateManagement() {
 
   const categories = ['All Categories', 'Membership', 'Payments', 'Events', 'General Enquiries', 'Other'];
 
+  const inboxOptions = useMemo(() => [
+    { value: 'all', label: 'All inboxes' },
+    ...INBOXES.map((inbox) => ({ value: inbox.email, label: inboxLabel(inbox) }))
+  ], []);
+
+  const sortOptions = useMemo(() => [
+    { value: 'alpha-asc', label: 'A → Z' },
+    { value: 'alpha-desc', label: 'Z → A' },
+    { value: 'recent', label: 'Recently Updated' }
+  ], []);
+
+  const categoryOptions = useMemo(
+    () => categories.map((category) => ({ value: category, label: category })),
+    [categories]
+  );
+
+  const inboxTemplates = useMemo(() => {
+    if (inboxFilter === 'all') return templates;
+    return templates.filter((t) => t.inbox === inboxFilter);
+  }, [templates, inboxFilter]);
+
   // ── Filtered + sorted list ──
   const displayedTemplates = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const filtered = templates.filter((t) => {
+    const filtered = inboxTemplates.filter((t) => {
       const matchSearch = q === '' || t.name.toLowerCase().includes(q) || t.subject.toLowerCase().includes(q);
       const matchCat = categoryFilter === 'All Categories' || t.category === categoryFilter;
       return matchSearch && matchCat;
@@ -127,7 +169,7 @@ export default function TemplateManagement() {
       // recent
       return new Date(b.lastUpdated) - new Date(a.lastUpdated);
     });
-  }, [templates, search, sortMode, categoryFilter]);
+  }, [inboxTemplates, search, sortMode, categoryFilter]);
 
   // ── Select a template ──
   const selectedTemplate = templates.find(t => t.id === selectedId) || null;
@@ -204,7 +246,8 @@ export default function TemplateManagement() {
         category: editForm.category || 'Membership',
         status: editForm.status || 'Draft',
         timesUsed: 0,
-        lastUpdated: new Date().toISOString()
+        lastUpdated: new Date().toISOString(),
+        inbox: inboxFilter !== 'all' ? inboxFilter : INBOXES[0].email
       };
       setTemplates(prev => [...prev, newTemplate]);
       setSelectedId(newTemplate.id);
@@ -259,34 +302,47 @@ export default function TemplateManagement() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto select-none">
+    <div className="max-w-7xl mx-auto select-none flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden">
       <Toast />
 
-      {/* Page header */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border-default)] pb-4 mb-6">
-        <div className="flex items-center gap-3">
-          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Template Management</h2>
-          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
-            {templates.length} templates
+      <PageHeader
+        section="Customer service"
+        title="Manage Templates"
+        description="Create, edit, and preview AI templates."
+        className="mb-4 shrink-0"
+        meta={
+          <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--color-surface-highlight)] text-[var(--color-text-secondary)]">
+            {inboxTemplates.length} templates
           </span>
-        </div>
-        <button
-          onClick={handleNewTemplate}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          New Template
-        </button>
-      </div>
+        }
+        actions={
+          <button
+            onClick={handleNewTemplate}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            New Template
+          </button>
+        }
+      />
 
       {/* Master-Detail container */}
-      <div className="flex rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white" style={{ minHeight: '72vh' }}>
+      <div className="flex flex-1 min-h-0 rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white">
 
         {/* ── LEFT PANE ─────────────────────────────────────────── */}
-        <div className="w-[37%] flex flex-col border-r border-[var(--color-border-default)] shrink-0">
+        <div className="w-[37%] flex flex-col border-r border-[var(--color-border-default)] shrink-0 min-h-0">
 
           {/* Left pane controls */}
           <div className="p-4 border-b border-[var(--color-border-default)] space-y-3 bg-gray-50">
+            {/* Inbox filter */}
+            <SelectDropdown
+              value={inboxFilter}
+              onChange={setInboxFilter}
+              options={inboxOptions}
+              size="xs"
+              className="w-full"
+            />
+
             {/* Search */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-text-muted)]" />
@@ -301,33 +357,25 @@ export default function TemplateManagement() {
 
             {/* Sort + Category row */}
             <div className="flex gap-2">
-              <div className="relative flex-1">
-                <select
-                  value={sortMode}
-                  onChange={(e) => setSortMode(e.target.value)}
-                  className="w-full appearance-none px-3 py-2 pr-7 bg-white border border-[var(--color-border-default)] rounded-lg text-xs font-semibold text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer"
-                >
-                  <option value="alpha-asc">A → Z</option>
-                  <option value="alpha-desc">Z → A</option>
-                  <option value="recent">Recently Updated</option>
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" />
-              </div>
-              <div className="relative flex-1">
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="w-full appearance-none px-3 py-2 pr-7 bg-white border border-[var(--color-border-default)] rounded-lg text-xs font-semibold text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer"
-                >
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" />
-              </div>
+              <SelectDropdown
+                value={sortMode}
+                onChange={setSortMode}
+                options={sortOptions}
+                size="xs"
+                className="flex-1 min-w-0"
+              />
+              <SelectDropdown
+                value={categoryFilter}
+                onChange={setCategoryFilter}
+                options={categoryOptions}
+                size="xs"
+                className="flex-1 min-w-0"
+              />
             </div>
 
             {/* Meta */}
             <p className="text-[11px] text-[var(--color-text-muted)] font-medium">
-              {displayedTemplates.length} of {templates.length} templates
+              {displayedTemplates.length} of {inboxTemplates.length} templates
             </p>
           </div>
 
@@ -351,10 +399,9 @@ export default function TemplateManagement() {
         </div>
 
         {/* ── RIGHT PANE ────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
           {!selectedTemplate && !isCreatingNew ? (
-            /* Empty state */
-            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--color-text-muted)] p-10 text-center">
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--color-text-muted)] p-8 text-center min-h-0">
               <div className="w-14 h-14 rounded-2xl bg-[var(--color-surface-highlight)] flex items-center justify-center">
                 <FileText className="w-7 h-7 text-[var(--color-brand-primary)]/40" />
               </div>
@@ -369,7 +416,7 @@ export default function TemplateManagement() {
           ) : (
             <>
               {/* Editor header */}
-              <div className="flex items-start justify-between px-6 py-4 border-b border-[var(--color-border-default)]">
+              <div className="flex items-start justify-between px-6 py-4 border-b border-[var(--color-border-default)] shrink-0">
                 <div>
                   <h3 className="text-base font-bold text-[var(--color-text-primary)] leading-snug">
                     {isCreatingNew
@@ -440,7 +487,7 @@ export default function TemplateManagement() {
               </div>
 
               {/* Editor form */}
-              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-5">
                 {!(isEditing || isCreatingNew) && (
                   <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-3 text-xs text-[var(--color-text-secondary)]">
                     Preview mode. Click the pencil icon above to edit this template.

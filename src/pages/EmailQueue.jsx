@@ -1,482 +1,1029 @@
-import { useState, useMemo } from 'react';
-import { Flag, Search, Info } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
-import { emailQueue, templates } from '../data/mockData';
-import { DataTable, Tag, Drawer, Toast, useToast } from '../components/ui';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Search, Flag, Send, AlertTriangle, Inbox,
+  ChevronLeft, ChevronRight, Mail, Sparkles, SlidersHorizontal,
+  SortAsc, Archive, X, Pencil
+} from 'lucide-react';
+import { format, parseISO, isToday, isYesterday } from 'date-fns';
+import { emailQueue, templates, connectedInboxes, initialArchivedEmailIds } from '../data/mockData';
+import { Toast, useToast, SelectDropdown } from '../components/ui';
+import PageHeader from '../components/layout/PageHeader';
 
-export default function EmailQueue() {
-  const [emails, setEmails] = useState(emailQueue);
-  const [search, setSearch] = useState('');
-  const [filterInbox, setFilterInbox] = useState('All');
-  const [filterStatus, setFilterStatus] = useState('All');
-  const [selectedEmail, setSelectedEmail] = useState(null);
-  
-  const { showToast } = useToast();
+const PAGE_SIZE = 10;
+const SIGNATURE = 'Kind regards,\nPower Music Team';
 
-  // Helper: truncate string
-  const truncate = (str, len) => {
-    if (!str) return '';
-    return str.length > len ? str.substring(0, len) + '...' : str;
-  };
+const MAILBOXES = [
+  { id: 'inbox', label: 'Inbox', shortLabel: 'Inbox', icon: Inbox },
+  { id: 'urgent', label: 'Urgent', shortLabel: 'Urgent', icon: AlertTriangle },
+  { id: 'flagged', label: 'Flagged', shortLabel: 'Flagged', icon: Flag },
+  { id: 'archive', label: 'Archive', shortLabel: 'Archive', icon: Archive },
+  { id: 'sent', label: 'Sent', shortLabel: 'Sent', icon: Send },
+];
+const MAILBOX_IDS = new Set(MAILBOXES.map((m) => m.id));
 
-  // Helper: format received time for table
-  const formatReceivedTime = (receivedStr) => {
-    if (!receivedStr) return '';
-    try {
-      // If it is from the latest date context (2025-06-24), show only time
-      if (receivedStr.startsWith('2025-06-24')) {
-        return format(parseISO(receivedStr), 'HH:mm');
-      }
-      return 'Yesterday';
-    } catch {
-      return receivedStr;
+const INTENTS = ['All', 'Enquiry', 'Cancellation', 'Renewal', 'Partnership', 'Finance', 'Events'];
+
+function getFirstName(from) {
+  if (!from) return 'there';
+  return from.split(' ')[0];
+}
+
+function buildDraft(email) {
+  if (!email.templateUsed) {
+    return `Hi ${getFirstName(email.from)},\n\nThank you for your message. A member of our team will review your enquiry and respond shortly.\n\n${SIGNATURE}`;
+  }
+  const tmpl = templates.find((t) => t.name === email.templateUsed);
+  if (!tmpl) {
+    return `Hi ${getFirstName(email.from)},\n\nThank you for getting in touch.\n\n${SIGNATURE}`;
+  }
+  return tmpl.body
+    .replace(/\{\{first_name\}\}/g, getFirstName(email.from))
+    .replace(/\{\{club_name\}\}/g, 'your club')
+    .replace(/\{\{membership_type\}\}/g, 'membership')
+    .replace(/\{\{inbox_name\}\}/g, email.inbox?.split('@')[0] ?? 'support');
+}
+
+function formatListTime(iso) {
+  try {
+    const d = parseISO(iso);
+    if (isToday(d)) return format(d, 'h:mm a');
+    if (isYesterday(d)) return 'Yesterday';
+    return format(d, 'd MMM');
+  } catch {
+    return iso;
+  }
+}
+
+function getDateGroupLabel(iso) {
+  try {
+    const d = parseISO(iso);
+    if (isToday(d)) return 'Today';
+    if (isYesterday(d)) return 'Yesterday';
+    return format(d, 'EEEE, d MMMM');
+  } catch {
+    return 'Earlier';
+  }
+}
+
+function groupEmailsByDateAndIntent(emails) {
+  const dateMap = new Map();
+  emails.forEach((email) => {
+    const dateLabel = getDateGroupLabel(email.receivedAt);
+    if (!dateMap.has(dateLabel)) dateMap.set(dateLabel, new Map());
+    const intentMap = dateMap.get(dateLabel);
+    if (!intentMap.has(email.intent)) intentMap.set(email.intent, []);
+    intentMap.get(email.intent).push(email);
+  });
+
+  return Array.from(dateMap.entries()).map(([dateLabel, intentMap]) => ({
+    dateLabel,
+    intentGroups: Array.from(intentMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([intent, items]) => ({ intent, items })),
+  }));
+}
+
+function formatDetailTime(iso) {
+  try {
+    return format(parseISO(iso), 'EEE, d MMM yyyy · HH:mm');
+  } catch {
+    return iso;
+  }
+}
+
+function matchesMailbox(email, mailbox) {
+  switch (mailbox) {
+    case 'inbox': return email.draftStatus !== 'Sent';
+    case 'urgent': return email.urgent;
+    case 'flagged': return email.flagged;
+    case 'sent': return email.draftStatus === 'Sent';
+    default: return true;
+  }
+}
+
+function getPreviewLine(body) {
+  if (!body) return '';
+  const lines = body.split('\n').map((line) => line.trim()).filter(Boolean);
+  const meaningful = lines.find((line) => line.length > 8 && !/^hi,?$/i.test(line)) || lines.join(' ');
+  return meaningful.length > 80 ? `${meaningful.slice(0, 80)}...` : meaningful;
+}
+
+function emailMatchesDateRange(iso, dateFrom, dateTo) {
+  if (!dateFrom && !dateTo) return true;
+  try {
+    const d = parseISO(iso);
+    if (dateFrom) {
+      const from = parseISO(dateFrom);
+      from.setHours(0, 0, 0, 0);
+      if (d < from) return false;
     }
-  };
-
-  // Helper: format received datetime for drawer
-  const formatDetailReceived = (dateStr) => {
-    if (!dateStr) return '';
-    try {
-      const parsed = parseISO(dateStr);
-      return format(parsed, 'dd MMM yyyy at HH:mm');
-    } catch {
-      return dateStr;
+    if (dateTo) {
+      const to = parseISO(dateTo);
+      to.setHours(23, 59, 59, 999);
+      if (d > to) return false;
     }
-  };
+    return true;
+  } catch {
+    return true;
+  }
+}
 
-  // Helper: get intent pill CSS styles
-  const getIntentClass = (intent) => {
-    switch (intent) {
-      case 'Enquiry':
-        return 'bg-[#dbeafe] text-[#1e40af]';
-      case 'Renewal':
-        return 'bg-[#dcfce7] text-[#166534]';
-      case 'Cancellation':
-        return 'bg-[#fee2e2] text-[#991b1b]';
-      case 'Partnership':
-        return 'bg-[#f3e8ff] text-[#7c3aed]';
-      case 'Finance':
-        return 'bg-[#fef9c3] text-[#713f12]';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
-  };
+function IntentBadge({ intent, confidence }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]">
+      {intent}
+      {confidence != null && <span className="opacity-70">· {confidence}%</span>}
+    </span>
+  );
+}
 
-  // Helper: resolve template body placeholders
-  const getDraftText = (email) => {
-    if (!email.templateUsed) {
-      return 'No draft available — email has been flagged for manual review.';
-    }
-    const foundTemplate = templates.find((t) => t.name === email.templateUsed);
-    if (foundTemplate) {
-      const firstName = email.from ? email.from.split(' ')[0] : 'there';
-      const inboxShort = email.inbox ? email.inbox.split('@')[0] + '@' : '';
-      return foundTemplate.body
-        .replace(/\{\{first_name\}\}/g, firstName)
-        .replace(/\{\{inbox_name\}\}/g, inboxShort);
-    }
+function EmailListItem({ email, selected, checked, onClick, onCheck }) {
+  const unread = !email.read;
 
-    // Default template text fallback if template is missing from data
-    const firstName = email.from ? email.from.split(' ')[0] : 'there';
-    return `Hi ${firstName},\n\nThank you for your ${email.intent.toLowerCase()} enquiry.\n\nKind regards,\nPower Music Team`;
-  };
-
-  // Filter application
-  const filteredEmails = useMemo(() => {
-    return emails.filter((email) => {
-      // 1. Search sender or subject
-      const query = search.trim().toLowerCase();
-      const matchesSearch =
-        query === '' ||
-        email.from.toLowerCase().includes(query) ||
-        email.subject.toLowerCase().includes(query);
-
-      // 2. Inbox filter
-      const matchesInbox = filterInbox === 'All' || email.inbox === filterInbox;
-
-      // 3. Status filter
-      const matchesStatus = filterStatus === 'All' || email.draftStatus === filterStatus;
-
-      return matchesSearch && matchesInbox && matchesStatus;
-    });
-  }, [emails, search, filterInbox, filterStatus]);
-
-  // Handle workflow action buttons
-  const handleAction = (id, action) => {
-    let toastMsg = '';
-    let toastType = 'success';
-
-    setEmails((prev) =>
-      prev.map((email) => {
-        if (email.id === id) {
-          if (action === 'reviewed') {
-            toastMsg = 'Email marked as reviewed.';
-            return { ...email, draftStatus: 'Reviewed', flagged: false };
-          } else if (action === 'sent') {
-            toastMsg = 'Draft marked as sent.';
-            return { ...email, draftStatus: 'Sent', flagged: false };
-          } else if (action === 'flagged') {
-            toastMsg = 'Email flagged for manual review.';
-            toastType = 'warning';
-            return {
-              ...email,
-              draftStatus: 'Flagged',
-              flagged: true,
-              flagReason: 'Manual override'
-            };
-          }
-        }
-        return email;
-      })
-    );
-
-    // Sync selectedEmail context for immediate UI updates in drawer
-    setSelectedEmail((prev) => {
-      if (!prev) return null;
-      if (action === 'reviewed') return { ...prev, draftStatus: 'Reviewed', flagged: false };
-      if (action === 'sent') return { ...prev, draftStatus: 'Sent', flagged: false };
-      if (action === 'flagged') {
-        return {
-          ...prev,
-          draftStatus: 'Flagged',
-          flagged: true,
-          flagReason: 'Manual override'
-        };
-      }
-      return prev;
-    });
-
-    showToast(toastMsg, toastType);
-  };
-
-  // Table column definition
-  const columns = [
-    {
-      key: 'flagged',
-      label: 'Flag',
-      render: (val) =>
-        val ? (
-          <span className="flagged-row-indicator inline-flex items-center text-[var(--color-signal-red)]">
-            <Flag className="w-4 h-4 fill-[var(--color-signal-red)] text-[var(--color-signal-red)]" />
-          </span>
-        ) : null
-    },
-    {
-      key: 'from',
-      label: 'From',
-      render: (_, row) => (
-        <div className="flex flex-col">
-          <span className="font-semibold text-sm text-[var(--color-text-primary)]">
-            {row.from}
-          </span>
-          <span className="text-xs text-[var(--color-text-secondary)] font-normal text-gray-500 mt-0.5">
-            {row.fromEmail}
-          </span>
-        </div>
-      )
-    },
-    {
-      key: 'subject',
-      label: 'Subject',
-      render: (val) => (
-        <span className="font-semibold text-sm text-[var(--color-text-primary)]">
-          {truncate(val, 60)}
-        </span>
-      )
-    },
-    {
-      key: 'inbox',
-      label: 'Inbox',
-      render: (val) => (
-        <span className="text-sm font-semibold text-[var(--color-text-primary)]">
-          {val ? val.split('@')[0] + '@' : ''}
-        </span>
-      )
-    },
-    {
-      key: 'intent',
-      label: 'AI Intent',
-      render: (val, row) => (
-        <div className="flex items-center gap-2">
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${getIntentClass(
-              val
-            )}`}
-          >
-            {val}
-          </span>
-          <span className="text-xs text-[var(--color-text-secondary)] font-semibold">
-            ({row.intentConfidence}%)
-          </span>
-        </div>
-      )
-    },
-    {
-      key: 'templateUsed',
-      label: 'Template Used',
-      render: (val) => (
-        <span className="text-sm font-medium text-[var(--color-text-primary)]">
-          {val ? truncate(val, 30) : '—'}
-        </span>
-      )
-    },
-    {
-      key: 'draftStatus',
-      label: 'Draft Status',
-      render: (val) => (
-        <Tag
-          variant={val === 'Draft Created' ? 'active' : val === 'Flagged' ? 'flagged' : 'archived'}
-          label={val}
-        />
-      )
-    },
-    {
-      key: 'receivedAt',
-      label: 'Received',
-      render: (val) => (
-        <span className="text-xs font-medium text-[var(--color-text-secondary)]">
-          {formatReceivedTime(val)}
-        </span>
-      )
-    }
-  ];
+  // Unread = cool blue tint + dot (attention). Selected = neutral grey + left bar (focus).
+  const rowClass = selected
+    ? 'bg-[#f4f5f7] shadow-[inset_3px_0_0_0_var(--color-brand-primary)]'
+    : unread
+      ? 'bg-[#eef5ff] hover:bg-[#e3effc]'
+      : 'bg-white hover:bg-[var(--color-surface-panel)]/80';
 
   return (
-    <div className="email-queue-container max-w-7xl mx-auto space-y-6 select-none relative">
-      {/* Inject custom CSS styles for overriding Drawer width and styling flagged row border-left */}
-      <style>{`
-        /* Overrides max-width to 520px inside the email-queue page */
-        .email-queue-container .max-w-\\[480px\\] {
-          max-width: 520px !important;
-        }
-
-        /* Targets first td in rows containing a flagged indicator */
-        tr:has(.flagged-row-indicator) td:first-child {
-          border-left: 3px solid var(--color-signal-red) !important;
-        }
-      `}</style>
-
-      {/* Header Row */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border-default)] pb-4">
-        <div className="flex items-center gap-3">
-          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
-            Email Queue
-          </h2>
-          <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-150 text-gray-700">
-            6 emails
-          </span>
-        </div>
-      </div>
-
-      {/* Filter Bar */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 w-full bg-white p-4 rounded-md border border-[var(--color-border-default)]">
-        {/* Search */}
-        <div className="relative flex-1">
-          <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-[var(--color-text-secondary)]" />
-          </span>
-          <input
-            type="text"
-            placeholder="Search sender or subject..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="block w-full pl-9 pr-3 py-1.5 bg-white border border-[var(--color-border-default)] rounded-md text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
-          />
-        </div>
-
-        {/* Inbox Filter */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase">
-            Inbox:
-          </span>
-          <select
-            value={filterInbox}
-            onChange={(e) => setFilterInbox(e.target.value)}
-            className="border border-[var(--color-border-default)] rounded-md px-3 py-1.5 bg-white text-sm text-[var(--color-text-primary)] font-medium focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer"
-          >
-            <option value="All">All Inboxes</option>
-            <option value="info@powermusic.com">info@</option>
-            <option value="support@powermusic.com">support@</option>
-          </select>
-        </div>
-
-        {/* Status Filter */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase">
-            Status:
-          </span>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="border border-[var(--color-border-default)] rounded-md px-3 py-1.5 bg-white text-sm text-[var(--color-text-primary)] font-medium focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer"
-          >
-            <option value="All">All Statuses</option>
-            <option value="Draft Created">Draft Created</option>
-            <option value="Flagged">Flagged</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="w-full">
-        <DataTable
-          columns={columns}
-          rows={filteredEmails}
-          onRowClick={(row) => setSelectedEmail(row)}
-          emptyMessage="No emails matching your search."
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
+      className={`w-full text-left px-4 py-3 border-b border-[var(--color-border-default)] transition-colors cursor-pointer ${rowClass}`}
+    >
+      <div className="flex items-start gap-2.5 min-w-0">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => { e.stopPropagation(); onCheck(); }}
+          onClick={(e) => e.stopPropagation()}
+          className="mt-1 h-4 w-4 rounded border-[var(--color-brand-primary)]/35 text-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)] cursor-pointer shrink-0 accent-[var(--color-brand-primary)]"
+          aria-label={`Select ${email.from}`}
         />
+
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm truncate ${
+            selected
+              ? 'font-normal text-[var(--color-brand-primary)]'
+              : unread
+                ? 'font-bold text-[var(--color-text-primary)]'
+                : 'font-normal text-[var(--color-text-secondary)]'
+          }`}>
+            {email.subject}
+          </p>
+          <p className={`text-xs mt-1 truncate ${
+            selected
+              ? 'text-[var(--color-text-secondary)]'
+              : unread
+                ? 'font-bold text-[var(--color-text-secondary)]'
+                : 'text-[var(--color-text-muted)]'
+          }`}>
+            From: {email.from}
+          </p>
+          <p className="text-xs mt-0.5 truncate text-[var(--color-text-muted)]">
+            {getPreviewLine(email.body)}
+          </p>
+        </div>
+
+        <div className="flex flex-col items-end gap-1.5 shrink-0 mt-0.5 min-w-[2.5rem]">
+          {unread && (
+            <span
+              className={`w-2 h-2 rounded-full bg-[var(--color-brand-primary)] ring-2 shrink-0 ${
+                selected ? 'ring-[#f4f5f7]' : 'ring-[#eef5ff]'
+              }`}
+              aria-label="Unread"
+            />
+          )}
+          <span className={`text-[10px] tabular-nums ${
+            unread
+              ? 'font-bold text-[var(--color-brand-primary)]/75'
+              : 'text-[var(--color-text-muted)]'
+          }`}>
+            {formatListTime(email.receivedAt)}
+          </span>
+        </div>
       </div>
+    </div>
+  );
+}
 
-      {/* Footer statistics */}
-      <div className="flex items-center justify-between px-2 text-xs font-semibold text-[var(--color-text-secondary)]">
-        <span>{filteredEmails.length} records shown</span>
-      </div>
+export default function EmailQueue() {
+  const { showToast } = useToast();
+  const [searchParams] = useSearchParams();
+  const mailboxFromUrl = searchParams.get('mailbox');
+  const [emails, setEmails] = useState(emailQueue);
+  const [mailbox, setMailbox] = useState(() =>
+    MAILBOX_IDS.has(mailboxFromUrl) ? mailboxFromUrl : 'inbox'
+  );
+  const [inboxFilter, setInboxFilter] = useState(() => connectedInboxes[0]?.email ?? '');
+  const [intentFilter, setIntentFilter] = useState('All');
+  const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [sortOrder, setSortOrder] = useState('newest');
+  const [page, setPage] = useState(1);
+  const [selectedId, setSelectedId] = useState(null);
+  const [draftEdits, setDraftEdits] = useState({});
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [checkedIds, setCheckedIds] = useState(new Set());
+  const [isEditingDraft, setIsEditingDraft] = useState(false);
+  const [archivedIds, setArchivedIds] = useState(() => new Set(initialArchivedEmailIds));
+  const sortRef = useRef(null);
 
-      {/* Detail Drawer */}
-      <Drawer
-        isOpen={selectedEmail !== null}
-        onClose={() => setSelectedEmail(null)}
-        title={selectedEmail ? truncate(selectedEmail.subject, 40) : ''}
-      >
-        {selectedEmail && (
-          <div className="flex flex-col h-full space-y-6 text-left select-none pb-20">
-            {/* Drawer Body Layout Split */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
-              {/* Column A — Original Email */}
-              <div className="space-y-4 pr-1">
-                <div>
-                  <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-2">
-                    Original Email
-                  </span>
-                  <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                    From: {selectedEmail.from} &lt;{selectedEmail.fromEmail}&gt;
-                  </div>
-                  <div className="text-xs text-[var(--color-text-secondary)] font-medium mt-0.5">
-                    Received: {formatDetailReceived(selectedEmail.receivedAt)}
-                  </div>
-                </div>
+  useEffect(() => {
+    if (!sortOpen) return;
+    const onClickOutside = (e) => {
+      if (sortRef.current && !sortRef.current.contains(e.target)) setSortOpen(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [sortOpen]);
 
-                <div className="border-t border-[var(--color-border-default)] pt-3">
-                  <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-3 text-sm text-[var(--color-text-primary)] font-medium leading-relaxed font-sans whitespace-pre-wrap max-h-[220px] overflow-y-auto">
-                    {selectedEmail.body}
-                  </div>
-                </div>
+  const intentOptions = useMemo(
+    () => INTENTS.map((intent) => ({ value: intent, label: intent === 'All' ? 'All intents' : intent })),
+    []
+  );
 
-                <div className="space-y-2 pt-3 border-t border-[var(--color-border-default)]">
-                  <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                    AI Classification
-                  </span>
-                  <div className="flex flex-col gap-1.5">
-                    <div>
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${getIntentClass(
-                          selectedEmail.intent
-                        )}`}
-                      >
-                        {selectedEmail.intent}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <div className="w-[100px] h-2 bg-gray-100 rounded-full overflow-hidden shrink-0">
-                        <div
-                          className="h-full bg-[var(--color-brand-accent)] rounded-full"
-                          style={{ width: `${selectedEmail.intentConfidence}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-[var(--color-text-secondary)] font-semibold">
-                        {selectedEmail.intentConfidence}% confidence
-                      </span>
-                    </div>
-                  </div>
-                </div>
+  const mailboxCounts = useMemo(() => ({
+    inbox: emails.filter((e) => !archivedIds.has(e.id) && matchesMailbox(e, 'inbox')).length,
+    urgent: emails.filter((e) => !archivedIds.has(e.id) && matchesMailbox(e, 'urgent')).length,
+    flagged: emails.filter((e) => !archivedIds.has(e.id) && matchesMailbox(e, 'flagged')).length,
+    archive: emails.filter((e) => archivedIds.has(e.id)).length,
+    sent: emails.filter((e) => !archivedIds.has(e.id) && matchesMailbox(e, 'sent')).length,
+  }), [emails, archivedIds]);
+
+  const filteredEmails = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return emails
+      .filter((email) => {
+        if (mailbox === 'archive') return archivedIds.has(email.id);
+        return !archivedIds.has(email.id) && matchesMailbox(email, mailbox);
+      })
+      .filter((email) => email.inbox === inboxFilter)
+      .filter((email) => intentFilter === 'All' || email.intent === intentFilter)
+      .filter((email) => emailMatchesDateRange(email.receivedAt, dateFrom, dateTo))
+      .filter((email) => {
+        if (!q) return true;
+        return (
+          email.from.toLowerCase().includes(q) ||
+          email.fromEmail.toLowerCase().includes(q) ||
+          email.inbox.toLowerCase().includes(q) ||
+          email.subject.toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => {
+        const diff = new Date(a.receivedAt) - new Date(b.receivedAt);
+        return sortOrder === 'oldest' ? diff : -diff;
+      });
+  }, [emails, mailbox, inboxFilter, intentFilter, search, dateFrom, dateTo, sortOrder, archivedIds]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+
+  const paginatedEmails = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return filteredEmails.slice(start, start + PAGE_SIZE);
+  }, [filteredEmails, safePage]);
+
+  const listGroups = useMemo(() => groupEmailsByDateAndIntent(paginatedEmails), [paginatedEmails]);
+
+  const accountOptions = useMemo(
+    () => connectedInboxes.map((inbox) => ({
+      value: inbox.email,
+      label: inbox.title,
+    })),
+    []
+  );
+
+  const selectedInbox = useMemo(
+    () => connectedInboxes.find((inbox) => inbox.email === inboxFilter),
+    [inboxFilter]
+  );
+
+  const allPageChecked = paginatedEmails.length > 0 && paginatedEmails.every((e) => checkedIds.has(e.id));
+  const somePageChecked = paginatedEmails.some((e) => checkedIds.has(e.id));
+
+  const toggleCheck = (id) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllPage = () => {
+    if (allPageChecked) {
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        paginatedEmails.forEach((e) => next.delete(e.id));
+        return next;
+      });
+    } else {
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        paginatedEmails.forEach((e) => next.add(e.id));
+        return next;
+      });
+    }
+  };
+
+  const activeMailboxLabel = MAILBOXES.find((m) => m.id === mailbox)?.label ?? 'Inbox';
+
+  useEffect(() => {
+    setPage(1);
+    setCheckedIds(new Set());
+  }, [mailbox, inboxFilter, intentFilter, search, dateFrom, dateTo, sortOrder]);
+
+  const hasActiveSearch = Boolean(search.trim());
+  const hasActiveFilters = intentFilter !== 'All' || dateFrom || dateTo;
+
+  const selectedEmail = emails.find((e) => e.id === selectedId) ?? null;
+
+  const getDraftForEmail = useCallback((email) => {
+    if (draftEdits[email.id] != null) return draftEdits[email.id];
+    return buildDraft(email);
+  }, [draftEdits]);
+
+  const handleSelect = (email) => {
+    setSelectedId(email.id);
+    setIsEditingDraft(false);
+    setEmails((prev) =>
+      prev.map((e) => (e.id === email.id ? { ...e, read: true } : e))
+    );
+    if (draftEdits[email.id] == null) {
+      setDraftEdits((prev) => ({ ...prev, [email.id]: buildDraft(email) }));
+    }
+  };
+
+  const handleCancelDraft = () => {
+    if (!selectedEmail) return;
+    setDraftEdits((prev) => ({ ...prev, [selectedEmail.id]: buildDraft(selectedEmail) }));
+    setIsEditingDraft(false);
+  };
+
+  const selectedCount = checkedIds.size;
+  const hasSelection = selectedCount > 0;
+
+  const archiveEmails = (ids) => {
+    if (ids.length === 0) {
+      showToast('Select one or more emails to archive.', 'error');
+      return;
+    }
+    setArchivedIds((prev) => new Set([...prev, ...ids]));
+    setCheckedIds(new Set());
+    if (selectedId && ids.includes(selectedId)) setSelectedId(null);
+    showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} moved to Archive.`, 'success');
+    setMailbox('archive');
+  };
+
+  const unarchiveEmails = (ids) => {
+    if (ids.length === 0) return;
+    setArchivedIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
+    setCheckedIds(new Set());
+    if (selectedId && ids.includes(selectedId)) setSelectedId(null);
+    showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} restored to Inbox.`, 'success');
+    setMailbox('inbox');
+  };
+
+  const flagSelected = () => {
+    const ids = hasSelection ? [...checkedIds] : selectedId ? [selectedId] : [];
+    if (ids.length === 0) {
+      showToast('Select one or more emails to flag.', 'error');
+      return;
+    }
+    flagEmails(ids);
+    setCheckedIds(new Set());
+  };
+
+  const flagEmails = (ids) => {
+    setEmails((prev) =>
+      prev.map((e) =>
+        ids.includes(e.id)
+          ? { ...e, flagged: true, draftStatus: e.draftStatus === 'Sent' ? 'Sent' : 'Flagged', flagReason: 'Manual review requested' }
+          : e
+      )
+    );
+    showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} flagged.`, 'warning');
+  };
+
+  const unflagEmails = (ids) => {
+    setEmails((prev) =>
+      prev.map((e) => {
+        if (!ids.includes(e.id) || !e.flagged) return e;
+        const nextStatus = e.draftStatus === 'Sent' ? 'Sent' : 'Draft Created';
+        return { ...e, flagged: false, draftStatus: nextStatus, flagReason: undefined };
+      })
+    );
+    showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} unflagged.`, 'success');
+  };
+
+  const toggleFlagEmail = (id) => {
+    const email = emails.find((e) => e.id === id);
+    if (!email) return;
+    if (email.flagged) unflagEmails([id]);
+    else flagEmails([id]);
+  };
+
+  const handleArchive = () => {
+    const ids = hasSelection ? [...checkedIds] : selectedId ? [selectedId] : [];
+    archiveEmails(ids);
+  };
+
+  const handleUnarchive = () => {
+    const ids = hasSelection ? [...checkedIds] : selectedId ? [selectedId] : [];
+    unarchiveEmails(ids);
+  };
+
+  const clearSelection = () => setCheckedIds(new Set());
+
+  const handleSend = () => {
+    if (!selectedEmail) return;
+    if (selectedEmail.flagged && !selectedEmail.templateUsed) {
+      showToast('Resolve the flag before sending this reply.', 'error');
+      return;
+    }
+    const now = new Date().toISOString();
+    setEmails((prev) =>
+      prev.map((e) =>
+        e.id === selectedEmail.id
+          ? { ...e, draftStatus: 'Sent', sentAt: now, flagged: false, read: true }
+          : e
+      )
+    );
+    showToast(`Reply sent to ${selectedEmail.fromEmail} via Gmail.`, 'success');
+    setIsEditingDraft(false);
+    setMailbox('sent');
+  };
+
+  const pageStart = filteredEmails.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(safePage * PAGE_SIZE, filteredEmails.length);
+
+  return (
+    <div className="max-w-7xl mx-auto flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden select-none">
+      <Toast />
+
+      <PageHeader
+        section="Customer service"
+        title="Email Responses"
+        description="Review incoming mail, edit AI drafts, and send replies from connected inboxes."
+        compact
+      />
+
+      <div className="flex flex-1 min-h-0 flex-col rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white">
+        {/* Connected account */}
+        <div className="shrink-0 px-4 py-3 border-b border-[var(--color-border-default)] bg-white">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-brand-primary)]/25 bg-gradient-to-br from-[#f4f7fd] via-[#e9eff9] to-[#eef3fb] px-3.5 py-2.5 shadow-[0_1px_3px_rgba(26,26,46,0.04)]">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-lg border border-[var(--color-brand-primary)]/15 bg-white/60 backdrop-blur-sm flex items-center justify-center shrink-0">
+                <Mail className="w-4 h-4 text-[var(--color-brand-primary)]" />
               </div>
-
-              {/* Column B — AI Draft */}
-              <div className="space-y-4 border-t md:border-t-0 md:border-l border-[var(--color-border-default)] pt-4 md:pt-0 md:pl-5 flex flex-col justify-between">
-                <div className="space-y-3 flex-1">
-                  <div>
-                    <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1">
-                      AI Draft Preview
-                    </span>
-                    <span className="text-xs text-[var(--color-text-secondary)] font-medium">
-                      Template:{' '}
-                      {selectedEmail.templateUsed ? (
-                        <span className="font-semibold text-[var(--color-text-primary)]">
-                          {selectedEmail.templateUsed}
-                        </span>
-                      ) : (
-                        <span className="italic text-[var(--color-text-muted)]">
-                          No template matched
-                        </span>
-                      )}
-                    </span>
-                  </div>
-
-                  <div className="bg-white border border-[var(--color-border-default)] rounded-md p-3 text-sm text-[var(--color-text-primary)] font-medium leading-relaxed font-sans whitespace-pre-wrap min-h-[140px] max-h-[220px] overflow-y-auto bg-gray-50/20">
-                    {getDraftText(selectedEmail)}
-                  </div>
-                </div>
-
-                <div className="bg-[#eff6ff] border border-[#bfdbfe] rounded-md p-3 flex items-start gap-2 mt-3 shrink-0">
-                  <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-                  <span className="text-xs text-blue-800 font-semibold leading-normal">
-                    Open your email client to review and send this draft.
-                  </span>
-                </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]/60">
+                  Connected account
+                </p>
+                <p className="text-sm font-semibold text-[var(--color-brand-primary)] truncate">
+                  {selectedInbox?.title ?? 'Account'}
+                </p>
+                <p className="text-xs text-[var(--color-text-secondary)] truncate">{inboxFilter}</p>
               </div>
             </div>
+            <SelectDropdown
+              value={inboxFilter}
+              onChange={setInboxFilter}
+              options={accountOptions}
+              size="xs"
+              variant="soft"
+              className="w-44 shrink-0"
+            />
+          </div>
+        </div>
 
-            {/* Simulated Activity Log */}
-            <div className="space-y-2.5 pt-4 border-t border-[var(--color-border-default)]">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                Activity Log
-              </span>
-              <div className="space-y-1.5">
-                <div className="text-xs text-[var(--color-text-secondary)] font-medium">
-                  {formatReceivedTime(selectedEmail.receivedAt)} — Email received, AI
-                  classification complete
-                </div>
-                <div className="text-xs text-[var(--color-text-secondary)] font-medium">
-                  {formatReceivedTime(selectedEmail.receivedAt)} —{' '}
-                  {selectedEmail.templateUsed ? (
-                    <span>Draft created using {selectedEmail.templateUsed}</span>
-                  ) : (
-                    <span className="text-amber-600 font-semibold">
-                      Draft creation skipped — flagged for manual review
-                    </span>
+        <div className="flex flex-1 min-h-0">
+        {/* ── Email list (Team Inbox style) ── */}
+        <div className="w-[380px] shrink-0 flex flex-col border-r border-[var(--color-border-default)] min-h-0 bg-white">
+          {/* List header */}
+          <div className="shrink-0 px-4 pt-4 pb-2 border-b border-[var(--color-border-default)]">
+            <div className="flex items-center justify-between gap-2 mb-4">
+              <h2 className="text-lg font-bold text-[var(--color-text-primary)]">{activeMailboxLabel}</h2>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => { setSearchOpen((o) => !o); setFilterOpen(false); setSortOpen(false); }}
+                  className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                    searchOpen || hasActiveSearch
+                      ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                  }`}
+                  aria-label="Search"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFilterOpen((o) => !o); setSearchOpen(false); setSortOpen(false); }}
+                  className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                    filterOpen || hasActiveFilters
+                      ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                  }`}
+                  aria-label="Filter"
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                </button>
+                <div className="relative" ref={sortRef}>
+                  <button
+                    type="button"
+                    onClick={() => { setSortOpen((o) => !o); setFilterOpen(false); setSearchOpen(false); }}
+                    className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                      sortOpen || sortOrder !== 'newest'
+                        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                        : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                    }`}
+                    aria-label="Sort"
+                  >
+                    <SortAsc className="w-4 h-4" />
+                  </button>
+                  {sortOpen && (
+                    <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-48 py-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-[var(--shadow-modal)]">
+                      <button
+                        type="button"
+                        onClick={() => { setSortOrder('newest'); setSortOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm font-medium cursor-pointer ${
+                          sortOrder === 'newest'
+                            ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                            : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)]'
+                        }`}
+                      >
+                        Newest first
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setSortOrder('oldest'); setSortOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm font-medium cursor-pointer ${
+                          sortOrder === 'oldest'
+                            ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                            : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)]'
+                        }`}
+                      >
+                        Oldest first
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Action Buttons Row */}
-            <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-[var(--color-border-default)] py-4 flex items-center gap-2">
-              <button
-                onClick={() => handleAction(selectedEmail.id, 'reviewed')}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 focus:outline-none transition-colors cursor-pointer"
-              >
-                Mark as Reviewed
-              </button>
-              <button
-                onClick={() => handleAction(selectedEmail.id, 'sent')}
-                className="px-4 py-2 border border-transparent rounded-md text-sm font-semibold text-white bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)] focus:outline-none transition-colors cursor-pointer"
-              >
-                Mark as Sent
-              </button>
-              {!selectedEmail.flagged && (
-                <button
-                  onClick={() => handleAction(selectedEmail.id, 'flagged')}
-                  className="px-4 py-2 border border-red-300 rounded-md text-sm font-semibold text-red-700 bg-white hover:bg-red-50 focus:outline-none transition-colors cursor-pointer"
-                >
-                  Flag for Review
-                </button>
-              )}
+            {/* Horizontal mailbox tabs */}
+            <div className="flex items-stretch gap-0 overflow-x-auto scrollbar-hide -mx-1 px-1">
+              {MAILBOXES.map(({ id, shortLabel, icon: Icon }) => {
+                const count = mailboxCounts[id];
+                const active = mailbox === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => { setMailbox(id); setSelectedId(null); }}
+                    className={`relative flex flex-col items-center justify-center gap-1 min-w-[72px] px-2 py-2 transition-colors cursor-pointer shrink-0 ${
+                      active ? 'text-[var(--color-brand-primary)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                    }`}
+                  >
+                    <div className="relative">
+                      <Icon className="w-5 h-5" />
+                      {count > 0 && (id === 'inbox' || id === 'archive' || id === 'flagged' || id === 'sent') && (
+                        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-[var(--color-brand-primary)] text-white text-[9px] font-bold flex items-center justify-center">
+                          {count > 99 ? '99+' : count}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`text-[11px] font-semibold whitespace-nowrap ${active ? 'text-[var(--color-brand-primary)]' : ''}`}>
+                      {shortLabel}
+                    </span>
+                    {active && (
+                      <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-[var(--color-brand-primary)]" />
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
-        )}
-      </Drawer>
 
-      <Toast />
+          {/* Collapsible search */}
+          {searchOpen && (
+            <div className="shrink-0 px-4 py-3 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)]" />
+                <input
+                  type="text"
+                  placeholder="Search sender, recipient, or subject..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  autoFocus
+                  className="w-full pl-9 pr-8 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)]"
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Collapsible filters (date + intent only) */}
+          {filterOpen && (
+            <div className="shrink-0 px-4 py-3 border-b border-[var(--color-border-default)] space-y-2 bg-[var(--color-surface-panel)]/50">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-1">From date</label>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-1">To date</label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)]"
+                  />
+                </div>
+              </div>
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  onClick={() => { setDateFrom(''); setDateTo(''); }}
+                  className="text-xs font-semibold text-[var(--color-brand-primary)] hover:underline cursor-pointer"
+                >
+                  Clear date filter
+                </button>
+              )}
+              <SelectDropdown value={intentFilter} onChange={setIntentFilter} options={intentOptions} size="xs" className="w-full" />
+            </div>
+          )}
+
+          {/* Select all + bulk actions */}
+          {filteredEmails.length > 0 && (
+            <div className="shrink-0 border-b border-[var(--color-border-default)] bg-[var(--color-surface-highlight)]/30">
+              <label className="flex items-center gap-2.5 px-4 py-2.5 cursor-pointer hover:bg-[var(--color-surface-highlight)]/50">
+                <input
+                  type="checkbox"
+                  checked={allPageChecked}
+                  ref={(el) => { if (el) el.indeterminate = somePageChecked && !allPageChecked; }}
+                  onChange={toggleSelectAllPage}
+                  className="h-4 w-4 rounded border-[var(--color-brand-primary)]/30 text-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)] cursor-pointer accent-[var(--color-brand-primary)]"
+                />
+                <span className="text-sm font-semibold text-[var(--color-brand-primary)]">
+                  Select all{hasSelection ? ` · ${selectedCount} selected` : ''}
+                </span>
+              </label>
+              {hasSelection && (
+                <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
+                  {mailbox === 'archive' ? (
+                    <button
+                      type="button"
+                      onClick={handleUnarchive}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[var(--color-brand-primary)] bg-white border border-[var(--color-border-default)] hover:bg-[var(--color-surface-highlight-strong)] transition-colors cursor-pointer"
+                    >
+                      <Inbox className="w-3.5 h-3.5" />
+                      Restore to inbox
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleArchive}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors cursor-pointer shadow-sm"
+                    >
+                      <Archive className="w-3.5 h-3.5" />
+                      Archive ({selectedCount})
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={flagSelected}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[var(--color-brand-primary)] bg-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
+                  >
+                    <Flag className="w-3.5 h-3.5" />
+                    Flag
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="text-xs font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {filteredEmails.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+                <Mail className="w-10 h-10 text-[var(--color-text-muted)] mb-3 opacity-40" />
+                <p className="text-sm font-semibold text-[var(--color-text-primary)]">No emails here</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">Try another mailbox or inbox filter.</p>
+              </div>
+            ) : (
+              listGroups.map(({ dateLabel, intentGroups }) => (
+                <section key={dateLabel}>
+                  <div className="sticky top-0 z-20 px-4 py-2 bg-white/95 backdrop-blur-sm border-b border-[var(--color-border-default)] shadow-[inset_0_-1px_0_0_var(--color-brand-primary)]/20">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]/75">{dateLabel}</p>
+                  </div>
+                  {intentGroups.map(({ intent, items }) => (
+                    <div key={`${dateLabel}-${intent}`}>
+                      <div className="sticky top-[36px] z-10 flex items-center justify-between gap-2 px-4 py-1 bg-white border-b border-[var(--color-border-default)]">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+                          {intent}
+                        </p>
+                        <span className="text-[10px] font-medium tabular-nums text-[var(--color-text-muted)]">
+                          {items.length}
+                        </span>
+                      </div>
+                      {items.map((email) => (
+                        <EmailListItem
+                          key={email.id}
+                          email={email}
+                          selected={selectedId === email.id}
+                          checked={checkedIds.has(email.id)}
+                          onClick={() => handleSelect(email)}
+                          onCheck={() => toggleCheck(email.id)}
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </section>
+              ))
+            )}
+          </div>
+
+          {/* Pagination */}
+          {filteredEmails.length > 0 && (
+            <div className="shrink-0 border-t border-[var(--color-border-default)] px-3 py-2 flex items-center justify-between bg-white">
+              <span className="text-[11px] font-medium text-[var(--color-text-muted)]">
+                {pageStart}–{pageEnd} of {filteredEmails.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  className="p-1.5 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-semibold text-[var(--color-text-primary)] px-1">
+                  {safePage}/{totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="p-1.5 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Reading pane ── */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white border-l border-[var(--color-border-default)]">
+          {!selectedEmail ? (
+            <div className="flex-1 flex flex-col p-8">
+              {hasSelection ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto">
+                  <div className="w-full rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 p-6 space-y-4">
+                    <p className="text-sm font-bold text-[var(--color-brand-primary)]">
+                      {selectedCount} email{selectedCount > 1 ? 's' : ''} selected
+                    </p>
+                    <p className="text-xs text-[var(--color-text-secondary)]">
+                      Choose an action for the selected messages.
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {mailbox === 'archive' ? (
+                        <button
+                          type="button"
+                          onClick={handleUnarchive}
+                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-[var(--color-brand-primary)] bg-white border border-[var(--color-border-default)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
+                        >
+                          <Inbox className="w-4 h-4" />
+                          Restore to inbox
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleArchive}
+                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors cursor-pointer shadow-sm"
+                        >
+                          <Archive className="w-4 h-4" />
+                          Move to archive
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={flagSelected}
+                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-[var(--color-brand-primary)] bg-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
+                      >
+                        <Flag className="w-4 h-4" />
+                        Flag for review
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-[var(--color-surface-highlight)] flex items-center justify-center mb-4">
+                    <Mail className="w-8 h-8 text-[var(--color-brand-primary)]/40" />
+                  </div>
+                  <p className="text-sm font-bold text-[var(--color-text-primary)]">Select an email to review</p>
+                  <p className="text-xs text-[var(--color-text-secondary)] mt-1 max-w-xs">
+                    Review the AI draft, then read the original message below. Select multiple to archive or flag in bulk.
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+              {/* Selected email context */}
+              <div className="shrink-0 px-6 py-4 border-b border-[var(--color-border-default)] bg-white">
+                <p className="text-base font-bold leading-snug text-[var(--color-brand-primary)]">
+                  {selectedEmail.subject}
+                </p>
+                <p className="text-sm mt-1 text-[var(--color-text-secondary)]">
+                  From: {selectedEmail.from}
+                </p>
+                <p className="text-sm text-[var(--color-text-muted)] mt-0.5 truncate">
+                  {getPreviewLine(selectedEmail.body)}
+                </p>
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  <IntentBadge intent={selectedEmail.intent} confidence={selectedEmail.intentConfidence} />
+                  {selectedEmail.flagged && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700">
+                      <Flag className="w-3 h-3 fill-red-700" />
+                      Flagged
+                    </span>
+                  )}
+                  {selectedEmail.urgent && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800">
+                      <AlertTriangle className="w-3 h-3" />
+                      Urgent
+                    </span>
+                  )}
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleFlagEmail(selectedEmail.id)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                        selectedEmail.flagged
+                          ? 'text-red-700 bg-red-50 border border-red-200 hover:bg-red-100'
+                          : 'text-[var(--color-brand-primary)] bg-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-highlight)]'
+                      }`}
+                    >
+                      <Flag className={`w-3.5 h-3.5 ${selectedEmail.flagged ? 'fill-red-700' : ''}`} />
+                      {selectedEmail.flagged ? 'Unflag' : 'Flag'}
+                    </button>
+                    {archivedIds.has(selectedEmail.id) ? (
+                      <button
+                        type="button"
+                        onClick={() => unarchiveEmails([selectedEmail.id])}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[var(--color-brand-primary)] bg-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
+                      >
+                        <Inbox className="w-3.5 h-3.5" />
+                        Restore
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => archiveEmails([selectedEmail.id])}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors cursor-pointer shadow-sm"
+                      >
+                        <Archive className="w-3.5 h-3.5" />
+                        Archive
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 px-6 py-5 space-y-6 bg-[var(--color-surface-bg)]">
+                {/* AI Generated Response */}
+                <section>
+                  <div className="rounded-xl border border-[var(--color-border-default)] bg-white shadow-sm overflow-hidden">
+                    <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--color-border-default)]/70">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="inline-flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-md bg-[var(--color-surface-highlight)] text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]">
+                          <Sparkles className="w-3 h-3" />
+                          Reply draft generated
+                        </span>
+                        {selectedEmail.draftStatus === 'Sent' && (
+                          <span className="text-[10px] font-medium text-[var(--color-text-muted)]">Sent</span>
+                        )}
+                      </div>
+                      {selectedEmail.draftStatus !== 'Sent' && (
+                        <div className="flex items-center gap-2 shrink-0">
+                          {!isEditingDraft ? (
+                            <button
+                              type="button"
+                              onClick={() => setIsEditingDraft(true)}
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--color-brand-primary)] hover:underline cursor-pointer"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              Edit
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleCancelDraft}
+                              className="text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="px-4 py-4 bg-[var(--color-surface-bg)]/40">
+                      {selectedEmail.draftStatus === 'Sent' || !isEditingDraft ? (
+                        <div className="rounded-lg bg-white px-4 py-3.5 text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-wrap min-h-[120px] border border-[var(--color-border-default)]/60">
+                          {getDraftForEmail(selectedEmail)}
+                        </div>
+                      ) : (
+                        <textarea
+                          value={getDraftForEmail(selectedEmail)}
+                          onChange={(e) => setDraftEdits((prev) => ({ ...prev, [selectedEmail.id]: e.target.value }))}
+                          rows={10}
+                          className="w-full rounded-lg border border-[var(--color-border-default)] bg-white px-4 py-3.5 text-sm text-[var(--color-text-primary)] leading-relaxed font-sans resize-none focus:outline-none focus:border-[var(--color-brand-primary)]/30 focus:ring-2 focus:ring-[var(--color-brand-primary)]/10 min-h-[120px]"
+                        />
+                      )}
+                    </div>
+
+                    {selectedEmail.draftStatus !== 'Sent' && (
+                      <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-[var(--color-border-default)]/70 bg-white">
+                        <p className="text-[11px] text-[var(--color-text-muted)] truncate min-w-0">
+                          From <span className="font-medium text-[var(--color-text-secondary)]">{selectedEmail.inbox}</span>
+                          <span className="mx-1.5 text-[var(--color-border-default)]">·</span>
+                          Opens with Hi {getFirstName(selectedEmail.from)}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleSend}
+                          disabled={selectedEmail.flagged && !selectedEmail.templateUsed}
+                          className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                        >
+                          <Send className="w-4 h-4" />
+                          Send
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <hr className="border-[var(--color-border-default)]" />
+
+                {/* Original email — below, per wireframe */}
+                <section>
+                  <h3 className="text-xl font-bold text-[var(--color-text-primary)] mb-4">Original email</h3>
+                  <div className="text-xs text-[var(--color-text-secondary)] space-y-1 mb-4">
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">From:</span> {selectedEmail.from} &lt;{selectedEmail.fromEmail}&gt;</p>
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">To:</span> {selectedEmail.inbox}</p>
+                    <p><span className="font-semibold text-[var(--color-text-primary)]">Received:</span> {formatDetailTime(selectedEmail.receivedAt)}</p>
+                  </div>
+                  <div className="text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-wrap">
+                    {selectedEmail.body}
+                  </div>
+                  {selectedEmail.templateUsed && (
+                    <p className="mt-4 text-xs text-[var(--color-text-muted)]">
+                      Matched template: <span className="font-semibold text-[var(--color-text-primary)]">{selectedEmail.templateUsed}</span>
+                    </p>
+                  )}
+                </section>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
     </div>
   );
 }
