@@ -4,8 +4,9 @@ import {
 } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { pendingRequests, userLedger } from '../data/mockData';
-import { DataTable, Tag, Modal, Toast, useToast } from '../components/ui';
+import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown } from '../components/ui';
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
+import PageHeader from '../components/layout/PageHeader';
 import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 
 const SORT_PRESETS = [
@@ -153,15 +154,13 @@ function ControlsBar({
                 <label className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
                   {slot.label}
                 </label>
-                <select
+                <SelectDropdown
                   value={slot.value}
-                  onChange={(e) => slot.onChange(e.target.value)}
-                  className="h-9 px-3 rounded-md border border-[var(--color-border-default)] bg-white text-sm font-medium text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer"
-                >
-                  {slot.options.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+                  onChange={slot.onChange}
+                  options={slot.options}
+                  size="sm"
+                  className="w-full"
+                />
               </div>
             ))}
             {activeFilterCount > 0 && (
@@ -586,13 +585,21 @@ export default function Requests() {
     <div className="max-w-7xl mx-auto space-y-6 select-none">
       <Toast />
 
-      {/* ── Page Header with toggle ── */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border-default)] pb-4">
-        <div className="flex items-center gap-4">
-          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Requests</h2>
-
-          {/* All / Add / Remove toggle */}
-          <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)]">
+      <PageHeader
+        section="Partner service"
+        title="New requests"
+        description="Review and action incoming add and remove requests."
+        actions={
+          <button
+            onClick={() => { resetManualForm(actionTab === 'All' ? 'Add' : actionTab); setShowAddManualModal(true); }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Manually</span>
+          </button>
+        }
+        footer={
+            <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] w-fit">
             {[
               { key: 'All', label: 'All', count: allCount },
               { key: 'Add', label: 'Add', count: addCount },
@@ -617,17 +624,9 @@ export default function Requests() {
                 </span>
               </button>
             ))}
-          </div>
-        </div>
-
-        <button
-          onClick={() => { resetManualForm(actionTab === 'All' ? 'Add' : actionTab); setShowAddManualModal(true); }}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Manually</span>
-        </button>
-      </div>
+            </div>
+        }
+      />
 
       {/* Controls Bar */}
       <ControlsBar
