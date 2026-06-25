@@ -174,22 +174,23 @@ export default function GmailAccounts() {
                     <Link2 className="w-4 h-4 text-[var(--color-text-secondary)]" />
                     Reconnect
                   </button>
-                  <div className="flex flex-col items-end gap-2">
-                    <button type="button" className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-[var(--color-brand-primary)] bg-white border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-surface-highlight)] hover:border-[var(--color-surface-highlight-strong)] transition-colors shadow-sm cursor-pointer">
-                      <Unlink className="w-4 h-4 text-[var(--color-text-secondary)]" />
-                      Disconnect
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteTarget(account)}
-                      aria-label={`Delete ${account.title}`}
-                      title="Delete account"
-                      className="p-2 rounded-lg text-red-600 bg-red-50 hover:bg-red-100 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  <button type="button" className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-[var(--color-brand-primary)] bg-white border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-surface-highlight)] hover:border-[var(--color-surface-highlight-strong)] transition-colors shadow-sm cursor-pointer">
+                    <Unlink className="w-4 h-4 text-[var(--color-text-secondary)]" />
+                    Disconnect
+                  </button>
                 </div>
+              </div>
+              <div className="flex justify-end mt-3">
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(account)}
+                  aria-label={`Remove ${account.title}`}
+                  title="Remove account"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Remove
+                </button>
               </div>
             </div>
           ))
