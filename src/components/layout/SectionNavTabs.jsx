@@ -3,12 +3,12 @@ import { NavLink } from 'react-router-dom';
 export const CUSTOMER_SERVICE_TABS = [
   { to: '/email-responses', label: 'Email Responses' },
   { to: '/templates', label: 'Templates' },
-  { to: '/gmail-accounts', label: 'Settings' }
+  { to: '/email-accounts', label: 'Settings' }
 ];
 
 export const PARTNER_SERVICE_TABS = [
   { to: '/new-requests', label: 'New Requests' },
-  { to: '/user-ledger', label: 'Users' }
+  { to: '/directory', label: 'Users' }
 ];
 
 const navTabClass = ({ isActive }) =>

@@ -70,7 +70,6 @@ const COLUMN_THEMES = {
       warning: 'border-l-[#2f5f94]'
     }
   }
-  return { start, end };
 };
 
 function getActivityMeta(type) {
@@ -335,8 +334,8 @@ export default function Home() {
       <div className="grid grid-cols-1 xl:grid-cols-2 grid-rows-2 xl:grid-rows-1 gap-4 flex-1 min-h-0 items-stretch">
         <ServiceColumn
           themeKey="customer"
-          title="Customer service"
-          description="Gmail templates, connected inboxes, and flagged emails."
+          title="Customer support"
+          description="Email templates, connected inboxes, and flagged emails."
           kpis={[
             { label: 'New Emails', value: kpiData.newEmails, icon: Mail, onClick: () => navigate('/email-responses') },
             { label: 'Flagged', value: kpiData.flaggedEmails, icon: Flag, onClick: goToFlaggedEmails },
@@ -355,11 +354,11 @@ export default function Home() {
 
         <ServiceColumn
           themeKey="partner"
-          title="Partner service"
-          description="New user requests and the partner user ledger."
+          title="Partner support"
+          description="New user requests and the partner Directory."
           kpis={[
             { label: 'Pending requests', value: kpiData.pendingRequests, icon: Inbox, onClick: () => navigate('/new-requests') },
-            { label: 'Users in ledger', value: kpiData.usersInLedger, icon: Users, onClick: () => navigate('/user-ledger') }
+            { label: 'Users in directory', value: kpiData.usersInDirectory, icon: Users, onClick: () => navigate('/directory') }
           ]}
           alertsTitle="Priority alerts"
           alertsSubtitle={duplicateAlerts.length ? 'Items need attention' : 'Nothing urgent'}

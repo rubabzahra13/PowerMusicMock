@@ -7,7 +7,7 @@ import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 const panelClass =
   'bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg p-3 flex flex-col gap-1.5 min-h-0';
 
-export default function RequestDetailDrawer({ request, isOpen, onClose, onConfirmAction, ledger = [] }) {
+export default function RequestDetailDrawer({ request, isOpen, onClose, onConfirmAction, directory = [] }) {
   const [log, setLog] = useState([]);
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [noteText, setNoteText] = useState('');
@@ -61,12 +61,12 @@ export default function RequestDetailDrawer({ request, isOpen, onClose, onConfir
     }
   };
 
-  const matchedLedgerRecord = useMemo(() => {
-    if (!request || !ledger || !request.tags?.includes('Already Exists')) return null;
-    return ledger.find(
+  const matchedDirectoryRecord = useMemo(() => {
+    if (!request || !directory || !request.tags?.includes('Already Exists')) return null;
+    return directory.find(
       (record) => record.email.toLowerCase() === request.person.email.toLowerCase()
     );
-  }, [request, ledger]);
+  }, [request, directory]);
 
   if (!request) return null;
 
@@ -97,7 +97,7 @@ export default function RequestDetailDrawer({ request, isOpen, onClose, onConfir
   };
 
   return (
-    <Drawer isOpen={isOpen} onClose={onClose} title="Request Detail" fill>
+    <Drawer isOpen={isOpen} onClose={onClose} title="Request detail" fill>
       <div className="flex flex-col flex-1 min-h-0 gap-3 text-left select-none">
         <div className="shrink-0 text-xs text-[var(--color-text-secondary)] font-medium flex flex-wrap gap-x-4 gap-y-1 border-b border-[var(--color-border-default)] pb-2.5">
           <span>Received: {formatDateTime(request.receivedAt)}</span>
@@ -139,14 +139,14 @@ export default function RequestDetailDrawer({ request, isOpen, onClose, onConfir
           </p>
         </div>
 
-        {request.tags?.includes('Already Exists') && matchedLedgerRecord && (
+        {request.tags?.includes('Already Exists') && matchedDirectoryRecord && (
           <div className="shrink-0 bg-[#fef3c7] border border-amber-300 border-l-4 border-l-[var(--color-already-exists-border)] rounded-lg p-3 space-y-1.5">
-            <span className="block text-xs font-bold text-[#92400e]">Already exists in ledger</span>
+            <span className="block text-xs font-bold text-[#92400e]">Already exists in directory</span>
             <div className="text-xs text-amber-900 font-medium leading-snug">
-              {matchedLedgerRecord.firstName} {matchedLedgerRecord.lastName} · {matchedLedgerRecord.email}
+              {matchedDirectoryRecord.firstName} {matchedDirectoryRecord.lastName} · {matchedDirectoryRecord.email}
             </div>
             <div className="text-[11px] text-amber-800">
-              Added: {formatDate(matchedLedgerRecord.dateAdded)} · {matchedLedgerRecord.location}
+              Added: {formatDate(matchedDirectoryRecord.dateAdded)} · {matchedDirectoryRecord.location}
             </div>
           </div>
         )}

@@ -123,9 +123,9 @@ export const handledRequests = [
 ];
 
 // ─────────────────────────────────────────────────────────────
-//  USER LEDGER  (displayId: newest = 1)
+//  Directory  (displayId: newest = 1)
 // ─────────────────────────────────────────────────────────────
-export const userLedger = [
+export const directoryData = [
   {
     id: "ul-001", displayId: 1,
     firstName: "James", lastName: "Walsh",
@@ -610,7 +610,7 @@ export const kpiData = {
   newEmails: 5,
   flaggedEmails: 4,
   templatesActive: 12,
-  usersInLedger: 47,
+  usersInDirectory: 47,
   alreadyExistsWarnings: 2
 };
 

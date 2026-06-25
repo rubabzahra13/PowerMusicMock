@@ -394,7 +394,7 @@ export default function PreviouslyHandled() {
       <Drawer
         isOpen={selectedRequest !== null}
         onClose={() => setSelectedRequest(null)}
-        title="Request Record"
+        title="Request record"
       >
         {selectedRequest && (
           <div className="space-y-6 text-left select-none">

@@ -335,7 +335,7 @@ export default function TemplateEditor({ mode = 'new' }) {
       <Modal
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
-        title="Delete Template"
+        title="Delete template"
         footer={
           <>
             <button

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Zap, CheckCircle, Search } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { userLedger } from '../data/mockData';
+import { directoryData } from '../data/mockData';
 import { Toast, useToast } from '../components/ui';
 
 export default function ManagerForm() {
@@ -35,7 +35,7 @@ export default function ManagerForm() {
 
     if (!email && (!first || !last)) return null;
 
-    return userLedger.find((record) => {
+    return directoryData.find((record) => {
       const emailMatch = email !== '' && record.email.toLowerCase() === email;
       const nameMatch =
         first !== '' &&
@@ -93,9 +93,9 @@ export default function ManagerForm() {
   const filteredUsers = useMemo(() => {
     const query = searchInput.trim().toLowerCase();
     if (query === '') {
-      return userLedger.slice(0, 4);
+      return directoryData.slice(0, 4);
     }
-    return userLedger
+    return directoryData
       .filter(
         (record) =>
           record.firstName.toLowerCase().includes(query) ||
