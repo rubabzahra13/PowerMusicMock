@@ -4,7 +4,7 @@ import PageHeader from '../components/layout/PageHeader';
 import DottedScroll from '../components/ui/DottedScroll';
 import { Modal, Toast, useToast } from '../components/ui';
 
-const STORAGE_KEY = 'power_music_gmail_accounts_v1';
+const STORAGE_KEY = 'power_music_email_accounts_v1';
 
 const INITIAL_ACCOUNTS = [
   {
@@ -56,7 +56,7 @@ function loadAccounts() {
   return INITIAL_ACCOUNTS;
 }
 
-export default function GmailAccounts() {
+export default function EmailAccounts() {
   const { showToast } = useToast();
   const [accounts, setAccounts] = useState(loadAccounts);
   const [renameTarget, setRenameTarget] = useState(null);
@@ -106,9 +106,9 @@ export default function GmailAccounts() {
       <Toast />
 
       <PageHeader
-        section="Customer service"
+        section="Customer support"
         title="Manage connected accounts"
-        description="Manage connected Gmail inboxes for each vertical."
+        description="Manage connected email inboxes for each vertical."
         className="mb-4 shrink-0"
         actions={
           <button
@@ -125,7 +125,7 @@ export default function GmailAccounts() {
         {accounts.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--color-border-default)] bg-white p-8 text-center shrink-0">
             <p className="text-sm font-semibold text-[var(--color-text-primary)]">No connected accounts</p>
-            <p className="text-xs text-[var(--color-text-muted)] mt-1">Add a Gmail inbox to get started.</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">Add a email inbox to get started.</p>
           </div>
         ) : (
           accounts.map((account) => (
@@ -143,7 +143,7 @@ export default function GmailAccounts() {
                     <h2 className="text-base font-bold text-[var(--color-text-primary)] leading-tight group-hover:text-[var(--color-brand-primary)] transition-colors truncate">
                       {account.title}
                     </h2>
-                    <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Connect the Gmail inbox used for this vertical</p>
+                    <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Connect the email inbox used for this vertical</p>
                     <button
                       type="button"
                       onClick={() => openRenameModal(account)}

@@ -306,8 +306,8 @@ export default function TemplateManagement() {
       <Toast />
 
       <PageHeader
-        section="Customer service"
-        title="Manage Templates"
+        section="Customer support"
+        title="Manage templates"
         description="Create, edit, and preview AI templates."
         className="mb-4 shrink-0"
         meta={
@@ -651,7 +651,7 @@ export default function TemplateManagement() {
       <Modal
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
-        title="Delete Template"
+        title="Delete template"
         footer={
           <>
             <button

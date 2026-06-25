@@ -3,8 +3,9 @@ import {
   Home,
   Mail,
   FileText,
-  Mail,
-  Settings
+  Settings,
+  Inbox,
+  Users
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -45,49 +46,35 @@ export default function Sidebar() {
         {/* Customer Support */}
         <div className="space-y-1">
           <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
-            Customer Support
+            Customer support
           </span>
           <NavLink to="/email-responses" className={navItemClass}>
             <Mail className="w-4 h-4 shrink-0" />
-            <span>Email Responses</span>
+            <span>Email responses</span>
           </NavLink>
           <NavLink to="/templates" className={navItemClass}>
             <FileText className="w-4 h-4 shrink-0" />
             <span>Templates</span>
           </NavLink>
-          <NavLink to="/gmail-accounts" className={navItemClass}>
+          <NavLink to="/email-accounts" className={navItemClass}>
             <Settings className="w-4 h-4 shrink-0" />
-            <span>Settings</span>
+            <span>Email accounts</span>
           </NavLink>
         </div>
+
 
         {/* Partner Support */}
         <div className="space-y-1">
-          <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
-            Partner Support
-          </span>
-          <NavLink to="/new-requests" className={navItemClass}>
-            <Inbox className="w-4 h-4 shrink-0" />
-            <span>New Requests</span>
-          </NavLink>
-          <NavLink to="/user-ledger" className={navItemClass}>
-            <Users className="w-4 h-4 shrink-0" />
-            <span>Users</span>
-          </NavLink>
-        </div>
-
-        {/* Partner Management */}
-        <div className="space-y-1">
           <span className="block px-3 text-[11px] font-semibold tracking-wider text-white/40 uppercase mb-2">
-            Partner Management
+            Partner support
           </span>
           <NavLink to="/new-requests" className={navItemClass}>
             <Inbox className="w-4 h-4 shrink-0" />
-            <span>New Requests</span>
+            <span>New requests</span>
           </NavLink>
-          <NavLink to="/user-ledger" className={navItemClass}>
+          <NavLink to="/directory" className={navItemClass}>
             <Users className="w-4 h-4 shrink-0" />
-            <span>Ledger</span>
+            <span>Directory</span>
           </NavLink>
         </div>
 

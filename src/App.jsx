@@ -4,9 +4,9 @@ import AppLayout from './components/layout/AppLayout';
 import Home from './pages/Home';
 import ManagerForm from './pages/ManagerForm';
 import NewRequests from './pages/NewRequests';
-import UserLedger from './pages/UserLedger';
+import Directory from './pages/Directory';
 import TemplateManagement from './pages/TemplateLibrary';
-import GmailAccounts from './pages/GmailAccounts';
+import EmailAccounts from './pages/EmailAccounts';
 import EmailQueue from './pages/EmailQueue';
 
 export default function App() {
@@ -32,10 +32,10 @@ export default function App() {
         />
 
         <Route
-          path="/user-ledger"
+          path="/directory"
           element={
             <AppLayout>
-              <UserLedger />
+              <Directory />
             </AppLayout>
           }
         />
@@ -56,10 +56,10 @@ export default function App() {
           }
         />
         <Route
-          path="/gmail-accounts"
+          path="/email-accounts"
           element={
             <AppLayout>
-              <GmailAccounts />
+              <EmailAccounts />
             </AppLayout>
           }
         />

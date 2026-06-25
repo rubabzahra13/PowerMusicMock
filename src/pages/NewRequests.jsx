@@ -3,7 +3,7 @@ import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
-import { pendingRequests, userLedger } from '../data/mockData';
+import { pendingRequests, directoryData } from '../data/mockData';
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown } from '../components/ui';
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
 import PageHeader from '../components/layout/PageHeader';
@@ -586,7 +586,7 @@ export default function Requests() {
       <Toast />
 
       <PageHeader
-        section="Partner service"
+        section="Partner support"
         title="New requests"
         description="Review and action incoming add and remove requests."
         actions={
@@ -686,7 +686,7 @@ export default function Requests() {
       <Modal
         isOpen={showAddManualModal}
         onClose={() => { setShowAddManualModal(false); resetManualForm(); }}
-        title="Add Request Manually"
+        title="Add request manually"
         wide
         headerExtra={
           <div className="flex items-center bg-white rounded-lg p-0.5 gap-0.5 ring-1 ring-[rgba(26,26,46,0.08)] shadow-sm">
@@ -864,7 +864,7 @@ export default function Requests() {
         request={selectedNewRequest}
         isOpen={selectedNewRequest !== null}
         onClose={() => setSelectedNewRequest(null)}
-        ledger={userLedger}
+        directory={directoryData}
         onConfirmAction={(req) => setConfirmActionRequest(req)}
       />
 

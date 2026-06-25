@@ -462,7 +462,7 @@ export default function EmailQueue() {
           : e
       )
     );
-    showToast(`Reply sent to ${selectedEmail.fromEmail} via Gmail.`, 'success');
+    showToast(`Reply sent to ${selectedEmail.fromEmail} via email.`, 'success');
     setIsEditingDraft(false);
     setMailbox('sent');
   };
@@ -475,8 +475,8 @@ export default function EmailQueue() {
       <Toast />
 
       <PageHeader
-        section="Customer service"
-        title="Email Responses"
+        section="Customer support"
+        title="Email responses"
         description="Review incoming mail, edit AI drafts, and send replies from connected inboxes."
         compact
       />

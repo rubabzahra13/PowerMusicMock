@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { userLedger } from '../data/mockData';
+import { directoryData } from '../data/mockData';
 import { DataTable, Tag, Drawer, SelectDropdown } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 
@@ -197,7 +197,7 @@ const TimestampCell = ({ val }) => {
 };
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
-export default function UserLedger() {
+export default function Directory() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusTab, setStatusTab] = useState('All');
   const [filterLocation, setFilterLocation] = useState('All');
@@ -227,12 +227,12 @@ export default function UserLedger() {
     } catch { return iso; }
   };
 
-  const addedCount = userLedger.filter((u) => u.status === 'Added').length;
-  const removedCount = userLedger.filter((u) => u.status === 'Removed').length;
-  const allCount = userLedger.length;
+  const addedCount = directoryData.filter((u) => u.status === 'Added').length;
+  const removedCount = directoryData.filter((u) => u.status === 'Removed').length;
+  const allCount = directoryData.length;
 
   const statusTabRows = useMemo(
-    () => (statusTab === 'All' ? userLedger : userLedger.filter((u) => u.status === statusTab)),
+    () => (statusTab === 'All' ? directoryData : directoryData.filter((u) => u.status === statusTab)),
     [statusTab]
   );
 
@@ -250,7 +250,7 @@ export default function UserLedger() {
     [statusTabRows]
   );
 
-  const filteredLedger = useMemo(() => {
+  const filteredDirectory = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const { field, dir } = parseSortPreset(sortPreset);
     const sortDir = dir === 'asc' ? 1 : -1;
@@ -290,7 +290,7 @@ export default function UserLedger() {
 
   const handleExportCSV = () => {
     const headers = ['ID', 'Person Name', 'Person Email', 'Location', 'Status', 'Date Added', 'Manager Name', 'Manager Email', 'Club', 'Notes'];
-    const csvRows = filteredLedger.map((user) =>
+    const csvRows = filteredDirectory.map((user) =>
       [
         formatDisplayId(user.displayId),
         `${user.firstName} ${user.lastName}`,
@@ -308,7 +308,7 @@ export default function UserLedger() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', 'user-ledger-export.csv');
+    link.setAttribute('download', 'user-directory-export.csv');
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -419,8 +419,8 @@ export default function UserLedger() {
   return (
     <div className="max-w-7xl mx-auto space-y-6 select-none">
       <PageHeader
-        section="Partner service"
-        title="User ledger"
+        section="Partner support"
+        title="Directory"
         description="View and export the record of added and removed partner users."
         actions={
           <button
@@ -486,7 +486,7 @@ export default function UserLedger() {
       <div className="w-full">
         <DataTable
           columns={columns}
-          rows={filteredLedger}
+          rows={filteredDirectory}
           onRowClick={(row) => setSelectedUser(row)}
           emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
           compact
@@ -496,7 +496,7 @@ export default function UserLedger() {
 
       {/* Footer */}
       <div className="px-2 text-xs font-medium text-[var(--color-text-secondary)]">
-        {filteredLedger.length} records
+        {filteredDirectory.length} records
       </div>
 
       {/* History Drawer */}
@@ -535,7 +535,7 @@ export default function UserLedger() {
             </div>
 
             <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Ledger Status</span>
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Directory status</span>
               <div className="flex items-center gap-2 mb-1">
                 <Tag variant={selectedUser.status === 'Added' ? 'added' : 'removed'} label={selectedUser.status} />
               </div>
