@@ -171,7 +171,7 @@ function ServiceColumn({
             ) : (
               <div className="space-y-1.5">
                 {alerts.map((alert) => {
-                  const isClickable = alert.type !== 'critical' && Boolean(onAlertClick);
+                  const isClickable = Boolean(onAlertClick);
                   const alertBorder = theme.alertBorder[alert.type] || theme.alertBorder.warning;
                   const AlertIcon = alert.type === 'critical' ? Flag : Users;
 
@@ -283,6 +283,8 @@ export default function Home() {
     }
   };
 
+  const goToFlaggedEmails = () => navigate('/email-responses?mailbox=flagged');
+
   const handleActivityClick = (activity) => {
     if (activity.type === 'template_updated') {
       navigate('/templates');
@@ -335,13 +337,14 @@ export default function Home() {
           description="Gmail templates, connected inboxes, and flagged emails."
           kpis={[
             { label: 'New Emails', value: kpiData.newEmails, icon: Mail, onClick: () => navigate('/email-responses') },
-            { label: 'Flagged', value: kpiData.flaggedEmails, icon: Flag },
+            { label: 'Flagged', value: kpiData.flaggedEmails, icon: Flag, onClick: goToFlaggedEmails },
             { label: 'Active Templates', value: kpiData.templatesActive, icon: FileText, onClick: () => navigate('/templates') }
           ]}
           alertsTitle="Flagged emails"
           alertsSubtitle={flaggedEmailAlerts.length ? 'Requires review' : 'All clear'}
           alerts={flaggedEmailAlerts}
           alertEmptyText="No flagged emails to review."
+          onAlertClick={goToFlaggedEmails}
           activities={customerActivity}
           activityEmptyText="No recent template activity."
           formatActivityDate={formatActivityDate}
