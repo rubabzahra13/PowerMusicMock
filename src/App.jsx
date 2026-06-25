@@ -7,6 +7,7 @@ import NewRequests from './pages/NewRequests';
 import UserLedger from './pages/UserLedger';
 import TemplateManagement from './pages/TemplateLibrary';
 import GmailAccounts from './pages/GmailAccounts';
+import EmailQueue from './pages/EmailQueue';
 
 export default function App() {
   return (
@@ -43,6 +44,14 @@ export default function App() {
           element={
             <AppLayout>
               <TemplateManagement />
+            </AppLayout>
+          }
+        />
+        <Route
+          path="/email-responses"
+          element={
+            <AppLayout>
+              <EmailQueue />
             </AppLayout>
           }
         />

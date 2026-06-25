@@ -7,3 +7,4 @@ export { default as Toast } from './Toast';
 export { useToast } from './useToast';
 export { default as FilterBar } from './FilterBar';
 export { default as SectionLabel } from './SectionLabel';
+export { default as SelectDropdown } from './SelectDropdown';

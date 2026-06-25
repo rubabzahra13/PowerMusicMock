@@ -1,11 +1,11 @@
 import { NavLink } from 'react-router-dom';
 import {
-  Zap,
   Home,
   Inbox,
   Users,
   FileText,
-  Mail
+  Mail,
+  Settings
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -20,7 +20,11 @@ export default function Sidebar() {
     <aside className="fixed left-0 top-0 bottom-0 w-[200px] bg-[var(--color-surface-sidebar)] flex flex-col border-r border-white/5 z-20 text-white select-none">
       {/* Logo Section */}
       <div className="h-14 flex items-center gap-2 px-4">
-        <Zap className="w-5 h-5 text-[var(--color-brand-accent)] fill-[var(--color-brand-accent)] animate-pulse" />
+        <img
+          src="/image.png"
+          alt="Power Music"
+          className="h-5 w-5 shrink-0 object-contain object-top"
+        />
         <span className="text-[15px] font-semibold tracking-wide text-white">
           Power Music Ops
         </span>
@@ -40,33 +44,37 @@ export default function Sidebar() {
           </NavLink>
         </div>
 
-        {/* Customer Service */}
+        {/* Customer Support */}
         <div className="space-y-1">
           <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
-            Customer service
+            Customer Support
           </span>
+          <NavLink to="/email-responses" className={navItemClass}>
+            <Mail className="w-4 h-4 shrink-0" />
+            <span>Email Responses</span>
+          </NavLink>
           <NavLink to="/templates" className={navItemClass}>
             <FileText className="w-4 h-4 shrink-0" />
-            <span>Gmail templates</span>
+            <span>Templates</span>
           </NavLink>
           <NavLink to="/gmail-accounts" className={navItemClass}>
-            <Mail className="w-4 h-4 shrink-0" />
-            <span>Gmail accounts</span>
+            <Settings className="w-4 h-4 shrink-0" />
+            <span>Settings</span>
           </NavLink>
         </div>
 
-        {/* Partner Service */}
+        {/* Partner Support */}
         <div className="space-y-1">
           <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
-            Partner service
+            Partner Support
           </span>
           <NavLink to="/new-requests" className={navItemClass}>
             <Inbox className="w-4 h-4 shrink-0" />
-            <span>New requests</span>
+            <span>New Requests</span>
           </NavLink>
           <NavLink to="/user-ledger" className={navItemClass}>
             <Users className="w-4 h-4 shrink-0" />
-            <span>User ledger</span>
+            <span>Users</span>
           </NavLink>
         </div>
       </div>
