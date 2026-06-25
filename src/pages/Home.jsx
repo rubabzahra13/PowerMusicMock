@@ -8,6 +8,7 @@ import {
   FileText,
   Flag,
   Inbox,
+  Mail,
   UserMinus,
   UserPlus,
   Users
@@ -136,7 +137,7 @@ function ServiceColumn({
         <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 ml-4">{description}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-2.5 shrink-0">
+      <div className={`grid gap-2.5 shrink-0 ${kpis.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
         {kpis.map((kpi) => (
           <KpiCard key={kpi.label} {...kpi} theme={theme} />
         ))}
@@ -333,8 +334,9 @@ export default function Home() {
           title="Customer service"
           description="Gmail templates, connected inboxes, and flagged emails."
           kpis={[
-            { label: 'Flagged emails', value: kpiData.flaggedEmails, icon: Flag },
-            { label: 'Active templates', value: kpiData.templatesActive, icon: FileText, onClick: () => navigate('/templates') }
+            { label: 'New Emails', value: kpiData.newEmails, icon: Mail, onClick: () => navigate('/email-responses') },
+            { label: 'Flagged', value: kpiData.flaggedEmails, icon: Flag },
+            { label: 'Active Templates', value: kpiData.templatesActive, icon: FileText, onClick: () => navigate('/templates') }
           ]}
           alertsTitle="Flagged emails"
           alertsSubtitle={flaggedEmailAlerts.length ? 'Requires review' : 'All clear'}

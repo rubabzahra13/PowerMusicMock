@@ -1,6 +1,6 @@
-export default function PageHeader({ section, title, description, meta, actions, footer, className = '' }) {
+export default function PageHeader({ section, title, description, meta, actions, footer, className = '', compact = false }) {
   return (
-    <header className={`border-b border-[var(--color-border-default)] pb-5 mb-8 space-y-4 ${className}`}>
+    <header className={`border-b border-[var(--color-border-default)] space-y-4 shrink-0 ${compact ? 'pb-4 mb-3' : 'pb-5 mb-8'} ${className}`}>
       <div className="min-w-0">
         <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">
           {section}

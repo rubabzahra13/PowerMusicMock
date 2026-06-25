@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { userLedger } from '../data/mockData';
-import { DataTable, Tag, Drawer } from '../components/ui';
+import { DataTable, Tag, Drawer, SelectDropdown } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 
 const SORT_PRESETS = [
@@ -150,15 +150,13 @@ function ControlsBar({
                 <label className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
                   {slot.label}
                 </label>
-                <select
+                <SelectDropdown
                   value={slot.value}
-                  onChange={(e) => slot.onChange(e.target.value)}
-                  className="h-9 px-3 rounded-md border border-[var(--color-border-default)] bg-white text-sm font-medium text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer"
-                >
-                  {slot.options.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+                  onChange={slot.onChange}
+                  options={slot.options}
+                  size="sm"
+                  className="w-full"
+                />
               </div>
             ))}
             {activeFilterCount > 0 && (
@@ -434,7 +432,7 @@ export default function UserLedger() {
           </button>
         }
         footer={
-          <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] w-fit">
+            <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] w-fit">
             {statusTabs.map(({ key, label, count }) => (
               <button
                 key={key}
@@ -455,7 +453,7 @@ export default function UserLedger() {
                 </span>
               </button>
             ))}
-          </div>
+            </div>
         }
       />
 
