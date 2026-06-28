@@ -420,8 +420,9 @@ export default function UserLedger() {
     <div className="max-w-7xl mx-auto space-y-6 select-none">
       <PageHeader
         section="Partner service"
-        title="User ledger"
+        title="Users"
         description="View and export the record of added and removed partner users."
+        workspace
         actions={
           <button
             onClick={handleExportCSV}

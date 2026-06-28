@@ -107,9 +107,10 @@ export default function GmailAccounts() {
 
       <PageHeader
         section="Customer service"
-        title="Manage connected accounts"
+        title="Settings"
         description="Manage connected Gmail inboxes for each vertical."
-        className="mb-4 shrink-0"
+        workspace
+        className="shrink-0"
         actions={
           <button
             type="button"
