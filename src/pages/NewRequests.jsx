@@ -587,8 +587,9 @@ export default function Requests() {
 
       <PageHeader
         section="Partner service"
-        title="New requests"
+        title="New Requests"
         description="Review and action incoming add and remove requests."
+        workspace
         actions={
           <button
             onClick={() => { resetManualForm(actionTab === 'All' ? 'Add' : actionTab); setShowAddManualModal(true); }}
