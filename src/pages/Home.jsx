@@ -132,7 +132,7 @@ function ServiceColumn({
       <div className="shrink-0">
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full shrink-0 ${theme.dot}`} />
-          <h2 className="text-base font-bold text-[var(--color-text-primary)]">{title}</h2>
+          <h2 className="text-base font-bold uppercase tracking-wide text-[var(--color-text-primary)]">{title}</h2>
         </div>
         <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 ml-4">{description}</p>
       </div>
@@ -333,7 +333,7 @@ export default function Home() {
       <div className="grid grid-cols-1 xl:grid-cols-2 grid-rows-2 xl:grid-rows-1 gap-4 flex-1 min-h-0 items-stretch">
         <ServiceColumn
           themeKey="customer"
-          title="Customer service"
+          title="Customer Support"
           description="Gmail templates, connected inboxes, and flagged emails."
           kpis={[
             { label: 'New Emails', value: kpiData.newEmails, icon: Mail, onClick: () => navigate('/email-responses') },
@@ -353,7 +353,7 @@ export default function Home() {
 
         <ServiceColumn
           themeKey="partner"
-          title="Partner service"
+          title="Partner Support"
           description="New user requests and the partner user ledger."
           kpis={[
             { label: 'Pending requests', value: kpiData.pendingRequests, icon: Inbox, onClick: () => navigate('/new-requests') },

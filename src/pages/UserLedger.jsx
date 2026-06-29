@@ -419,7 +419,7 @@ export default function UserLedger() {
   return (
     <div className="max-w-7xl mx-auto space-y-6 select-none">
       <PageHeader
-        section="Partner service"
+        section="Partner Support"
         title="Users"
         description="View and export the record of added and removed partner users."
         workspace

@@ -321,7 +321,7 @@ export default function TemplateManagement() {
       <Toast />
 
       <PageHeader
-        section="Customer service"
+        section="Customer Support"
         title="Email templates"
         description="Create, edit, and preview AI templates."
         workspace

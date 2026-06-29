@@ -471,7 +471,7 @@ export default function EmailQueue() {
       <Toast />
 
       <PageHeader
-        section="Customer service"
+        section="Customer Support"
         title="Email Responses"
         description="Review incoming mail, edit AI drafts, and send replies from connected inboxes."
         workspace
