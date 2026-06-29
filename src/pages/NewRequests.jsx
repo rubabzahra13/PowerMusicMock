@@ -586,7 +586,7 @@ export default function Requests() {
       <Toast />
 
       <PageHeader
-        section="Partner service"
+        section="Partner Support"
         title="New Requests"
         description="Review and action incoming add and remove requests."
         workspace
