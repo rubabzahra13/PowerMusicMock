@@ -1,5 +1,8 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Search, FileText, Trash2, Save, X, ChevronDown, Plus, Pencil } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import {
+  Search, FileText, Trash2, Save, X, ChevronDown, Plus, Pencil,
+  Mail, SlidersHorizontal, SortAsc
+} from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { templates as mockTemplates } from '../data/mockData';
 import { Toast, useToast, Modal, SelectDropdown } from '../components/ui';
@@ -13,8 +16,8 @@ const INBOXES = [
   { email: 'royaltyfree@powermusic.com', title: 'Royalty Free Music' }
 ];
 
-function inboxLabel({ title, email }) {
-  return `${title} ${email}`;
+function inboxTitle(email) {
+  return INBOXES.find((inbox) => inbox.email === email)?.title ?? 'Inbox';
 }
 
 function ensureTemplateInboxes(list) {
@@ -67,22 +70,23 @@ const fmtUpdated = (iso) => {
 };
 
 // ─── Template List Item ────────────────────────────────────────────────────────
+const TEMPLATE_CATEGORIES = ['All Categories', 'Membership', 'Payments', 'Events', 'General Enquiries', 'Other'];
+
 function TemplateListItem({ template, isSelected, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-4 py-3.5 flex items-start gap-3 transition-colors border-b border-[var(--color-border-default)] last:border-b-0 cursor-pointer ${
+      className={`w-full text-left px-4 py-3 border-b border-[var(--color-border-default)] transition-colors cursor-pointer ${
         isSelected
-          ? 'bg-[var(--color-surface-highlight)] border-l-2 border-l-[var(--color-brand-primary)]'
-          : 'hover:bg-gray-50'
+          ? 'bg-[#f4f5f7] border-l-[3px] border-l-[var(--color-brand-primary)]'
+          : 'hover:bg-[var(--color-surface-highlight)]/50'
       }`}
     >
-      <FileText className={`w-4 h-4 shrink-0 mt-0.5 ${isSelected ? 'text-[var(--color-brand-primary)]' : 'text-gray-400'}`} />
-      <div className="flex-1 min-w-0">
-        <div className={`text-sm font-semibold truncate ${isSelected ? 'text-[var(--color-brand-primary)]' : 'text-[var(--color-text-primary)]'}`}>
+      <div className="min-w-0">
+        <div className={`text-sm truncate ${isSelected ? 'font-semibold text-[var(--color-brand-primary)]' : 'font-medium text-[var(--color-text-primary)]'}`}>
           {template.name}
         </div>
-        <div className="text-xs text-[var(--color-text-muted)] truncate mt-0.5 font-normal">
+        <div className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">
           {template.subject}
         </div>
         <div className="flex items-center gap-2 mt-1.5">
@@ -93,7 +97,7 @@ function TemplateListItem({ template, isSelected, onClick }) {
           }`}>
             {template.status}
           </span>
-          <span className="text-[10px] text-[var(--color-text-muted)]">{template.category}</span>
+          <span className="text-[10px] font-medium text-[var(--color-text-muted)]">{template.category}</span>
         </div>
       </div>
     </button>
@@ -116,9 +120,13 @@ export default function TemplateManagement() {
 
   // Left pane controls
   const [search, setSearch] = useState('');
-  const [inboxFilter, setInboxFilter] = useState('all');
+  const [inboxFilter, setInboxFilter] = useState(() => INBOXES[0]?.email ?? '');
   const [sortMode, setSortMode] = useState('alpha-asc'); // 'alpha-asc' | 'alpha-desc' | 'recent'
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef(null);
 
   // Right pane: which template is selected + editor form state
   const [selectedId, setSelectedId] = useState(null);
@@ -132,11 +140,10 @@ export default function TemplateManagement() {
   // New template creation mode
   const [isCreatingNew, setIsCreatingNew] = useState(false);
 
-  const categories = ['All Categories', 'Membership', 'Payments', 'Events', 'General Enquiries', 'Other'];
+  const categories = TEMPLATE_CATEGORIES;
 
   const inboxOptions = useMemo(() => [
-    { value: 'all', label: 'All inboxes' },
-    ...INBOXES.map((inbox) => ({ value: inbox.email, label: inboxLabel(inbox) }))
+    ...INBOXES.map((inbox) => ({ value: inbox.email, label: inbox.title }))
   ], []);
 
   const sortOptions = useMemo(() => [
@@ -150,8 +157,16 @@ export default function TemplateManagement() {
     [categories]
   );
 
+  useEffect(() => {
+    if (!sortOpen) return;
+    const onClickOutside = (e) => {
+      if (sortRef.current && !sortRef.current.contains(e.target)) setSortOpen(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [sortOpen]);
+
   const inboxTemplates = useMemo(() => {
-    if (inboxFilter === 'all') return templates;
     return templates.filter((t) => t.inbox === inboxFilter);
   }, [templates, inboxFilter]);
 
@@ -247,7 +262,7 @@ export default function TemplateManagement() {
         status: editForm.status || 'Draft',
         timesUsed: 0,
         lastUpdated: new Date().toISOString(),
-        inbox: inboxFilter !== 'all' ? inboxFilter : INBOXES[0].email
+        inbox: inboxFilter
       };
       setTemplates(prev => [...prev, newTemplate]);
       setSelectedId(newTemplate.id);
@@ -306,84 +321,163 @@ export default function TemplateManagement() {
       <Toast />
 
       <PageHeader
-        section="Customer support"
-        title="Manage templates"
+        section="Customer Support"
+        title="Email templates"
         description="Create, edit, and preview AI templates."
-        className="mb-4 shrink-0"
-        meta={
-          <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--color-surface-highlight)] text-[var(--color-text-secondary)]">
-            {inboxTemplates.length} templates
-          </span>
-        }
+        workspace
         actions={
-          <button
-            onClick={handleNewTemplate}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            New Template
-          </button>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex items-center gap-1.5 h-9 rounded-lg border border-[var(--color-brand-primary)]/25 bg-gradient-to-r from-[#f4f7fd] via-[#e9eff9] to-[#eef3fb] pl-2.5 pr-1 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
+              title={inboxFilter}
+            >
+              <Mail className="w-3.5 h-3.5 text-[var(--color-brand-primary)] shrink-0" aria-hidden="true" />
+              <SelectDropdown
+                value={inboxFilter}
+                onChange={setInboxFilter}
+                options={inboxOptions}
+                size="xs"
+                variant="soft"
+                className="w-32 sm:w-36"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleNewTemplate}
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              New Template
+            </button>
+          </div>
         }
       />
 
-      {/* Master-Detail container */}
-      <div className="flex flex-1 min-h-0 rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white">
+      <div className="flex flex-1 min-h-0 flex-col rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white">
+        <div className="flex flex-1 min-h-0">
 
         {/* ── LEFT PANE ─────────────────────────────────────────── */}
-        <div className="w-[37%] flex flex-col border-r border-[var(--color-border-default)] shrink-0 min-h-0">
+        <div className="w-[320px] shrink-0 flex flex-col border-r border-[var(--color-border-default)] min-h-0 bg-white">
 
-          {/* Left pane controls */}
-          <div className="p-4 border-b border-[var(--color-border-default)] space-y-3 bg-gray-50">
-            {/* Inbox filter */}
-            <SelectDropdown
-              value={inboxFilter}
-              onChange={setInboxFilter}
-              options={inboxOptions}
-              size="xs"
-              className="w-full"
-            />
-
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-text-muted)]" />
-              <input
-                type="text"
-                placeholder="Search templates..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
-              />
+          {/* List header — same position, width, and typography as Email Responses */}
+          <div className="shrink-0 px-4 pt-3 pb-2 border-b border-[var(--color-border-default)]">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="min-w-0">
+                <h2 className="text-base font-bold text-[var(--color-text-primary)]">Templates</h2>
+                <p className="text-[11px] font-medium text-[var(--color-text-muted)] truncate">
+                  {inboxTitle(inboxFilter)}
+                </p>
+              </div>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => { setSearchOpen((o) => !o); setFilterOpen(false); setSortOpen(false); }}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    searchOpen || search.trim()
+                      ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                  }`}
+                  aria-label="Search templates"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFilterOpen((o) => !o); setSearchOpen(false); setSortOpen(false); }}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    filterOpen || categoryFilter !== 'All Categories'
+                      ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                  }`}
+                  aria-label="Filter templates"
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                </button>
+                <div className="relative" ref={sortRef}>
+                  <button
+                    type="button"
+                    onClick={() => { setSortOpen((o) => !o); setFilterOpen(false); setSearchOpen(false); }}
+                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                      sortOpen || sortMode !== 'alpha-asc'
+                        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                        : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                    }`}
+                    aria-label="Sort templates"
+                  >
+                    <SortAsc className="w-4 h-4" />
+                  </button>
+                  {sortOpen && (
+                    <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-48 py-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-[var(--shadow-modal)]">
+                      {sortOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => { setSortMode(option.value); setSortOpen(false); }}
+                          className={`w-full text-left px-3 py-2 text-sm font-medium cursor-pointer ${
+                            sortMode === option.value
+                              ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                              : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)]'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
+          </div>
 
-            {/* Sort + Category row */}
-            <div className="flex gap-2">
-              <SelectDropdown
-                value={sortMode}
-                onChange={setSortMode}
-                options={sortOptions}
-                size="xs"
-                className="flex-1 min-w-0"
-              />
+          {searchOpen && (
+            <div className="shrink-0 px-4 py-3 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)]" />
+                <input
+                  type="text"
+                  placeholder="Search templates..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  autoFocus
+                  className="w-full pl-9 pr-8 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)]"
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {filterOpen && (
+            <div className="shrink-0 px-4 py-3 border-b border-[var(--color-border-default)] space-y-2 bg-[var(--color-surface-panel)]/50">
               <SelectDropdown
                 value={categoryFilter}
                 onChange={setCategoryFilter}
                 options={categoryOptions}
                 size="xs"
-                className="flex-1 min-w-0"
+                className="w-full"
               />
+              {categoryFilter !== 'All Categories' && (
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('All Categories')}
+                  className="text-xs font-semibold text-[var(--color-brand-primary)] hover:underline cursor-pointer"
+                >
+                  Clear category filter
+                </button>
+              )}
             </div>
-
-            {/* Meta */}
-            <p className="text-[11px] text-[var(--color-text-muted)] font-medium">
-              {displayedTemplates.length} of {inboxTemplates.length} templates
-            </p>
-          </div>
+          )}
 
           {/* Scrollable template list */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto min-h-0">
             {displayedTemplates.length === 0 ? (
-              <div className="flex items-center justify-center h-32 text-sm text-[var(--color-text-muted)]">
-                No templates found
+              <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+                <FileText className="w-10 h-10 text-[var(--color-text-muted)] mb-3 opacity-40" />
+                <p className="text-sm font-semibold text-[var(--color-text-primary)]">No templates found</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">Try another inbox or category filter.</p>
               </div>
             ) : (
               displayedTemplates.map((tmpl) => (
@@ -395,6 +489,12 @@ export default function TemplateManagement() {
                 />
               ))
             )}
+          </div>
+
+          <div className="shrink-0 border-t border-[var(--color-border-default)] px-3 py-2 flex items-center justify-between bg-white">
+            <span className="text-[11px] font-medium text-[var(--color-text-muted)]">
+              {displayedTemplates.length === 0 ? 0 : 1}–{displayedTemplates.length} of {inboxTemplates.length}
+            </span>
           </div>
         </div>
 
@@ -645,13 +745,14 @@ export default function TemplateManagement() {
             </>
           )}
         </div>
+        </div>
       </div>
 
       {/* Delete Confirmation Modal */}
       <Modal
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
-        title="Delete template"
+        title="Delete Template"
         footer={
           <>
             <button
