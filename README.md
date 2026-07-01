@@ -1,55 +1,80 @@
-# React + Vite
+# Power Music MVP
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This project is a web application featuring a React/Vite frontend and a FastAPI (Python) backend. The current state reflects **Pilot 1: Data Entry Automation**, allowing administrators to manage personnel requests and review the directory of added individuals.
 
-Currently, two official plugins are available:
+## Project Structure
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```text
+root/
+├── frontend/               # React + Vite Frontend Application
+│   ├── src/                # React source code (components, pages, utils)
+│   ├── public/             # Static assets
+│   ├── index.html          # Main HTML template
+│   ├── package.json        # Node dependencies and scripts
+│   └── tailwind.config.js  # TailwindCSS styling configuration
+│
+└── backend/                # FastAPI Python Backend Application
+    ├── app/                # Main application package
+    │   ├── api/            # API endpoints and routers (e.g., pilot1.py)
+    │   ├── main.py         # FastAPI application entry point
+    │   ├── database.py     # Database connection setup
+    │   ├── models.py       # SQLAlchemy ORM models
+    │   └── schemas.py      # Pydantic validation schemas
+    ├── alembic/            # Database migration scripts
+    ├── tests/              # Pytest test suite
+    ├── requirements.txt    # Python dependencies
+    └── .env                # Environment variables (Database URL)
+```
 
-## React Compiler
+## Running the Application
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 1. Frontend (React)
 
-## Expanding the ESLint configuration
+You need [Node.js](https://nodejs.org/) installed to run the frontend.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. Open a terminal and navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+2. Install the dependencies (only needed the first time):
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
+4. The application will be available at `http://localhost:5173`.
 
-## Backend Setup (FastAPI)
+### 2. Backend (FastAPI)
 
-The backend is built using Python and FastAPI, located in the `backend/` directory.
+You need Python 3.9+ installed to run the backend.
 
-### Prerequisites
-- Python 3.9+ installed on your system.
-
-### Installation & Running
-
-1. Open a terminal and navigate to the `backend/` folder:
+1. Open a terminal and navigate to the backend directory:
    ```bash
    cd backend
    ```
-
-2. Create a virtual environment:
+2. Create and activate a virtual environment (recommended):
    ```bash
+   # Windows
    python -m venv venv
+   venv\Scripts\activate
+
+   # macOS/Linux
+   python3 -m venv venv
+   source venv/bin/activate
    ```
-   *(If `python` is not recognized, try `python3` or `py` on Windows)*
-
-3. Activate the virtual environment:
-   - **Windows (Command Prompt):** `venv\Scripts\activate.bat`
-   - **Windows (PowerShell):** `venv\Scripts\Activate.ps1`
-   - **macOS/Linux:** `source venv/bin/activate`
-
-4. Install the required dependencies:
+3. Install the required Python packages:
    ```bash
    pip install -r requirements.txt
    ```
-
-5. Run the development server:
+4. Run the Uvicorn server. **Note:** Ensure you run it from the root of the `backend` folder and point to the `app` package:
    ```bash
-   uvicorn main:app --reload
+   uvicorn app.main:app --reload
    ```
+5. The API will be available at `http://localhost:8000`.
+6. Visit `http://localhost:8000/docs` to view the interactive Swagger API documentation.
 
-### Testing the Backend
-- **Health Check:** Open `http://localhost:8000/health` in your browser. It should return `{"status": "ok"}`.
-- **Swagger Documentation:** Visit `http://localhost:8000/docs` to view the API schema, including the `Request` and `Person` models, and test the endpoints directly from the browser.
+### Database
+
+The backend connects to a remote Supabase PostgreSQL database. Make sure your `backend/.env` file is properly populated with the `DATABASE_URL`.
