@@ -1,11 +1,12 @@
 import os
 import socket
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import NullPool
 
 load_dotenv()
 
@@ -36,6 +37,17 @@ def _force_ipv4(url: str) -> str:
         return url
 
 
+def _ensure_sslmode(url: str) -> str:
+    """Supabase requires TLS; ensure sslmode is set for remote hosts."""
+    parsed = urlparse(url)
+    if not parsed.hostname or parsed.hostname in {"localhost", "127.0.0.1"}:
+        return url
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if "sslmode" not in params:
+        params["sslmode"] = "require"
+    return urlunparse(parsed._replace(query=urlencode(params)))
+
+
 def get_database_url() -> str:
     url = os.getenv("DATABASE_URL")
     if not url:
@@ -48,7 +60,8 @@ def get_database_url() -> str:
         url = url.replace("postgresql://", "postgresql+psycopg://", 1)
     elif url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+psycopg://", 1)
-    return _force_ipv4(url)
+    url = _force_ipv4(url)
+    return _ensure_sslmode(url)
 
 
 def _is_network_unreachable(error: Exception) -> bool:
@@ -74,7 +87,13 @@ def _is_network_unreachable(error: Exception) -> bool:
 
 def create_db_engine():
     try:
-        return create_engine(get_database_url(), pool_pre_ping=True)
+        kwargs = {}
+        if os.getenv("VERCEL"):
+            # Serverless: open a fresh connection per request.
+            kwargs["poolclass"] = NullPool
+        else:
+            kwargs["pool_pre_ping"] = True
+        return create_engine(get_database_url(), **kwargs)
     except Exception as exc:
         if _is_network_unreachable(exc):
             host = urlparse(os.getenv("DATABASE_URL", "")).hostname or "unknown"
@@ -113,4 +132,7 @@ def verify_database_connection(db) -> None:
                 "unavailable on your network, use the session pooler connection string "
                 "from the Supabase dashboard (Connect → Session pooler) in DATABASE_URL."
             ) from exc
-        raise
+        raise DatabaseConnectionError(
+            "Database connection failed. Check DATABASE_URL on Vercel — the password "
+            "must be URL-encoded (e.g. @ → %40) and use the Supabase session pooler URI."
+        ) from exc
