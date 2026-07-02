@@ -1,8 +1,4 @@
 {
   "builds": [{ "src": "app/main.py", "use": "@vercel/python" }],
-  "routes": [{ "src": "/(.*)", "dest": "app/main.py" }],
-  "crons": [
-    { "path": "/api/pilot2/poll", "schedule": "* * * * *" },
-    { "path": "/api/pilot2/learning/distill", "schedule": "0 2 * * *" }
-  ]
+  "routes": [{ "src": "/(.*)", "dest": "app/main.py" }]
 }
