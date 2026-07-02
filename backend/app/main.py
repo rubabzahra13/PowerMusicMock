@@ -9,7 +9,13 @@ from app.database import DatabaseConnectionError, get_db, verify_database_connec
 from app.api.routers import pilot1, pilot2
 from app.pilot2 import scheduler
 
-models.Base.metadata.create_all(bind=engine)
+# Best-effort: creates missing tables in dev. Must not crash the app at
+# import time (e.g. cold start with a briefly unreachable DB) — the tables
+# already exist in production and /health reports connectivity problems.
+try:
+    models.Base.metadata.create_all(bind=engine)
+except Exception as exc:  # noqa: BLE001
+    print(f"WARNING: skipping create_all — database not reachable at startup: {exc}")
 
 app = FastAPI(title="Power Music MVP API")
 
