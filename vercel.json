@@ -1,20 +1,26 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "cd frontend && npm install && npm run build",
-  "outputDirectory": "frontend/dist",
-  "installCommand": "cd frontend && npm install",
-  "functions": {
-    "backend/index.py": {
-      "maxDuration": 60,
-      "includeFiles": "backend/app/**"
+  "services": {
+    "frontend": {
+      "root": "frontend"
+    },
+    "backend": {
+      "root": "backend",
+      "entrypoint": "index:app",
+      "functions": {
+        "index.py": {
+          "maxDuration": 60,
+          "includeFiles": "app/**"
+        }
+      }
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/backend/index.py" },
-    { "source": "/health", "destination": "/backend/index.py" },
-    { "source": "/docs", "destination": "/backend/index.py" },
-    { "source": "/docs/(.*)", "destination": "/backend/index.py" },
-    { "source": "/openapi.json", "destination": "/backend/index.py" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/health", "destination": { "service": "backend" } },
+    { "source": "/docs", "destination": { "service": "backend" } },
+    { "source": "/docs/(.*)", "destination": { "service": "backend" } },
+    { "source": "/openapi.json", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
   ]
 }
