@@ -15,9 +15,9 @@ import {
   Users
 } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
-import { kpiData, recentActivity, pendingRequests } from '../data/mockData';
-import { loadWithCache } from '../utils/pilot2Api';
-import { fetchJson } from '../utils/api';
+import { kpiData, recentActivity } from '../data/mockData';
+import { loadWithCache, getDashboard } from '../utils/pilot2Api';
+import { PanelListSkeleton, ActivitySkeleton } from '../components/ui';
 
 const CUSTOMER_ACTIVITY_TYPES = new Set(['template_updated']);
 const PARTNER_ACTIVITY_TYPES = new Set([
@@ -126,7 +126,9 @@ function ServiceColumn({
   activityEmptyText,
   formatActivityDate,
   onActivityClick,
-  themeKey
+  themeKey,
+  alertsLoading = false,
+  activityLoading = false,
 }) {
   const theme = COLUMN_THEMES[themeKey];
 
@@ -166,7 +168,9 @@ function ServiceColumn({
           </div>
 
           <div className="p-2.5 flex-1 min-h-0 overflow-y-auto">
-            {alerts.length === 0 ? (
+            {alertsLoading ? (
+              <PanelListSkeleton rows={2} />
+            ) : alerts.length === 0 ? (
               <div className="h-full min-h-[72px] flex flex-col items-center justify-center text-center px-3 py-4">
                 <CheckCircle className="w-7 h-7 text-[var(--color-signal-green)] mb-1.5" />
                 <p className="text-sm font-medium text-[var(--color-text-secondary)]">{alertEmptyText}</p>
@@ -219,7 +223,9 @@ function ServiceColumn({
           </div>
 
           <div className="p-3 flex-1 min-h-0 overflow-y-auto">
-            {activities.length === 0 ? (
+            {activityLoading ? (
+              <ActivitySkeleton rows={3} />
+            ) : activities.length === 0 ? (
               <p className="text-sm text-[var(--color-text-muted)] text-center py-4">{activityEmptyText}</p>
             ) : (
               <div className="space-y-0">
@@ -278,25 +284,18 @@ export default function Home() {
   const [livePendingRequests, setLivePendingRequests] = useState([]);
   const [liveKpis, setLiveKpis] = useState({ pendingRequests: 0, usersInLedger: 0 });
   const [livePartnerActivity, setLivePartnerActivity] = useState([]);
+  const [partnerReady, setPartnerReady] = useState(false);
 
   useEffect(() => {
-    // Cached copies render instantly; fresh data replaces them. Focus
-    // revalidates so the dashboard stays current.
+    const applyDashboard = (data) => {
+      setLivePendingRequests(data.pendingRequests);
+      setLiveKpis(data.kpis);
+      setLivePartnerActivity(data.activity);
+      setPartnerReady(true);
+    };
     const load = () => {
-      loadWithCache('home_pending', () =>
-        fetchJson('/api/admin/requests?status=new'),
-        setLivePendingRequests,
-      ).catch(err => console.error(err));
-
-      loadWithCache('home_kpis', () =>
-        fetchJson('/api/kpis'),
-        setLiveKpis,
-      ).catch(err => console.error(err));
-
-      loadWithCache('home_activity', () =>
-        fetchJson('/api/activity'),
-        setLivePartnerActivity,
-      ).catch(err => console.error(err));
+      loadWithCache('home_dashboard', getDashboard, applyDashboard)
+        .catch((err) => console.error(err));
     };
     load();
     const refresh = () => { if (!document.hidden) load(); };
@@ -391,6 +390,8 @@ export default function Home() {
           themeKey="partner"
           title="Partner Support"
           description="New user requests and the partner user ledger."
+          alertsLoading={!partnerReady}
+          activityLoading={!partnerReady}
           kpis={[
             { label: 'Pending requests', value: liveKpis.pendingRequests, icon: Inbox, onClick: () => navigate('/new-requests') },
             { label: 'Users in ledger', value: liveKpis.usersInLedger, icon: Users, onClick: () => navigate('/user-ledger') }

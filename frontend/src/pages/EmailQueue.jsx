@@ -6,8 +6,8 @@ import {
   SortAsc, Archive, X, Pencil, Trash2, RotateCcw
 } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
-import { getEmails, getInboxes, patchEmail, sendEmail, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache } from '../utils/pilot2Api';
-import { Toast, useToast, SelectDropdown, Modal } from '../components/ui';
+import { patchEmail, sendEmail, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache, getPilot2Workspace } from '../utils/pilot2Api';
+import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 
 const PAGE_SIZE = 10;
@@ -308,6 +308,7 @@ export default function EmailQueue() {
   const [checkedIds, setCheckedIds] = useState(new Set());
   const [isEditingDraft, setIsEditingDraft] = useState(false);
   const [archivedIds, setArchivedIds] = useState(() => new Set());
+  const [listLoading, setListLoading] = useState(true);
   const sortRef = useRef(null);
 
   // Load emails and inboxes: cached copy renders instantly, then fresh data
@@ -331,10 +332,12 @@ export default function EmailQueue() {
   const cancelledRef = useRef(false);
 
   const revalidate = useCallback(() => {
-    loadWithCache('emails', getEmails, (rows) => {
-      if (!cancelledRef.current && pendingRef.current === 0) applyEmails(rows);
+    loadWithCache('pilot2_workspace', getPilot2Workspace, (data) => {
+      if (!cancelledRef.current && pendingRef.current === 0) applyEmails(data.emails ?? []);
+      if (!cancelledRef.current) applyInboxes(data.inboxes ?? []);
+      if (!cancelledRef.current) setListLoading(false);
     }).catch(() => {});
-  }, [applyEmails]);
+  }, [applyEmails, applyInboxes]);
 
   // Wrap every write call: pause refreshes while saving, then re-sync state
   // and cache from the server as soon as the last save lands.
@@ -350,12 +353,14 @@ export default function EmailQueue() {
 
   useEffect(() => {
     cancelledRef.current = false;
-    loadWithCache('emails', getEmails, (rows) => {
-      if (!cancelledRef.current && pendingRef.current === 0) applyEmails(rows);
-    }).catch((err) => showToast(`Could not load emails: ${err.message}`, 'error'));
-    loadWithCache('inboxes', getInboxes, (rows) => {
-      if (!cancelledRef.current) applyInboxes(rows);
-    }).catch(() => {});
+    loadWithCache('pilot2_workspace', getPilot2Workspace, (data) => {
+      if (!cancelledRef.current && pendingRef.current === 0) applyEmails(data.emails ?? []);
+      if (!cancelledRef.current) applyInboxes(data.inboxes ?? []);
+      if (!cancelledRef.current) setListLoading(false);
+    }).catch((err) => {
+      setListLoading(false);
+      showToast(`Could not load emails: ${err.message}`, 'error');
+    });
 
     // Background revalidation — silent, keeps the page current (picks up
     // changes made in Gmail or another tab).
@@ -1085,7 +1090,9 @@ export default function EmailQueue() {
           )}
 
           <div className="flex-1 overflow-y-auto min-h-0">
-            {filteredEmails.length === 0 ? (
+            {listLoading ? (
+              <EmailListSkeleton rows={10} />
+            ) : filteredEmails.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full p-6 text-center">
                 {mailbox === 'bin' ? (
                   <>

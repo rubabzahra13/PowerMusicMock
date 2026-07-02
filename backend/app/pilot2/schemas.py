@@ -154,3 +154,8 @@ class DistillResultOut(BaseModel):
     editsProcessed: int
     intentsUpdated: List[str]
     suggestionsCreated: int
+
+
+class Pilot2WorkspaceOut(BaseModel):
+    emails: List[EmailOut]
+    inboxes: List[InboxOut]

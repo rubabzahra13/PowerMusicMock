@@ -45,6 +45,21 @@ export function writeCache(key, data) {
   try { sessionStorage.setItem(`pm_cache_${key}`, JSON.stringify(data)); } catch { /* quota */ }
 }
 
+export function patchCache(key, patch) {
+  try {
+    const cached = sessionStorage.getItem(`pm_cache_${key}`);
+    const existing = cached ? JSON.parse(cached) : {};
+    if (!isApiErrorPayload(existing)) {
+      sessionStorage.setItem(`pm_cache_${key}`, JSON.stringify({ ...existing, ...patch }));
+    }
+  } catch { /* quota */ }
+}
+
+// Combined page payloads (one round trip per view)
+export const getDashboard = () => request('/api/dashboard');
+export const getNewRequestsPage = () => request('/api/admin/requests/page');
+export const getPilot2Workspace = () => request('/api/pilot2/workspace');
+
 // Inboxes
 export const getInboxes = () => request('/api/pilot2/inboxes');
 export const connectInbox = (email, title) =>

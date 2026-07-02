@@ -7,8 +7,8 @@ import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
-import { loadWithCache, writeCache } from '../utils/pilot2Api';
-import { fetchJson, getApiUrl } from '../utils/api';
+import { loadWithCache, patchCache, getNewRequestsPage } from '../utils/pilot2Api';
+import { getApiUrl } from '../utils/api';
 
 const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (newest first)' },
@@ -243,19 +243,20 @@ export default function Requests() {
   // ── New requests data ──
   const [newRequests, setNewRequests] = useState([]);
   const [liveDirectory, setLiveDirectory] = useState([]);
+  const [tableLoading, setTableLoading] = useState(true);
 
   useEffect(() => {
-    // Cached copies render instantly; fresh data replaces them.
+    const applyPage = (data) => {
+      setNewRequests(data.requests);
+      setLiveDirectory(data.persons);
+      setTableLoading(false);
+    };
     const load = () => {
-      loadWithCache('requests_new', () =>
-        fetchJson('/api/admin/requests?status=new'),
-        setNewRequests,
-      ).catch((err) => console.error(err));
-
-      loadWithCache('directory_persons', () =>
-        fetchJson('/api/persons'),
-        setLiveDirectory,
-      ).catch((err) => console.error(err));
+      loadWithCache('requests_page', getNewRequestsPage, applyPage)
+        .catch((err) => {
+          console.error(err);
+          setTableLoading(false);
+        });
     };
     load();
     const refresh = () => { if (!document.hidden) load(); };
@@ -452,7 +453,7 @@ export default function Requests() {
 
       setNewRequests((prev) => {
         const next = [...created, ...prev];
-        writeCache('requests_new', next);
+        patchCache('requests_page', { requests: next });
         return next;
       });
       showToast(
@@ -476,7 +477,7 @@ export default function Requests() {
       
       setNewRequests((prev) => {
         const next = prev.filter((r) => r.id !== req.id);
-        writeCache('requests_new', next);
+        patchCache('requests_page', { requests: next });
         return next;
       });
       showToast(
@@ -716,6 +717,7 @@ export default function Requests() {
           emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
           compact
           centerHeaders
+          loading={tableLoading}
         />
       </div>
 
