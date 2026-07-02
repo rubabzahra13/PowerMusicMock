@@ -1,5 +1,6 @@
-// Pilot 2 API client — same base URL convention as the Pilot 1 pages.
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Pilot 2 API client — same base URL convention as the Pilot 1 pages
+// (see utils/api.js: localhost in dev, same-origin in production).
+import API_BASE from './api';
 
 async function request(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
