@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { getTemplates, createTemplate, updateTemplate, deleteTemplate, loadWithCache } from '../utils/pilot2Api';
-import { Toast, useToast, Modal, SelectDropdown } from '../components/ui';
+import { Toast, useToast, Modal, SelectDropdown, CardListSkeleton } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 
 // ─── Language content swapper ──────────────────────────────────────────────────
@@ -93,11 +93,19 @@ export default function TemplateManagement() {
   // Cached copy renders instantly; fresh data replaces it, and window focus
   // revalidates so edits from other tabs/devices appear.
   const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
   useEffect(() => {
     let cancelled = false;
     const load = () =>
-      loadWithCache('templates', getTemplates, (rows) => { if (!cancelled) setTemplates(rows); })
-        .catch((err) => showToast(`Could not load templates: ${err.message}`, 'error'));
+      loadWithCache('templates', getTemplates, (rows) => {
+        if (!cancelled) {
+          setTemplates(rows);
+          setTemplatesLoading(false);
+        }
+      }).catch((err) => {
+        if (!cancelled) setTemplatesLoading(false);
+        showToast(`Could not load templates: ${err.message}`, 'error');
+      });
     load();
     const refresh = () => { if (!document.hidden) load(); };
     window.addEventListener('focus', refresh);
@@ -456,7 +464,11 @@ export default function TemplateManagement() {
 
           {/* Scrollable template list */}
           <div className="flex-1 overflow-y-auto min-h-0">
-            {displayedTemplates.length === 0 ? (
+            {templatesLoading ? (
+              <div className="p-3">
+                <CardListSkeleton rows={6} />
+              </div>
+            ) : displayedTemplates.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full p-6 text-center">
                 <FileText className="w-10 h-10 text-[var(--color-text-muted)] mb-3 opacity-40" />
                 <p className="text-sm font-semibold text-[var(--color-text-primary)]">No templates found</p>

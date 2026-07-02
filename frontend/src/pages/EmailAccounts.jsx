@@ -3,7 +3,7 @@ import { Mail, Link2, Unlink } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import PageHeader from '../components/layout/PageHeader';
 import DottedScroll from '../components/ui/DottedScroll';
-import { Toast, useToast } from '../components/ui';
+import { Toast, useToast, CardListSkeleton } from '../components/ui';
 import { getInboxes, connectInbox, disconnectInbox, loadWithCache } from '../utils/pilot2Api';
 
 function connectedDate(iso) {
@@ -15,11 +15,16 @@ export default function GmailAccounts() {
   const { showToast } = useToast();
   const [accounts, setAccounts] = useState([]);
   const [busyId, setBusyId] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(() => {
-    // Cached copy renders instantly; fresh data replaces it.
-    loadWithCache('inboxes', getInboxes, setAccounts)
-      .catch((err) => showToast(`Could not load inboxes: ${err.message}`, 'error'));
+    loadWithCache('inboxes', getInboxes, (rows) => {
+      setAccounts(rows);
+      setLoading(false);
+    }).catch((err) => {
+      setLoading(false);
+      showToast(`Could not load inboxes: ${err.message}`, 'error');
+    });
   }, [showToast]);
 
   useEffect(() => {
@@ -72,7 +77,9 @@ export default function GmailAccounts() {
       />
 
       <DottedScroll>
-        {accounts.map((account) => {
+        {loading ? (
+          <CardListSkeleton rows={4} />
+        ) : accounts.map((account) => {
           const isConnected = account.status === 'Connected';
           return (
             <div

@@ -23,13 +23,31 @@ export function StackedTextCell({ primary, secondary }) {
   );
 }
 
+function TableBodySkeleton({ columns, rows = 6 }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <tr key={rowIndex} className="border-b border-[var(--color-border-default)] last:border-b-0">
+          {columns.map((column) => (
+            <td key={column.key} className="px-3 py-2.5">
+              <div className="animate-pulse rounded-md bg-[var(--color-surface-highlight)] h-4 w-full max-w-[120px]" />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export default function DataTable({
   columns,
   rows,
   onRowClick,
   emptyMessage = 'No data available',
   compact = false,
-  centerHeaders = false
+  centerHeaders = false,
+  loading = false,
+  skeletonRows = 6,
 }) {
   const isRowClickable = typeof onRowClick === 'function';
 
@@ -59,7 +77,9 @@ export default function DataTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-[var(--color-border-default)]">
-          {rows && rows.length > 0 ? (
+          {loading ? (
+            <TableBodySkeleton columns={columns} rows={skeletonRows} />
+          ) : rows && rows.length > 0 ? (
             rows.map((row, rowIndex) => (
               <tr
                 key={row.id || rowIndex}

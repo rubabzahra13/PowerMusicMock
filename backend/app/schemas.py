@@ -165,3 +165,14 @@ class ActivityOut(BaseModel):
 class KpiOut(BaseModel):
     pendingRequests: int
     usersInLedger: int
+
+
+class DashboardOut(BaseModel):
+    kpis: KpiOut
+    pendingRequests: List[RequestOut]
+    activity: List[ActivityOut]
+
+
+class NewRequestsPageOut(BaseModel):
+    requests: List[RequestOut]
+    persons: List[PersonOut]
