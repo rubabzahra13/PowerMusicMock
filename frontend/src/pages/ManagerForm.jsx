@@ -256,9 +256,9 @@ export default function ManagerForm() {
                     <input
                       type="text"
                       required
-                      disabled
                       value={managerForm.firstName}
-                      className="w-full px-3 py-1.5 bg-gray-50 border border-[var(--color-border-default)] rounded-md text-sm text-[var(--color-text-secondary)] cursor-not-allowed opacity-80"
+                      onChange={(e) => handleManagerChange('firstName', e.target.value)}
+                      className="w-full px-3 py-1.5 bg-white border border-[var(--color-border-default)] rounded-md text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
                     />
                   </div>
                   <div>
@@ -268,9 +268,9 @@ export default function ManagerForm() {
                     <input
                       type="text"
                       required
-                      disabled
                       value={managerForm.lastName}
-                      className="w-full px-3 py-1.5 bg-gray-50 border border-[var(--color-border-default)] rounded-md text-sm text-[var(--color-text-secondary)] cursor-not-allowed opacity-80"
+                      onChange={(e) => handleManagerChange('lastName', e.target.value)}
+                      className="w-full px-3 py-1.5 bg-white border border-[var(--color-border-default)] rounded-md text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
                     />
                   </div>
                 </div>
@@ -282,10 +282,17 @@ export default function ManagerForm() {
                     <input
                       type="email"
                       required
-                      disabled
                       value={managerForm.email}
-                      className="w-full px-3 py-1.5 bg-gray-50 border border-[var(--color-border-default)] rounded-md text-sm text-[var(--color-text-secondary)] cursor-not-allowed opacity-80"
+                      onChange={(e) => handleManagerChange('email', e.target.value)}
+                      className={`w-full px-3 py-1.5 bg-white border rounded-md text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors ${
+                        !managerEmailValid ? 'border-red-500 focus:border-red-500' : 'border-[var(--color-border-default)]'
+                      }`}
                     />
+                    {!managerEmailValid && (
+                      <span className="block text-[10px] text-red-500 font-semibold mt-1">
+                        Email must end with @puregym.com
+                      </span>
+                    )}
                   </div>
 
                   <div>
@@ -295,9 +302,9 @@ export default function ManagerForm() {
                     <input
                       type="text"
                       required
-                      disabled
                       value={managerForm.club}
-                      className="w-full px-3 py-1.5 bg-gray-50 border border-[var(--color-border-default)] rounded-md text-sm text-[var(--color-text-secondary)] cursor-not-allowed opacity-80"
+                      onChange={(e) => handleManagerChange('club', e.target.value)}
+                      className="w-full px-3 py-1.5 bg-white border border-[var(--color-border-default)] rounded-md text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
                     />
                   </div>
                 </div>
