@@ -1,9 +1,10 @@
 """Pilot 2 · Inbound Email Management API."""
 
+import hmac
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
@@ -424,19 +425,38 @@ def reject_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
     return suggestion
 
 
-# GET is allowed because Vercel cron jobs only send GET requests.
+def require_cron_secret(request: Request, secret: Optional[str] = None) -> None:
+    """Guard the job-trigger endpoints. Open when PILOT2_CRON_SECRET is unset
+    (local dev); otherwise the caller must present the shared secret via
+    X-Cron-Secret, Authorization: Bearer, or a ?secret= query parameter."""
+    expected = config.CRON_SECRET
+    if not expected:
+        return
+    provided = (
+        request.headers.get("x-cron-secret")
+        or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        or secret
+        or ""
+    )
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Invalid or missing cron secret.")
+
+
+# GET is allowed because hosted cron services typically only send GET requests.
 @router.api_route("/poll", methods=["GET", "POST"])
-def trigger_poll(db: Session = Depends(get_db)):
+def trigger_poll(request: Request, secret: Optional[str] = None, db: Session = Depends(get_db)):
     """Manually fetch new Gmail messages (also runs on a schedule in live
-    mode; Vercel cron can hit this endpoint on serverless hosting)."""
+    mode; an external cron service hits this endpoint on serverless hosting)."""
+    require_cron_secret(request, secret)
     processed = pipeline.poll_all_accounts(db)
     return {"emailsProcessed": processed}
 
 
-# GET is allowed because Vercel cron jobs only send GET requests.
+# GET is allowed because hosted cron services typically only send GET requests.
 @router.api_route("/learning/distill", methods=["GET", "POST"], response_model=schemas.DistillResultOut)
-def trigger_distillation(db: Session = Depends(get_db)):
+def trigger_distillation(request: Request, secret: Optional[str] = None, db: Session = Depends(get_db)):
     """Manual trigger for the learning job (also runs nightly on a schedule)."""
+    require_cron_secret(request, secret)
     result = run_distillation(db)
     return {
         "editsProcessed": result.edits_processed,

@@ -34,6 +34,11 @@ GOOGLE_REDIRECT_URI = os.getenv(
     "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/pilot2/inboxes/oauth/callback"
 )
 
+# Shared secret for the poll/distill trigger endpoints. When set, callers
+# must send it (X-Cron-Secret header, Authorization: Bearer, or ?secret=).
+# Leave empty in local dev to keep the endpoints open.
+CRON_SECRET = os.getenv("PILOT2_CRON_SECRET", "")
+
 # Background jobs
 POLL_INTERVAL_MINUTES = int(os.getenv("PILOT2_POLL_INTERVAL_MINUTES", "1"))
 DISTILL_HOUR_UTC = int(os.getenv("PILOT2_DISTILL_HOUR_UTC", "2"))
