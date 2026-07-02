@@ -25,6 +25,18 @@ def list_inboxes(db: Session = Depends(get_db)):
     return db.query(models.EmailAccount).order_by(models.EmailAccount.id).all()
 
 
+@router.get("/workspace", response_model=schemas.Pilot2WorkspaceOut)
+def get_workspace(db: Session = Depends(get_db)):
+    inboxes = db.query(models.EmailAccount).order_by(models.EmailAccount.id).all()
+    emails = (
+        db.query(models.Email)
+        .filter(models.Email.draft_status != "Ignored")
+        .order_by(models.Email.received_at.desc())
+        .all()
+    )
+    return {"emails": emails, "inboxes": inboxes}
+
+
 @router.post("/inboxes/connect")
 def connect_inbox(payload: schemas.InboxConnectIn, db: Session = Depends(get_db)):
     account = (

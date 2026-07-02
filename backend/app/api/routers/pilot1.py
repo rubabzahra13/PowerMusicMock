@@ -46,6 +46,32 @@ def get_kpis(db: Session = Depends(get_db)):
     users = db.query(models.Person).count()
     return {"pendingRequests": pending, "usersInLedger": users}
 
+
+@router.get("/api/dashboard", response_model=schemas.DashboardOut)
+def get_dashboard(db: Session = Depends(get_db)):
+    pending = (
+        db.query(models.Request)
+        .filter(models.Request.status == "new")
+        .order_by(models.Request.received_at.desc())
+        .all()
+    )
+    assign_display_ids(pending, status_attr="status", date_attr="received_at")
+    activity = (
+        db.query(models.Activity)
+        .order_by(models.Activity.timestamp.desc())
+        .limit(10)
+        .all()
+    )
+    users = db.query(models.Person).count()
+    return {
+        "kpis": {
+            "pendingRequests": len(pending),
+            "usersInLedger": users,
+        },
+        "pendingRequests": pending,
+        "activity": activity,
+    }
+
 @router.get("/api/activity", response_model=List[schemas.ActivityOut])
 def get_activity(db: Session = Depends(get_db)):
     return db.query(models.Activity).order_by(models.Activity.timestamp.desc()).limit(10).all()
@@ -151,6 +177,23 @@ def get_admin_requests(status: Optional[str] = None, db: Session = Depends(get_d
         assign_display_ids(db_requests, status_attr="status", date_attr="received_at")
         
     return db_requests
+
+@router.get("/api/admin/requests/page", response_model=schemas.NewRequestsPageOut)
+def get_new_requests_page(db: Session = Depends(get_db)):
+    db_requests = (
+        db.query(models.Request)
+        .filter(models.Request.status == "new")
+        .order_by(models.Request.received_at.desc())
+        .all()
+    )
+    assign_display_ids(db_requests, status_attr="status", date_attr="received_at")
+    people = (
+        db.query(models.Person)
+        .order_by(models.Person.date_added.desc())
+        .all()
+    )
+    assign_display_ids(people, status_attr="status", date_attr="date_added")
+    return {"requests": db_requests, "persons": people}
 
 @router.post("/api/admin/requests/{request_id}/mark-handled", response_model=schemas.RequestOut)
 def mark_request_handled(request_id: str, db: Session = Depends(get_db)):
