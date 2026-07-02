@@ -6,10 +6,9 @@ import { Toast, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { authenticatedFetch } from '../utils/api';
-import { ENFORCE_DOMAIN_CHECK } from '../config';
 
 export default function ManagerForm() {
-  const { user, profile, logout } = useAuth();
+  const { user, profile, appConfig, logout } = useAuth();
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [liveDirectoryData, setLiveDirectoryData] = useState([]);
@@ -88,11 +87,10 @@ export default function ManagerForm() {
     const email = managerForm.email.trim();
     if (email === '') return true; // don't show error until something is typed
     
-    // ENFORCE_DOMAIN_CHECK imported from config
-    if (!ENFORCE_DOMAIN_CHECK) return true;
+    if (appConfig && !appConfig.enforceDomainCheck) return true;
 
     return email.toLowerCase().endsWith('@puregym.com');
-  }, [managerForm.email]);
+  }, [managerForm.email, appConfig]);
 
   // Submit check
   const isFormValid = useMemo(() => {

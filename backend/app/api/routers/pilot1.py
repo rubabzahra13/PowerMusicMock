@@ -13,6 +13,12 @@ from app.display import assign_display_ids
 
 router = APIRouter()
 
+@router.get("/api/config")
+def get_config():
+    return {
+        "enforceDomainCheck": ENFORCE_DOMAIN_CHECK
+    }
+
 @router.get("/api/auth/me")
 def get_me(user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     user_id = user.get("sub") or user.get("id")

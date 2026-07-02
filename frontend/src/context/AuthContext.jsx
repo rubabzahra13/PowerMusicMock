@@ -20,14 +20,27 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [role, setRole] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [appConfig, setAppConfig] = useState({ enforceDomainCheck: true });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
 
-    // 1. Get initial session
-    supabase.auth.getSession().then(async ({ data: { session: initialSession } }) => {
+    // Fetch config and initial session concurrently
+    Promise.all([
+      supabase.auth.getSession(),
+      fetch('http://localhost:8000/api/config')
+        .then(res => res.json())
+        .catch(err => {
+          console.error('Failed to fetch backend configuration:', err);
+          return { enforceDomainCheck: true }; // secure fallback
+        })
+    ]).then(async ([sessionData, configData]) => {
       if (!active) return;
+
+      setAppConfig(configData);
+
+      const initialSession = sessionData.data.session;
       setSession(initialSession);
       const currentUser = initialSession?.user ?? null;
       setUser(currentUser);
@@ -177,7 +190,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, role, profile, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, session, role, profile, appConfig, loading, login, signup, logout }}>
       {children}
     </AuthContext.Provider>
   );
