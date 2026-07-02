@@ -14,6 +14,28 @@ class DatabaseConnectionError(Exception):
     """Raised when the database cannot be reached."""
 
 
+def _force_ipv4(url: str) -> str:
+    """Pin the connection to the host's IPv4 address via psycopg's hostaddr.
+
+    Some hosts (e.g. Vercel serverless) cannot open outbound IPv6 sockets,
+    while Supabase hostnames often resolve to IPv6 first — connections then
+    fail with 'Cannot assign requested address'. TLS still validates against
+    the hostname. No-op if the host has no IPv4 or is already pinned.
+    """
+    try:
+        parsed = urlparse(url)
+        if not parsed.hostname or "hostaddr=" in (parsed.query or ""):
+            return url
+        infos = socket.getaddrinfo(
+            parsed.hostname, parsed.port or 5432, socket.AF_INET, socket.SOCK_STREAM
+        )
+        ipv4 = infos[0][4][0]
+        separator = "&" if parsed.query else "?"
+        return f"{url}{separator}hostaddr={ipv4}"
+    except (socket.gaierror, OSError, IndexError):
+        return url
+
+
 def get_database_url() -> str:
     url = os.getenv("DATABASE_URL")
     if not url:
@@ -23,10 +45,10 @@ def get_database_url() -> str:
         )
 
     if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+psycopg://", 1)
-    if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+psycopg://", 1)
-    return url
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+    elif url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+psycopg://", 1)
+    return _force_ipv4(url)
 
 
 def _is_network_unreachable(error: Exception) -> bool:
