@@ -17,7 +17,7 @@ import {
 import PageHeader from '../components/layout/PageHeader';
 import { kpiData, recentActivity, pendingRequests } from '../data/mockData';
 import { loadWithCache } from '../utils/pilot2Api';
-import { getApiUrl } from '../utils/api';
+import { fetchJson } from '../utils/api';
 
 const CUSTOMER_ACTIVITY_TYPES = new Set(['template_updated']);
 const PARTNER_ACTIVITY_TYPES = new Set([
@@ -284,17 +284,17 @@ export default function Home() {
     // revalidates so the dashboard stays current.
     const load = () => {
       loadWithCache('home_pending', () =>
-        fetch(getApiUrl('/api/admin/requests?status=new')).then(res => res.json()),
+        fetchJson('/api/admin/requests?status=new'),
         setLivePendingRequests,
       ).catch(err => console.error(err));
 
       loadWithCache('home_kpis', () =>
-        fetch(getApiUrl('/api/kpis')).then(res => res.json()),
+        fetchJson('/api/kpis'),
         setLiveKpis,
       ).catch(err => console.error(err));
 
       loadWithCache('home_activity', () =>
-        fetch(getApiUrl('/api/activity')).then(res => res.json()),
+        fetchJson('/api/activity'),
         setLivePartnerActivity,
       ).catch(err => console.error(err));
     };
@@ -325,7 +325,7 @@ export default function Home() {
     if (activity.link) navigate('/new-requests');
   };
 
-  const duplicateAlerts = livePendingRequests
+  const duplicateAlerts = (Array.isArray(livePendingRequests) ? livePendingRequests : [])
     .filter((req) => req.tags?.includes('Already Exists'))
     .map((req) => ({
       id: req.id,
@@ -349,7 +349,7 @@ export default function Home() {
     .filter((a) => CUSTOMER_ACTIVITY_TYPES.has(a.type))
     .slice(0, 4);
 
-  const partnerActivity = livePartnerActivity
+  const partnerActivity = (Array.isArray(livePartnerActivity) ? livePartnerActivity : [])
     .filter((a) => PARTNER_ACTIVITY_TYPES.has(a.type))
     .map((a) => ({
       ...a,

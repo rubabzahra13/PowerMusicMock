@@ -1,18 +1,22 @@
 // Pilot 2 API client — same base URL convention as the Pilot 1 pages
 // (see utils/api.js: localhost in dev, same-origin in production).
-import API_BASE from './api';
+import API_BASE, { fetchJson } from './api';
 
 async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
+  return fetchJson(path, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try { detail = (await res.json()).detail ?? detail; } catch { /* keep statusText */ }
-    throw new Error(detail);
-  }
-  return res.json();
+}
+
+function isApiErrorPayload(data) {
+  return (
+    data != null
+    && typeof data === 'object'
+    && !Array.isArray(data)
+    && typeof data.detail === 'string'
+    && Object.keys(data).length === 1
+  );
 }
 
 // Stale-while-revalidate: show the last known data instantly from
@@ -21,9 +25,15 @@ async function request(path, options = {}) {
 export async function loadWithCache(key, fetcher, apply) {
   try {
     const cached = sessionStorage.getItem(`pm_cache_${key}`);
-    if (cached) apply(JSON.parse(cached), true);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (!isApiErrorPayload(parsed)) apply(parsed, true);
+    }
   } catch { /* corrupt cache — ignore */ }
   const fresh = await fetcher();
+  if (isApiErrorPayload(fresh)) {
+    throw new Error(fresh.detail);
+  }
   try { sessionStorage.setItem(`pm_cache_${key}`, JSON.stringify(fresh)); } catch { /* quota */ }
   apply(fresh, false);
   return fresh;
