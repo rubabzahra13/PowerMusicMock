@@ -1,22 +1,20 @@
 {
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "dist" }
-    },
-    {
-      "src": "backend/index.py",
-      "use": "@vercel/python",
-      "config": { "includeFiles": "app/**" }
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "installCommand": "cd frontend && npm install",
+  "functions": {
+    "backend/index.py": {
+      "maxDuration": 60,
+      "includeFiles": "backend/app/**"
     }
-  ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "backend/index.py" },
-    { "src": "/health", "dest": "backend/index.py" },
-    { "src": "/docs(.*)", "dest": "backend/index.py" },
-    { "src": "/openapi.json", "dest": "backend/index.py" },
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/index.html" }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/backend/index.py" },
+    { "source": "/health", "destination": "/backend/index.py" },
+    { "source": "/docs", "destination": "/backend/index.py" },
+    { "source": "/docs/(.*)", "destination": "/backend/index.py" },
+    { "source": "/openapi.json", "destination": "/backend/index.py" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
