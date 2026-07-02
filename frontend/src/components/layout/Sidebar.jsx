@@ -1,14 +1,28 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Home,
   Mail,
   FileText,
   Settings,
   Inbox,
-  Users
+  Users,
+  LogOut
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Sidebar() {
+  const { logout, user } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/admin/login');
+    } catch (err) {
+      console.error('Failed to log out:', err);
+    }
+  };
+
   const navItemClass = ({ isActive }) =>
     `flex items-center gap-3 h-9 px-3 rounded-md transition-all duration-200 text-sm font-medium ${
       isActive
@@ -81,15 +95,27 @@ export default function Sidebar() {
       </div>
 
       {/* Bottom Profile */}
-      <div className="p-4 border-t border-white/10 bg-black/10 flex items-center gap-3 shrink-0">
-        <div className="w-8 h-8 rounded-full bg-[var(--color-brand-accent)] flex items-center justify-center font-bold text-sm text-white shrink-0 shadow-inner">
-          A
+      <div className="p-4 border-t border-white/10 bg-black/10 flex items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-[var(--color-brand-accent)] flex items-center justify-center font-bold text-sm text-white shrink-0 shadow-inner">
+            {(user?.user_metadata?.firstName || 'A').substring(0, 1).toUpperCase()}
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-medium text-white truncate">
+              {user?.user_metadata?.firstName || 'Andrea'}
+            </span>
+            <span className="text-xs text-white/55 truncate">Administrator</span>
+          </div>
         </div>
-        <div className="flex flex-col min-w-0">
-          <span className="text-sm font-medium text-white truncate">Andrea</span>
-          <span className="text-xs text-[var(--color-text-muted)] truncate">Administrator</span>
-        </div>
+        <button
+          onClick={handleLogout}
+          title="Sign Out"
+          className="text-white/60 hover:text-white hover:bg-white/10 p-1.5 rounded transition-all cursor-pointer shrink-0"
+        >
+          <LogOut className="w-4.5 h-4.5" />
+        </button>
       </div>
     </aside>
   );
 }
+

@@ -2,8 +2,8 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
+import { authenticatedFetch } from '../utils/api';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
-import { pendingRequests, directoryData } from '../data/mockData';
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown } from '../components/ui';
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
 import PageHeader from '../components/layout/PageHeader';
@@ -240,7 +240,20 @@ export default function Requests() {
   const [actionTab, setActionTab] = useState('All');
 
   // ── New requests data ──
-  const [newRequests, setNewRequests] = useState(pendingRequests);
+  const [newRequests, setNewRequests] = useState([]);
+  const [liveDirectory, setLiveDirectory] = useState([]);
+
+  useEffect(() => {
+    authenticatedFetch('http://localhost:8000/api/admin/requests?status=new')
+      .then((res) => res.json())
+      .then((data) => setNewRequests(data))
+      .catch((err) => console.error(err));
+
+    authenticatedFetch('http://localhost:8000/api/persons')
+      .then((res) => res.json())
+      .then((data) => setLiveDirectory(data))
+      .catch((err) => console.error(err));
+  }, []);
 
   // ── Filter / Sort states ──
   const [searchQuery, setSearchQuery] = useState('');
@@ -411,51 +424,54 @@ export default function Requests() {
     managerForm.club.trim() &&
     personForms.every(isPersonFormValid);
 
-  const handleCreateRequest = (e) => {
+  const handleCreateRequest = async (e) => {
     e.preventDefault();
     if (!isModalFormValid) return;
 
-    const maxId = newRequests.reduce((m, r) => Math.max(m, r.displayId || 0), 0);
-    const timestamp = Date.now();
-    const created = personForms.map((person, index) => ({
-      id: `req-manual-${timestamp}-${index}`,
-      displayId: maxId + index + 1,
-      receivedAt: new Date().toISOString(),
-      submittedBy: {
-        firstName: 'Admin',
-        lastName: '',
-        email: managerForm.email,
-        club: 'Manual entry'
-      },
-      person: {
-        firstName: person.firstName,
-        lastName: person.lastName,
-        email: person.email,
-        location: person.location
-      },
-      action,
-      notes,
-      tags: [],
-      createdBy: 'Andrea (Admin)'
-    }));
+    try {
+      const response = await authenticatedFetch('http://localhost:8000/api/admin/requests/manual', {
+        method: 'POST',
+        body: JSON.stringify({
+          submittedBy: managerForm,
+          people: personForms,
+          action: action,
+          notes: notes
+        })
+      });
+      if (!response.ok) throw new Error('Failed to create manual requests');
+      const created = await response.json();
 
-    setNewRequests((prev) => [...created, ...prev]);
-    showToast(
-      created.length === 1 ? 'Request created.' : `${created.length} requests created.`,
-      'success'
-    );
-    setShowAddManualModal(false);
-    resetManualForm();
+      setNewRequests((prev) => [...created, ...prev]);
+      showToast(
+        created.length === 1 ? 'Request created.' : `${created.length} requests created.`,
+        'success'
+      );
+      setShowAddManualModal(false);
+      resetManualForm();
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to create request.', 'error');
+    }
   };
 
-  const completeRequest = (req) => {
-    setNewRequests((prev) => prev.filter((r) => r.id !== req.id));
-    showToast(
-      `${req.person.firstName} ${req.person.lastName} marked as ${req.action === 'Add' ? 'Added' : 'Removed'}.`,
-      'success'
-    );
-    setSelectedNewRequest((current) => (current?.id === req.id ? null : current));
-    setConfirmActionRequest(null);
+  const completeRequest = async (req) => {
+    try {
+      const response = await authenticatedFetch(`http://localhost:8000/api/admin/requests/${req.id}/mark-handled`, {
+        method: 'POST'
+      });
+      if (!response.ok) throw new Error('Failed to mark handled');
+      
+      setNewRequests((prev) => prev.filter((r) => r.id !== req.id));
+      showToast(
+        `${req.person.firstName} ${req.person.lastName} marked as ${req.action === 'Add' ? 'Added' : 'Removed'}.`,
+        'success'
+      );
+      setSelectedNewRequest((current) => (current?.id === req.id ? null : current));
+      setConfirmActionRequest(null);
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to complete request.', 'error');
+    }
   };
 
   // ── Column definitions — shared structure ──
@@ -586,9 +602,10 @@ export default function Requests() {
       <Toast />
 
       <PageHeader
-        section="Partner support"
-        title="New requests"
+        section="Partner Support"
+        title="New Requests"
         description="Review and action incoming add and remove requests."
+        workspace
         actions={
           <button
             onClick={() => { resetManualForm(actionTab === 'All' ? 'Add' : actionTab); setShowAddManualModal(true); }}
@@ -686,7 +703,7 @@ export default function Requests() {
       <Modal
         isOpen={showAddManualModal}
         onClose={() => { setShowAddManualModal(false); resetManualForm(); }}
-        title="Add request manually"
+        title="Add Request Manually"
         wide
         headerExtra={
           <div className="flex items-center bg-white rounded-lg p-0.5 gap-0.5 ring-1 ring-[rgba(26,26,46,0.08)] shadow-sm">
@@ -864,7 +881,7 @@ export default function Requests() {
         request={selectedNewRequest}
         isOpen={selectedNewRequest !== null}
         onClose={() => setSelectedNewRequest(null)}
-        directory={directoryData}
+        ledger={liveDirectory}
         onConfirmAction={(req) => setConfirmActionRequest(req)}
       />
 
