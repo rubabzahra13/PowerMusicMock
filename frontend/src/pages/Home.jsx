@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
 import { kpiData, recentActivity, pendingRequests } from '../data/mockData';
+import { loadWithCache } from '../utils/pilot2Api';
 
 const CUSTOMER_ACTIVITY_TYPES = new Set(['template_updated']);
 const PARTNER_ACTIVITY_TYPES = new Set([
@@ -278,20 +279,28 @@ export default function Home() {
   const [livePartnerActivity, setLivePartnerActivity] = useState([]);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/admin/requests?status=new')
-      .then(res => res.json())
-      .then(data => setLivePendingRequests(data))
-      .catch(err => console.error(err));
+    // Cached copies render instantly; fresh data replaces them. Focus
+    // revalidates so the dashboard stays current.
+    const load = () => {
+      loadWithCache('home_pending', () =>
+        fetch('http://localhost:8000/api/admin/requests?status=new').then(res => res.json()),
+        setLivePendingRequests,
+      ).catch(err => console.error(err));
 
-    fetch('http://localhost:8000/api/kpis')
-      .then(res => res.json())
-      .then(data => setLiveKpis(data))
-      .catch(err => console.error(err));
+      loadWithCache('home_kpis', () =>
+        fetch('http://localhost:8000/api/kpis').then(res => res.json()),
+        setLiveKpis,
+      ).catch(err => console.error(err));
 
-    fetch('http://localhost:8000/api/activity')
-      .then(res => res.json())
-      .then(data => setLivePartnerActivity(data))
-      .catch(err => console.error(err));
+      loadWithCache('home_activity', () =>
+        fetch('http://localhost:8000/api/activity').then(res => res.json()),
+        setLivePartnerActivity,
+      ).catch(err => console.error(err));
+    };
+    load();
+    const refresh = () => { if (!document.hidden) load(); };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
   }, []);
 
   const formatActivityDate = (isoString) => {
