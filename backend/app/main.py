@@ -1,3 +1,5 @@
+import os
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -17,6 +19,9 @@ origins = [
     "http://localhost:5174",
     "https://power-music-mock.vercel.app",
 ]
+# Extra allowed frontend origins for deployment, comma-separated.
+# e.g. EXTRA_CORS_ORIGINS=https://powermusic-app.vercel.app,https://ops.powermusic.com
+origins += [o.strip() for o in os.getenv("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
