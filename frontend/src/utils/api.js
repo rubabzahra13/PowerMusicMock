@@ -11,4 +11,20 @@ export const getApiUrl = (path) => {
   return `${API_BASE}${cleanPath}`;
 };
 
+/** Fetch JSON from the API; throws with server `detail` on non-2xx. */
+export async function fetchJson(path, options = {}) {
+  const res = await fetch(getApiUrl(path), options);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? detail;
+    } catch {
+      /* keep statusText */
+    }
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+  }
+  return res.json();
+}
+
 export default API_BASE;
