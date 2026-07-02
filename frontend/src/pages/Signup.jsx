@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Toast, useToast } from '../components/ui';
+import { Zap, AlertCircle, MailOpen } from 'lucide-react';
 
 export default function Signup() {
   const { signup, appConfig } = useAuth();
@@ -17,6 +18,7 @@ export default function Signup() {
   });
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isSuccess, setIsSuccess] = useState(false);
 
   const handleChange = (field, val) => {
     setFormData((prev) => ({ ...prev, [field]: val }));
@@ -52,8 +54,8 @@ export default function Signup() {
         club
       });
       
-      showToast('Registration successful! Please sign in.', 'success');
-      navigate('/login');
+      showToast('Registration successful! Please verify your email.', 'success');
+      setIsSuccess(true);
     } catch (err) {
       console.error(err);
       setErrorMsg(err.message || 'Registration failed.');
@@ -77,114 +79,143 @@ export default function Signup() {
           <p className="text-sm text-[var(--color-text-secondary)] mt-1">Manager Submission Portal</p>
         </div>
 
-        {/* Form Card */}
-        <div className="bg-white rounded-2xl border border-[var(--color-border-default)] shadow-xl p-8">
-          <h2 className="text-lg font-bold text-[var(--color-brand-primary)] mb-6">Create Manager Account</h2>
-
-          {errorMsg && (
-            <div className="mb-5 p-3 rounded-lg bg-red-50 border border-red-100 flex items-start gap-2.5 text-xs text-[var(--color-tag-removed-text)]">
-              <AlertCircle className="w-4 h-4 shrink-0 text-red-500 mt-0.5" />
-              <span>{errorMsg}</span>
+        {isSuccess ? (
+          /* Success Verification Card */
+          <div className="bg-white rounded-2xl border border-[var(--color-border-default)] shadow-xl p-8 text-center flex flex-col items-center">
+            <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center mb-6">
+              <MailOpen className="w-8 h-8 text-green-600" />
             </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
-                  First Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="John"
-                  value={formData.firstName}
-                  onChange={(e) => handleChange('firstName', e.target.value)}
-                  disabled={loading}
-                  className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
-                  Last Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="Doe"
-                  value={formData.lastName}
-                  onChange={(e) => handleChange('lastName', e.target.value)}
-                  disabled={loading}
-                  className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
-                Email Address (@puregym.com)
-              </label>
-              <input
-                type="email"
-                placeholder="john.doe@puregym.com"
-                value={formData.email}
-                onChange={(e) => handleChange('email', e.target.value)}
-                disabled={loading}
-                className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
-                Club / Location
-              </label>
-              <input
-                type="text"
-                placeholder="Leeds Central"
-                value={formData.club}
-                onChange={(e) => handleChange('club', e.target.value)}
-                disabled={loading}
-                className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
-                Password (min 6 characters)
-              </label>
-              <input
-                type="password"
-                placeholder="••••••••••••"
-                value={formData.password}
-                onChange={(e) => handleChange('password', e.target.value)}
-                disabled={loading}
-                className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
-                required
-              />
+            <h2 className="text-xl font-bold text-[var(--color-brand-primary)] mb-3">Verify Your Email</h2>
+            <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed mb-6">
+              We've sent a verification link to <strong className="text-[var(--color-brand-primary)]">{formData.email}</strong>.
+            </p>
+            
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 text-left text-xs text-[var(--color-text-secondary)] leading-relaxed mb-8 w-full">
+              <p className="font-semibold text-gray-700 mb-2">💡 Next Steps:</p>
+              <ol className="list-decimal list-inside space-y-1 text-gray-600">
+                <li>Check your email inbox (and spam/junk folder).</li>
+                <li>Click the verification link in the email to activate your account.</li>
+                <li>Once verified, click the button below to sign in.</li>
+              </ol>
             </div>
 
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full h-10 mt-2 bg-[var(--color-brand-primary)] hover:bg-opacity-95 text-white text-sm font-semibold rounded-lg shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+              onClick={() => navigate('/login')}
+              className="w-full h-11 bg-[var(--color-brand-primary)] hover:bg-opacity-95 text-white font-semibold rounded-lg transition-all shadow-md flex items-center justify-center cursor-pointer"
             >
-              {loading ? (
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              ) : (
-                'Create Account'
-              )}
+              Go to Sign In
             </button>
-          </form>
-
-          <div className="mt-6 text-center text-xs text-[var(--color-text-secondary)]">
-            Already have a manager account?{' '}
-            <Link to="/login" className="text-[var(--color-brand-accent)] font-semibold hover:underline">
-              Sign in
-            </Link>
           </div>
-        </div>
+        ) : (
+          /* Form Card */
+          <div className="bg-white rounded-2xl border border-[var(--color-border-default)] shadow-xl p-8">
+            <h2 className="text-lg font-bold text-[var(--color-brand-primary)] mb-6">Create Manager Account</h2>
+
+            {errorMsg && (
+              <div className="mb-5 p-3 rounded-lg bg-red-50 border border-red-100 flex items-start gap-2.5 text-xs text-[var(--color-tag-removed-text)]">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-500 mt-0.5" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
+                    First Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="John"
+                    value={formData.firstName}
+                    onChange={(e) => handleChange('firstName', e.target.value)}
+                    disabled={loading}
+                    className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
+                    Last Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Doe"
+                    value={formData.lastName}
+                    onChange={(e) => handleChange('lastName', e.target.value)}
+                    disabled={loading}
+                    className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
+                  Email Address {appConfig.enforceDomainCheck && '(@puregym.com)'}
+                </label>
+                <input
+                  type="email"
+                  placeholder={appConfig.enforceDomainCheck ? "john.doe@puregym.com" : "john.doe@gmail.com"}
+                  value={formData.email}
+                  onChange={(e) => handleChange('email', e.target.value)}
+                  disabled={loading}
+                  className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
+                  Club / Location
+                </label>
+                <input
+                  type="text"
+                  placeholder="Leeds Central"
+                  value={formData.club}
+                  onChange={(e) => handleChange('club', e.target.value)}
+                  disabled={loading}
+                  className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
+                  Password (min 6 characters)
+                </label>
+                <input
+                  type="password"
+                  placeholder="••••••••••••"
+                  value={formData.password}
+                  onChange={(e) => handleChange('password', e.target.value)}
+                  disabled={loading}
+                  className="w-full h-10 px-3 bg-[var(--color-surface-bg)] text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-brand-accent)] transition-all"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full h-10 mt-2 bg-[var(--color-brand-primary)] hover:bg-opacity-95 text-white text-sm font-semibold rounded-lg shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  'Create Account'
+                )}
+              </button>
+            </form>
+
+            <div className="mt-6 text-center text-xs text-[var(--color-text-secondary)]">
+              Already have a manager account?{' '}
+              <Link to="/login" className="text-[var(--color-brand-accent)] font-semibold hover:underline">
+                Sign in
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -15,6 +15,39 @@ const fetchUserProfile = async (accessToken) => {
   return response.json();
 };
 
+const getLoginFriendlyError = (error) => {
+  if (!error) return 'Authentication failed.';
+  const msg = error.message || '';
+  if (msg.includes('Email not confirmed') || msg.includes('Email not verified')) {
+    return 'Your email address has not been verified yet. Please check your inbox and click the verification link before signing in.';
+  }
+  if (msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')) {
+    return 'Incorrect email or password. Please verify your credentials and try again.';
+  }
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+    return 'Network error: Please check your internet connection and try again.';
+  }
+  if (msg.includes('too many requests') || msg.includes('Too many login attempts')) {
+    return 'Too many login attempts. Your account has been temporarily locked. Please try again in a few minutes.';
+  }
+  return error.message || 'Authentication failed. Please try again.';
+};
+
+const getSignupFriendlyError = (error) => {
+  if (!error) return 'Registration failed.';
+  const msg = error.message || '';
+  if (msg.includes('already registered') || msg.includes('User already exists')) {
+    return 'An account with this email address is already registered. Please sign in instead.';
+  }
+  if (msg.includes('Password should be at least 6 characters')) {
+    return 'Password is too weak. It must be at least 6 characters long.';
+  }
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+    return 'Network error: Unable to connect to the authentication server. Please check your internet connection and try again.';
+  }
+  return error.message || 'Registration failed. Please check your details and try again.';
+};
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
@@ -135,7 +168,9 @@ export function AuthProvider({ children }) {
         email,
         password,
       });
-      if (error) throw error;
+      if (error) {
+        throw new Error(getLoginFriendlyError(error));
+      }
 
       // 3. Fetch verified database role from backend
       const profileData = await fetchUserProfile(data.session.access_token);
@@ -151,6 +186,8 @@ export function AuthProvider({ children }) {
       setRole(profileData.role);
       setProfile(profileData);
       return data;
+    } catch (err) {
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -168,8 +205,12 @@ export function AuthProvider({ children }) {
           }
         }
       });
-      if (error) throw error;
+      if (error) {
+        throw new Error(getSignupFriendlyError(error));
+      }
       return data;
+    } catch (err) {
+      throw err;
     } finally {
       setLoading(false);
     }
