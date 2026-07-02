@@ -4,6 +4,7 @@ import { format, parseISO } from 'date-fns';
 
 import { DataTable, Tag, Drawer, SelectDropdown } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
+import { loadWithCache } from '../utils/pilot2Api';
 
 const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (oldest first)' },
@@ -201,10 +202,17 @@ export default function UserLedger() {
   const [liveUserLedger, setLiveUserLedger] = useState([]);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/persons')
-      .then((res) => res.json())
-      .then((data) => setLiveUserLedger(data))
-      .catch((err) => console.error(err));
+    // Cached copy renders instantly; fresh data replaces it.
+    const load = () => {
+      loadWithCache('directory_persons', () =>
+        fetch('http://localhost:8000/api/persons').then((res) => res.json()),
+        setLiveUserLedger,
+      ).catch((err) => console.error(err));
+    };
+    load();
+    const refresh = () => { if (!document.hidden) load(); };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
   }, []);
 
   const [searchQuery, setSearchQuery] = useState('');

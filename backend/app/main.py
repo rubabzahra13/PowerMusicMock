@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import DatabaseConnectionError, get_db, verify_database_connection, engine
-from app.api.routers import pilot1
+from app.api.routers import pilot1, pilot2
+from app.pilot2 import scheduler
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -34,3 +35,14 @@ def health_check(db: Session = Depends(get_db)):
     return {"status": "ok", "database": "connected"}
 
 app.include_router(pilot1.router)
+app.include_router(pilot2.router)
+
+
+@app.on_event("startup")
+def start_background_jobs():
+    scheduler.start()
+
+
+@app.on_event("shutdown")
+def stop_background_jobs():
+    scheduler.shutdown()
