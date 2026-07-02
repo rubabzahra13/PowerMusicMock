@@ -7,7 +7,7 @@ import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
-import { loadWithCache, writeCache } from '../utils/pilot2Api';
+import { loadWithCache, writeCache, API_BASE } from '../utils/pilot2Api';
 
 const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (newest first)' },
@@ -247,12 +247,12 @@ export default function Requests() {
     // Cached copies render instantly; fresh data replaces them.
     const load = () => {
       loadWithCache('requests_new', () =>
-        fetch('http://localhost:8000/api/admin/requests?status=new').then((res) => res.json()),
+        fetch(`${API_BASE}/api/admin/requests?status=new`).then((res) => res.json()),
         setNewRequests,
       ).catch((err) => console.error(err));
 
       loadWithCache('directory_persons', () =>
-        fetch('http://localhost:8000/api/persons').then((res) => res.json()),
+        fetch(`${API_BASE}/api/persons`).then((res) => res.json()),
         setLiveDirectory,
       ).catch((err) => console.error(err));
     };
@@ -436,7 +436,7 @@ export default function Requests() {
     if (!isModalFormValid) return;
 
     try {
-      const response = await fetch('http://localhost:8000/api/admin/requests/manual', {
+      const response = await fetch(`${API_BASE}/api/admin/requests/manual`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -468,7 +468,7 @@ export default function Requests() {
 
   const completeRequest = async (req) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/admin/requests/${req.id}/mark-handled`, {
+      const response = await fetch(`${API_BASE}/api/admin/requests/${req.id}/mark-handled`, {
         method: 'POST'
       });
       if (!response.ok) throw new Error('Failed to mark handled');
