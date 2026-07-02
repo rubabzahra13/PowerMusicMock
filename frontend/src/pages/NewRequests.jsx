@@ -8,7 +8,7 @@ import RequestDetailDrawer from '../components/RequestDetailDrawer';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 import { loadWithCache, writeCache } from '../utils/pilot2Api';
-import { getApiUrl } from '../utils/api';
+import { fetchJson, getApiUrl } from '../utils/api';
 
 const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (newest first)' },
@@ -248,12 +248,12 @@ export default function Requests() {
     // Cached copies render instantly; fresh data replaces them.
     const load = () => {
       loadWithCache('requests_new', () =>
-        fetch(getApiUrl('/api/admin/requests?status=new')).then((res) => res.json()),
+        fetchJson('/api/admin/requests?status=new'),
         setNewRequests,
       ).catch((err) => console.error(err));
 
       loadWithCache('directory_persons', () =>
-        fetch(getApiUrl('/api/persons')).then((res) => res.json()),
+        fetchJson('/api/persons'),
         setLiveDirectory,
       ).catch((err) => console.error(err));
     };
