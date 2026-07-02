@@ -424,7 +424,8 @@ def reject_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
     return suggestion
 
 
-@router.post("/poll")
+# GET is allowed because Vercel cron jobs only send GET requests.
+@router.api_route("/poll", methods=["GET", "POST"])
 def trigger_poll(db: Session = Depends(get_db)):
     """Manually fetch new Gmail messages (also runs on a schedule in live
     mode; Vercel cron can hit this endpoint on serverless hosting)."""
@@ -432,7 +433,8 @@ def trigger_poll(db: Session = Depends(get_db)):
     return {"emailsProcessed": processed}
 
 
-@router.post("/learning/distill", response_model=schemas.DistillResultOut)
+# GET is allowed because Vercel cron jobs only send GET requests.
+@router.api_route("/learning/distill", methods=["GET", "POST"], response_model=schemas.DistillResultOut)
 def trigger_distillation(db: Session = Depends(get_db)):
     """Manual trigger for the learning job (also runs nightly on a schedule)."""
     result = run_distillation(db)
