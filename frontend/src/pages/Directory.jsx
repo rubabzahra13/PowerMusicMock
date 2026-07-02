@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
+import { authenticatedFetch } from '../utils/api';
 import { format, parseISO } from 'date-fns';
 
 import { DataTable, Tag, Drawer, SelectDropdown } from '../components/ui';
@@ -201,7 +202,7 @@ export default function UserLedger() {
   const [liveUserLedger, setLiveUserLedger] = useState([]);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/persons')
+    authenticatedFetch('http://localhost:8000/api/persons')
       .then((res) => res.json())
       .then((data) => setLiveUserLedger(data))
       .catch((err) => console.error(err));

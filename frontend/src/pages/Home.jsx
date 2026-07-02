@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { authenticatedFetch } from '../utils/api';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 import {
   AlertTriangle,
@@ -278,17 +279,17 @@ export default function Home() {
   const [livePartnerActivity, setLivePartnerActivity] = useState([]);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/admin/requests?status=new')
+    authenticatedFetch('http://localhost:8000/api/admin/requests?status=new')
       .then(res => res.json())
       .then(data => setLivePendingRequests(data))
       .catch(err => console.error(err));
 
-    fetch('http://localhost:8000/api/kpis')
+    authenticatedFetch('http://localhost:8000/api/kpis')
       .then(res => res.json())
       .then(data => setLiveKpis(data))
       .catch(err => console.error(err));
 
-    fetch('http://localhost:8000/api/activity')
+    authenticatedFetch('http://localhost:8000/api/activity')
       .then(res => res.json())
       .then(data => setLivePartnerActivity(data))
       .catch(err => console.error(err));

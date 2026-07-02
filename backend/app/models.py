@@ -54,3 +54,10 @@ class Activity(Base):
     type = Column(String) 
     description = Column(String)
     linked_request_id = Column(String, nullable=True)
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+    
+    user_id = Column(String, primary_key=True)
+    role = Column(String, nullable=False)
+
