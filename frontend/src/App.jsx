@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import AppLayout from './components/layout/AppLayout';
+import { AuthProvider } from './context/AuthContext';
+import { AdminRoute, ProtectedRoute } from './components/ProtectedRoute';
 
 import Home from './pages/Home';
 import ManagerForm from './pages/ManagerForm';
@@ -9,64 +11,78 @@ import TemplateManagement from './pages/TemplateLibrary';
 import EmailAccounts from './pages/EmailAccounts';
 import EmailQueue from './pages/EmailQueue';
 
+import AdminLogin from './pages/AdminLogin';
+import Login from './pages/Login';
+import Signup from './pages/Signup';
+
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Admin Dashboard Routes (Wrapped in AppLayout) */}
-        <Route
-          path="/"
-          element={
-            <AppLayout>
-              <Home />
-            </AppLayout>
-          }
-        />
-        <Route
-          path="/new-requests"
-          element={
-            <AppLayout>
-              <NewRequests />
-            </AppLayout>
-          }
-        />
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Auth Routes */}
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
 
-        <Route
-          path="/directory"
-          element={
-            <AppLayout>
-              <Directory />
-            </AppLayout>
-          }
-        />
-        <Route
-          path="/templates"
-          element={
-            <AppLayout>
-              <TemplateManagement />
-            </AppLayout>
-          }
-        />
-        <Route
-          path="/email-responses"
-          element={
-            <AppLayout>
-              <EmailQueue />
-            </AppLayout>
-          }
-        />
-        <Route
-          path="/email-accounts"
-          element={
-            <AppLayout>
-              <EmailAccounts />
-            </AppLayout>
-          }
-        />
+          {/* Admin Dashboard Routes (Guarded by AdminRoute) */}
+          <Route element={<AdminRoute />}>
+            <Route
+              path="/"
+              element={
+                <AppLayout>
+                  <Home />
+                </AppLayout>
+              }
+            />
+            <Route
+              path="/new-requests"
+              element={
+                <AppLayout>
+                  <NewRequests />
+                </AppLayout>
+              }
+            />
+            <Route
+              path="/directory"
+              element={
+                <AppLayout>
+                  <Directory />
+                </AppLayout>
+              }
+            />
+            <Route
+              path="/templates"
+              element={
+                <AppLayout>
+                  <TemplateManagement />
+                </AppLayout>
+              }
+            />
+            <Route
+              path="/email-responses"
+              element={
+                <AppLayout>
+                  <EmailQueue />
+                </AppLayout>
+              }
+            />
+            <Route
+              path="/email-accounts"
+              element={
+                <AppLayout>
+                  <EmailAccounts />
+                </AppLayout>
+              }
+            />
+          </Route>
 
-        {/* Public Routes (No Layout Wrapper) */}
-        <Route path="/submit" element={<ManagerForm />} />
-      </Routes>
-    </BrowserRouter>
+          {/* Manager Form (Guarded by ProtectedRoute) */}
+          <Route element={<ProtectedRoute allowedRoles={['manager']} />}>
+            <Route path="/submit" element={<ManagerForm />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }

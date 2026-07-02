@@ -7,13 +7,35 @@ from sqlalchemy import func
 
 from app import models
 from app import schemas
-from app.api.dependencies import get_db
+from app.api.dependencies import get_db, verify_admin, verify_manager_or_admin, get_current_user, verify_manager
+from app.config import ENFORCE_DOMAIN_CHECK
 from app.display import assign_display_ids
 
 router = APIRouter()
 
+@router.get("/api/auth/me")
+def get_me(user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    user_id = user.get("sub") or user.get("id")
+    email = user.get("email")
+    
+    role_record = db.query(models.UserRole).filter(models.UserRole.user_id == user_id).first()
+    if not role_record:
+        raise HTTPException(status_code=403, detail="Role not configured in user_roles table")
+        
+    user_metadata = user.get("user_metadata", {}) or user.get("raw_user_meta_data", {}) or {}
+    
+    return {
+        "uid": user_id,
+        "email": email,
+        "role": role_record.role,
+        "firstName": user_metadata.get("firstName", ""),
+        "lastName": user_metadata.get("lastName", ""),
+        "club": user_metadata.get("club", "")
+    }
+
+
 @router.get("/api/requests", response_model=List[schemas.RequestOut])
-def get_requests(db: Session = Depends(get_db)):
+def get_requests(db: Session = Depends(get_db), user: dict = Depends(verify_admin)):
     db_requests = (
         db.query(models.Request)
         .order_by(models.Request.received_at.desc())
@@ -27,7 +49,7 @@ def get_requests(db: Session = Depends(get_db)):
     return db_requests
 
 @router.get("/api/persons", response_model=List[schemas.PersonOut])
-def get_people(db: Session = Depends(get_db)):
+def get_people(db: Session = Depends(get_db), user: dict = Depends(verify_manager_or_admin)):
     people = (
         db.query(models.Person)
         .order_by(models.Person.date_added.desc())
@@ -41,20 +63,22 @@ def get_people(db: Session = Depends(get_db)):
     return people
 
 @router.get("/api/kpis", response_model=schemas.KpiOut)
-def get_kpis(db: Session = Depends(get_db)):
+def get_kpis(db: Session = Depends(get_db), user: dict = Depends(verify_admin)):
     pending = db.query(models.Request).filter(models.Request.status == "new").count()
     users = db.query(models.Person).count()
     return {"pendingRequests": pending, "usersInLedger": users}
 
 @router.get("/api/activity", response_model=List[schemas.ActivityOut])
-def get_activity(db: Session = Depends(get_db)):
+def get_activity(db: Session = Depends(get_db), user: dict = Depends(verify_admin)):
     return db.query(models.Activity).order_by(models.Activity.timestamp.desc()).limit(10).all()
 
 @router.post("/api/requests", response_model=schemas.RequestOut)
-def create_request(req_in: schemas.RequestIn, db: Session = Depends(get_db)):
+def create_request(req_in: schemas.RequestIn, db: Session = Depends(get_db), user: dict = Depends(verify_manager)):
     # 1. Validate submitted_by_email ends in @puregym.com
+    # ENFORCE_DOMAIN_CHECK loaded from app.config
+    
     sub_email = (req_in.submittedBy.email or "").strip()
-    if not sub_email.lower().endswith("@puregym.com"):
+    if ENFORCE_DOMAIN_CHECK and not sub_email.lower().endswith("@puregym.com"):
         raise HTTPException(status_code=400, detail="Submitter email must be a puregym.com address.")
         
     # 2. Duplicate check
@@ -138,7 +162,7 @@ def create_request(req_in: schemas.RequestIn, db: Session = Depends(get_db)):
     return new_request
 
 @router.get("/api/admin/requests", response_model=List[schemas.RequestOut])
-def get_admin_requests(status: Optional[str] = None, db: Session = Depends(get_db)):
+def get_admin_requests(status: Optional[str] = None, db: Session = Depends(get_db), user: dict = Depends(verify_admin)):
     query = db.query(models.Request)
     if status:
         query = query.filter(models.Request.status == status)
@@ -153,7 +177,7 @@ def get_admin_requests(status: Optional[str] = None, db: Session = Depends(get_d
     return db_requests
 
 @router.post("/api/admin/requests/{request_id}/mark-handled", response_model=schemas.RequestOut)
-def mark_request_handled(request_id: str, db: Session = Depends(get_db)):
+def mark_request_handled(request_id: str, db: Session = Depends(get_db), user: dict = Depends(verify_admin)):
     req = db.query(models.Request).filter(models.Request.id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
@@ -256,7 +280,7 @@ def mark_request_handled(request_id: str, db: Session = Depends(get_db)):
     return req
 
 @router.post("/api/admin/requests/manual", response_model=List[schemas.RequestOut])
-def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depends(get_db)):
+def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depends(get_db), user: dict = Depends(verify_admin)):
     all_ids = db.query(models.Request.id).all()
     max_num = 0
     for (rid,) in all_ids:

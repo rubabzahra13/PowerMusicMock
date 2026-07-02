@@ -78,3 +78,12 @@ You need Python 3.9+ installed to run the backend.
 ### Database
 
 The backend connects to a remote Supabase PostgreSQL database. Make sure your `backend/.env` file is properly populated with the `DATABASE_URL`.
+
+Frontend Global Flag
+Configuration File: 
+
+frontend/src/config.js
+
+Flag: export const ENFORCE_DOMAIN_CHECK = true;
+
+Behavior: Setting this to false disables the email domain validations in both the Manager Form (ManagerForm.jsx) and the Signup view (Signup.jsx).

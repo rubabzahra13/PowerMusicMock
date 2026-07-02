@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
+import { authenticatedFetch } from '../utils/api';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown } from '../components/ui';
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
@@ -243,12 +244,12 @@ export default function Requests() {
   const [liveDirectory, setLiveDirectory] = useState([]);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/admin/requests?status=new')
+    authenticatedFetch('http://localhost:8000/api/admin/requests?status=new')
       .then((res) => res.json())
       .then((data) => setNewRequests(data))
       .catch((err) => console.error(err));
 
-    fetch('http://localhost:8000/api/persons')
+    authenticatedFetch('http://localhost:8000/api/persons')
       .then((res) => res.json())
       .then((data) => setLiveDirectory(data))
       .catch((err) => console.error(err));
@@ -428,9 +429,8 @@ export default function Requests() {
     if (!isModalFormValid) return;
 
     try {
-      const response = await fetch('http://localhost:8000/api/admin/requests/manual', {
+      const response = await authenticatedFetch('http://localhost:8000/api/admin/requests/manual', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           submittedBy: managerForm,
           people: personForms,
@@ -456,7 +456,7 @@ export default function Requests() {
 
   const completeRequest = async (req) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/admin/requests/${req.id}/mark-handled`, {
+      const response = await authenticatedFetch(`http://localhost:8000/api/admin/requests/${req.id}/mark-handled`, {
         method: 'POST'
       });
       if (!response.ok) throw new Error('Failed to mark handled');
