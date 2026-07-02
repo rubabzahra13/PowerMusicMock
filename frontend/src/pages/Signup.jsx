@@ -1,12 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Zap, AlertCircle } from 'lucide-react';
-import { ENFORCE_DOMAIN_CHECK } from '../config';
 import { Toast, useToast } from '../components/ui';
 
 export default function Signup() {
-  const { signup } = useAuth();
+  const { signup, appConfig } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
@@ -35,7 +33,7 @@ export default function Signup() {
       return;
     }
 
-    if (ENFORCE_DOMAIN_CHECK && !email.toLowerCase().endsWith('@puregym.com')) {
+    if (appConfig.enforceDomainCheck && !email.toLowerCase().endsWith('@puregym.com')) {
       setErrorMsg('Email address must end with @puregym.com.');
       return;
     }
