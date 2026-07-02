@@ -3,13 +3,14 @@ import { Zap, CheckCircle, Search } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { directoryData } from '../data/mockData';
 import { Toast, useToast } from '../components/ui';
+import { getApiUrl } from '../utils/api';
 
 export default function ManagerForm() {
   const { showToast } = useToast();
   const [liveDirectoryData, setLiveDirectoryData] = useState([]);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/persons')
+    fetch(getApiUrl('/api/persons'))
       .then((res) => res.json())
       .then((data) => setLiveDirectoryData(data))
       .catch((err) => console.error(err));
@@ -94,7 +95,7 @@ export default function ManagerForm() {
     if (!isFormValid) return;
 
     try {
-      const response = await fetch('http://localhost:8000/api/requests', {
+      const response = await fetch(getApiUrl('/api/requests'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

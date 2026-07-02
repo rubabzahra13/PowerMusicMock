@@ -17,6 +17,7 @@ import {
 import PageHeader from '../components/layout/PageHeader';
 import { kpiData, recentActivity, pendingRequests } from '../data/mockData';
 import { loadWithCache } from '../utils/pilot2Api';
+import { getApiUrl } from '../utils/api';
 
 const CUSTOMER_ACTIVITY_TYPES = new Set(['template_updated']);
 const PARTNER_ACTIVITY_TYPES = new Set([
@@ -283,17 +284,17 @@ export default function Home() {
     // revalidates so the dashboard stays current.
     const load = () => {
       loadWithCache('home_pending', () =>
-        fetch('http://localhost:8000/api/admin/requests?status=new').then(res => res.json()),
+        fetch(getApiUrl('/api/admin/requests?status=new')).then(res => res.json()),
         setLivePendingRequests,
       ).catch(err => console.error(err));
 
       loadWithCache('home_kpis', () =>
-        fetch('http://localhost:8000/api/kpis').then(res => res.json()),
+        fetch(getApiUrl('/api/kpis')).then(res => res.json()),
         setLiveKpis,
       ).catch(err => console.error(err));
 
       loadWithCache('home_activity', () =>
-        fetch('http://localhost:8000/api/activity').then(res => res.json()),
+        fetch(getApiUrl('/api/activity')).then(res => res.json()),
         setLivePartnerActivity,
       ).catch(err => console.error(err));
     };
