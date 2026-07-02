@@ -58,7 +58,7 @@ You need Python 3.9+ installed to run the backend.
    ```bash
    # Windows
    python -m venv venv
-   venv\Scripts\activate
+   .\venv\Scripts\activate
 
    # macOS/Linux
    python3 -m venv venv
