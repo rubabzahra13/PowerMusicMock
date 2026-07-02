@@ -1,6 +1,5 @@
-// Backend base URL. On deployment set VITE_API_URL (e.g. in Vercel project
-// settings) to the deployed backend; locally it falls back to localhost.
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Pilot 2 API client — same base URL convention as the Pilot 1 pages.
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 async function request(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
