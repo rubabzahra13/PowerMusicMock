@@ -2,6 +2,8 @@ import os
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app import models
@@ -18,6 +20,24 @@ except Exception as exc:  # noqa: BLE001
     print(f"WARNING: skipping create_all — database not reachable at startup: {exc}")
 
 app = FastAPI(title="Power Music MVP API")
+
+
+@app.exception_handler(DatabaseConnectionError)
+async def database_connection_error_handler(_request, exc: DatabaseConnectionError):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(OperationalError)
+async def database_operational_error_handler(_request, exc: OperationalError):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "Database connection failed. On Vercel, set DATABASE_URL to your "
+                "Supabase session pooler URI with a URL-encoded password (e.g. @ → %40)."
+            )
+        },
+    )
 
 origins = [
     "http://localhost:3000",

@@ -39,10 +39,11 @@ GOOGLE_REDIRECT_URI = os.getenv(
 # Leave empty in local dev to keep the endpoints open.
 CRON_SECRET = os.getenv("PILOT2_CRON_SECRET", "")
 
-# Background jobs
+# Background jobs — disabled on Vercel by default (use cron + PILOT2_CRON_SECRET).
 POLL_INTERVAL_MINUTES = int(os.getenv("PILOT2_POLL_INTERVAL_MINUTES", "1"))
 DISTILL_HOUR_UTC = int(os.getenv("PILOT2_DISTILL_HOUR_UTC", "2"))
-SCHEDULER_ENABLED = os.getenv("PILOT2_SCHEDULER_ENABLED", "true").lower() == "true"
+_default_scheduler = "false" if os.getenv("VERCEL") else "true"
+SCHEDULER_ENABLED = os.getenv("PILOT2_SCHEDULER_ENABLED", _default_scheduler).lower() == "true"
 
 SIGNATURE = os.getenv("PILOT2_SIGNATURE", "Kind regards,\nPower Music Team")
 
