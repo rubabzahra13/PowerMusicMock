@@ -1,0 +1,242 @@
+import { createContext, useContext, useEffect, useState } from 'react';
+import { supabase } from '../supabaseClient';
+
+const AuthContext = createContext({});
+
+const fetchUserProfile = async (accessToken) => {
+  const response = await fetch('http://localhost:8000/api/auth/me', {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  });
+  if (!response.ok) {
+    throw new Error('Failed to retrieve user role from database.');
+  }
+  return response.json();
+};
+
+const getLoginFriendlyError = (error) => {
+  if (!error) return 'Authentication failed.';
+  const msg = error.message || '';
+  if (msg.includes('Email not confirmed') || msg.includes('Email not verified')) {
+    return 'Your email address has not been verified yet. Please check your inbox and click the verification link before signing in.';
+  }
+  if (msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')) {
+    return 'Incorrect email or password. Please verify your credentials and try again.';
+  }
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+    return 'Network error: Please check your internet connection and try again.';
+  }
+  if (msg.includes('too many requests') || msg.includes('Too many login attempts')) {
+    return 'Too many login attempts. Your account has been temporarily locked. Please try again in a few minutes.';
+  }
+  return error.message || 'Authentication failed. Please try again.';
+};
+
+const getSignupFriendlyError = (error) => {
+  if (!error) return 'Registration failed.';
+  const msg = error.message || '';
+  if (msg.includes('already registered') || msg.includes('User already exists')) {
+    return 'An account with this email address is already registered. Please sign in instead.';
+  }
+  if (msg.includes('Password should be at least 6 characters')) {
+    return 'Password is too weak. It must be at least 6 characters long.';
+  }
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+    return 'Network error: Unable to connect to the authentication server. Please check your internet connection and try again.';
+  }
+  return error.message || 'Registration failed. Please check your details and try again.';
+};
+
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
+  const [role, setRole] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [appConfig, setAppConfig] = useState({ enforceDomainCheck: true });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    // Fetch config and initial session concurrently
+    Promise.all([
+      supabase.auth.getSession(),
+      fetch('http://localhost:8000/api/config')
+        .then(res => res.json())
+        .catch(err => {
+          console.error('Failed to fetch backend configuration:', err);
+          return { enforceDomainCheck: true }; // secure fallback
+        })
+    ]).then(async ([sessionData, configData]) => {
+      if (!active) return;
+
+      setAppConfig(configData);
+
+      const initialSession = sessionData.data.session;
+      setSession(initialSession);
+      const currentUser = initialSession?.user ?? null;
+      setUser(currentUser);
+
+      if (initialSession) {
+        try {
+          const profileData = await fetchUserProfile(initialSession.access_token);
+          if (active) {
+            setRole(profileData.role);
+            setProfile(profileData);
+          }
+        } catch (err) {
+          console.error('Error fetching initial profile:', err);
+          await supabase.auth.signOut();
+          if (active) {
+            setUser(null);
+            setSession(null);
+            setRole(null);
+            setProfile(null);
+          }
+        }
+      } else {
+        if (active) {
+          setRole(null);
+          setProfile(null);
+        }
+      }
+      if (active) {
+        setLoading(false);
+      }
+    });
+
+    // 2. Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+      if (!active) return;
+
+      if (event === 'SIGNED_OUT') {
+        setSession(null);
+        setUser(null);
+        setRole(null);
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      setSession(currentSession);
+      const currentUser = currentSession?.user ?? null;
+      setUser(currentUser);
+
+      if (currentSession) {
+        try {
+          const profileData = await fetchUserProfile(currentSession.access_token);
+          if (active) {
+            setRole(profileData.role);
+            setProfile(profileData);
+          }
+        } catch (err) {
+          console.error('Error fetching updated profile:', err);
+          await supabase.auth.signOut();
+          if (active) {
+            setSession(null);
+            setUser(null);
+            setRole(null);
+            setProfile(null);
+          }
+        }
+      } else {
+        if (active) {
+          setRole(null);
+          setProfile(null);
+        }
+      }
+      if (active) {
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const login = async (email, password, expectedRole) => {
+    setLoading(true);
+    try {
+      // 1. Force logout first to guarantee clean session transition
+      await supabase.auth.signOut();
+      
+      // 2. Perform authentication
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) {
+        throw new Error(getLoginFriendlyError(error));
+      }
+
+      // 3. Fetch verified database role from backend
+      const profileData = await fetchUserProfile(data.session.access_token);
+      
+      // 4. Validate role
+      if (profileData.role !== expectedRole) {
+        await supabase.auth.signOut();
+        throw new Error(`Access Denied: You do not have permission to access the ${expectedRole} portal.`);
+      }
+
+      setUser(data.user);
+      setSession(data.session);
+      setRole(profileData.role);
+      setProfile(profileData);
+      return data;
+    } catch (err) {
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signup = async (email, password, metadata = {}) => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            ...metadata
+          }
+        }
+      });
+      if (error) {
+        throw new Error(getSignupFriendlyError(error));
+      }
+      return data;
+    } catch (err) {
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      setUser(null);
+      setSession(null);
+      setRole(null);
+      setProfile(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, session, role, profile, appConfig, loading, login, signup, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
