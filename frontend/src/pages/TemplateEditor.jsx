@@ -335,6 +335,7 @@ export default function TemplateEditor({ mode = 'new' }) {
       <Modal
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
+        confirm
         title="Delete template"
         footer={
           <>
@@ -353,7 +354,7 @@ export default function TemplateEditor({ mode = 'new' }) {
           </>
         }
       >
-        <p className="text-sm font-medium text-gray-700 leading-normal">
+        <p>
           Are you sure you want to delete this template? This cannot be undone.
         </p>
       </Modal>

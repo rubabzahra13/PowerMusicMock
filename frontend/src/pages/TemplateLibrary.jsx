@@ -1,11 +1,16 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Search, FileText, Trash2, Save, X, ChevronDown, Plus, Pencil,
-  SlidersHorizontal, SortAsc
+  SlidersHorizontal, SortAsc, Mail, RotateCcw, Eye, Clock,
+  ChevronLeft, ChevronRight, Link2, Unlink,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { getTemplates, createTemplate, updateTemplate, deleteTemplate, loadWithCache } from '../utils/pilot2Api';
-import { Toast, useToast, Modal, SelectDropdown, CardListSkeleton } from '../components/ui';
+import {
+  getTemplates, createTemplate, updateTemplate, deleteTemplate,
+  restoreTemplate, deleteTemplateForever, getInboxes, loadWithCache, refreshCache, writeCache,
+} from '../utils/pilot2Api';
+import { Toast, useToast, SelectDropdown, CardListSkeleton, Modal } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 
 // ─── Language content swapper ──────────────────────────────────────────────────
@@ -50,76 +55,571 @@ const fmtUpdated = (iso) => {
   catch { return iso; }
 };
 
-// ─── Template List Item ────────────────────────────────────────────────────────
-const TEMPLATE_CATEGORIES = ['All Categories', 'Membership', 'Payments', 'Events', 'General Enquiries', 'Other'];
+const fmtListDate = (iso) => {
+  if (!iso) return '—';
+  try { return format(parseISO(iso), 'd MMM yyyy'); }
+  catch { return iso; }
+};
 
-function TemplateListItem({ template, isSelected, onClick }) {
+// ─── Template List Item ────────────────────────────────────────────────────────
+const TEMPLATE_CATEGORIES = ['Membership', 'Payments', 'Events', 'General Enquiries', 'Other'];
+const CATEGORY_ORDER = TEMPLATE_CATEGORIES.filter((c) => c !== 'All Categories');
+
+const LIBRARY_TABS = [
+  { id: 'templates', label: 'Templates', status: 'Active' },
+  { id: 'drafts', label: 'Drafts', status: 'Draft' },
+  { id: 'deleted', label: 'Deleted', status: 'Archived' },
+];
+
+const DEFAULT_NEW_BODY = 'Hi {{first_name}},\n\n\n\nKind regards,\nPower Music Team';
+const TEMPLATE_PAGE_SIZE = 12;
+
+function templateCreatedAt(template) {
+  return template?.createdAt || template?.lastUpdated;
+}
+
+function templateMatchesDateRange(template, dateFrom, dateTo) {
+  if (!dateFrom && !dateTo) return true;
+  try {
+    const created = parseISO(templateCreatedAt(template));
+    if (dateFrom) {
+      const from = parseISO(dateFrom);
+      from.setHours(0, 0, 0, 0);
+      if (created < from) return false;
+    }
+    if (dateTo) {
+      const to = parseISO(dateTo);
+      to.setHours(23, 59, 59, 999);
+      if (created > to) return false;
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function hasDraftableNewContent(form) {
+  if (!form) return false;
+  return !!(
+    form.name?.trim()
+    || form.subject?.trim()
+    || (form.body && form.body !== DEFAULT_NEW_BODY)
+  );
+}
+
+function groupTemplatesByCategory(templates) {
+  const byCategory = new Map();
+  templates.forEach((template) => {
+    const category = template.category || 'Other';
+    if (!byCategory.has(category)) byCategory.set(category, []);
+    byCategory.get(category).push(template);
+  });
+  const ordered = CATEGORY_ORDER.filter((cat) => byCategory.has(cat));
+  const extras = [...byCategory.keys()].filter((cat) => !CATEGORY_ORDER.includes(cat));
+  return [...ordered, ...extras].map((category) => ({
+    category,
+    items: byCategory.get(category),
+  }));
+}
+
+function templateTimestamp(template) {
+  const ts = new Date(template?.lastUpdated).getTime();
+  return Number.isNaN(ts) ? 0 : ts;
+}
+
+/** Prefer in-flight local edits; otherwise keep whichever copy is newer. */
+function mergeTemplateLists(serverRows, localRows, pendingIds) {
+  const localById = new Map((localRows || []).map((t) => [t.id, t]));
+  const serverById = new Map((serverRows || []).map((t) => [t.id, t]));
+  const allIds = new Set([...localById.keys(), ...serverById.keys()]);
+  const merged = [];
+
+  for (const id of allIds) {
+    const local = localById.get(id);
+    const server = serverById.get(id);
+
+    if (pendingIds.has(id)) {
+      if (local) merged.push(local);
+      continue;
+    }
+    if (!server) {
+      if (local) merged.push(local);
+      continue;
+    }
+    if (!local) {
+      merged.push(server);
+      continue;
+    }
+    merged.push(templateTimestamp(local) >= templateTimestamp(server) ? local : server);
+  }
+  return merged;
+}
+
+function touchTemplate(template, patch) {
+  const next = { ...template, ...patch, lastUpdated: new Date().toISOString() };
+  if (!next.createdAt) next.createdAt = template?.createdAt || template?.lastUpdated || next.lastUpdated;
+  return next;
+}
+
+function LibraryTabs({ activeTab, counts, onChange }) {
+  const tabIds = LIBRARY_TABS.map((tab) => tab.id);
+
+  const focusTab = (tabId) => {
+    requestAnimationFrame(() => {
+      document.getElementById(`library-tab-${tabId}`)?.focus();
+    });
+  };
+
+  const handleKeyDown = (event, tabId) => {
+    const index = tabIds.indexOf(tabId);
+    if (index < 0) return;
+
+    let nextId = null;
+    if (event.key === 'ArrowRight') nextId = tabIds[(index + 1) % tabIds.length];
+    else if (event.key === 'ArrowLeft') nextId = tabIds[(index - 1 + tabIds.length) % tabIds.length];
+    else if (event.key === 'Home') nextId = tabIds[0];
+    else if (event.key === 'End') nextId = tabIds[tabIds.length - 1];
+
+    if (!nextId) return;
+    event.preventDefault();
+    onChange(nextId);
+    focusTab(nextId);
+  };
+
+  return (
+    <div
+      className="px-3 pt-2 pb-0 border-b border-[var(--color-border-default)]"
+      role="tablist"
+      aria-label="Template library views"
+    >
+      <div className="flex items-stretch -mb-px gap-0.5">
+        {LIBRARY_TABS.map((tab) => {
+          const active = activeTab === tab.id;
+          const count = counts[tab.id] ?? 0;
+          const itemLabel = count === 1 ? 'item' : 'items';
+
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              aria-controls={`library-panel-${tab.id}`}
+              id={`library-tab-${tab.id}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onChange(tab.id)}
+              onKeyDown={(event) => handleKeyDown(event, tab.id)}
+              aria-label={`${tab.label}, ${count} ${itemLabel}`}
+              className={`group relative flex flex-1 min-w-0 flex-col items-center justify-center gap-0.5 px-2 py-2.5 rounded-t-md transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35 ${
+                active
+                  ? 'text-[var(--color-brand-primary)]'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]/60'
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`text-xs font-semibold leading-tight truncate max-w-full ${
+                  active ? 'text-[var(--color-brand-primary)]' : 'text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)]'
+                }`}
+              >
+                {tab.label}
+              </span>
+              <span
+                aria-hidden="true"
+                className={`text-[10px] font-medium tabular-nums leading-none ${
+                  active ? 'text-[var(--color-brand-primary)]/75' : 'text-[var(--color-text-muted)]'
+                }`}
+              >
+                {count}
+              </span>
+              {active && (
+                <span
+                  className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--color-brand-primary)]"
+                  aria-hidden="true"
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const TEMPLATE_FIELD_INPUT =
+  'w-full px-3 py-2.5 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] transition-colors focus:outline-none focus:border-[var(--color-brand-primary)]/40 focus:ring-2 focus:ring-[var(--color-brand-primary)]/10';
+
+const TEMPLATE_FIELD_READONLY =
+  'w-full px-3 py-2.5 bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)]';
+
+function TemplateReadonlyField({ label, children, className = '' }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+        {label}
+      </label>
+      <div className={`${TEMPLATE_FIELD_READONLY} ${className}`}>{children}</div>
+    </div>
+  );
+}
+
+function TemplateFieldLabel({ htmlFor, children, hint }) {
+  return (
+    <div className="space-y-0.5">
+      <label
+        htmlFor={htmlFor}
+        className="block text-xs font-semibold text-[var(--color-text-secondary)]"
+      >
+        {children}
+      </label>
+      {hint && <p className="text-[11px] text-[var(--color-text-muted)] leading-snug">{hint}</p>}
+    </div>
+  );
+}
+
+function TemplateModeBadge({ mode }) {
+  const styles = {
+    preview: 'bg-[var(--color-surface-highlight)] text-[var(--color-text-secondary)]',
+    editing: 'bg-[var(--color-brand-primary)]/10 text-[var(--color-brand-primary)]',
+    creating: 'bg-amber-50 text-amber-700',
+    deleted: 'bg-red-50 text-red-700',
+  };
+  const labels = {
+    preview: 'Preview',
+    editing: 'Editing',
+    creating: 'New template',
+    deleted: 'Deleted',
+  };
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold leading-none ${styles[mode]}`}>
+      {mode === 'preview' && <Eye className="w-3 h-3" aria-hidden="true" />}
+      {labels[mode]}
+    </span>
+  );
+}
+
+function TemplateStatusChip({ status, label }) {
+  const displayLabel = label ?? (status === 'Archived' ? 'Deleted' : status);
+  const styles = {
+    Active: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+    Draft: 'bg-amber-50 text-amber-700 ring-amber-100',
+    Archived: 'bg-gray-100 text-gray-600 ring-gray-200',
+  };
+  return (
+    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold leading-none ring-1 ring-inset ${styles[status] || styles.Archived}`}>
+      {displayLabel}
+    </span>
+  );
+}
+
+function TemplateToolbarButton({
+  variant,
+  icon: Icon,
+  label,
+  onClick,
+  ariaLabel,
+  iconClassName = 'w-3.5 h-3.5',
+  className = '',
+}) {
+  const styles = {
+    edit: 'h-9 px-3 gap-1.5 text-xs font-semibold text-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]/8 hover:bg-[var(--color-brand-primary)]/12 focus-visible:ring-[var(--color-brand-primary)]/30',
+    editIcon: 'h-8 w-8 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] focus-visible:ring-[var(--color-brand-primary)]/20',
+    delete: 'h-9 px-3 gap-1.5 text-xs font-semibold text-[var(--color-text-secondary)] border border-[var(--color-border-default)] hover:text-red-600 hover:border-red-200 hover:bg-red-50 focus-visible:ring-red-200',
+    deleteDraft: 'h-9 px-3 gap-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 focus-visible:ring-red-200',
+    deleteDraftIcon: 'h-8 w-8 text-red-600 bg-red-50 hover:bg-red-100 focus-visible:ring-red-200',
+    deleteForever: 'h-9 px-3 gap-1.5 text-xs font-semibold text-[var(--color-text-secondary)] border border-[var(--color-border-default)] hover:text-red-600 hover:border-red-200 hover:bg-red-50 focus-visible:ring-red-200',
+    deleteIcon: 'h-9 w-9 text-[var(--color-text-secondary)] hover:text-red-600 hover:bg-red-50 focus-visible:ring-red-200',
+    binIcon: 'h-8 w-8 text-[var(--color-text-muted)] hover:text-red-600 hover:bg-red-50 focus-visible:ring-red-200',
+    restore: 'h-9 px-3 gap-1.5 text-xs font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm focus-visible:ring-[var(--color-brand-primary)]/40 focus-visible:ring-offset-1',
+    restoreIcon: 'h-8 w-8 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] focus-visible:ring-[var(--color-brand-primary)]/20',
+    cancelIcon: 'h-9 w-9 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] focus-visible:ring-[var(--color-brand-primary)]/20',
+    discardIcon: 'h-9 w-9 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] focus-visible:ring-[var(--color-brand-primary)]/20',
+    discard: 'h-9 px-3 gap-1.5 text-xs font-semibold text-[var(--color-text-secondary)] border border-[var(--color-border-default)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] focus-visible:ring-[var(--color-brand-primary)]/20',
+    save: 'h-9 px-3 gap-1.5 text-xs font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm focus-visible:ring-[var(--color-brand-primary)]/40 focus-visible:ring-offset-1',
+    saveDraft: 'h-9 px-3 gap-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 focus-visible:ring-amber-200',
+    publish: 'h-9 px-3 gap-1.5 text-xs font-semibold text-[var(--color-text-secondary)] border border-[var(--color-border-default)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] focus-visible:ring-[var(--color-brand-primary)]/20',
+  };
+  const iconOnly = variant.endsWith('Icon') || variant === 'binIcon';
   return (
     <button
+      type="button"
       onClick={onClick}
-      className={`w-full text-left px-4 py-3 border-b border-[var(--color-border-default)] transition-colors cursor-pointer ${
+      aria-label={ariaLabel || label}
+      className={`inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 ${styles[variant]} ${className}`}
+    >
+      <Icon className={iconClassName} aria-hidden="true" />
+      {!iconOnly && label && <span>{label}</span>}
+    </button>
+  );
+}
+
+function CategorySection({ category, items, selectedId, onSelect, onEdit, onDelete, onRestore }) {
+  return (
+    <section className="px-3">
+      <div className="flex items-center gap-2 mb-1.5 px-1">
+        <h3 className="text-[11px] font-medium text-[var(--color-text-secondary)] shrink-0">
+          {category}
+        </h3>
+        <div className="flex-1 h-px bg-[var(--color-border-default)]/80" aria-hidden="true" />
+        <span className="text-[10px] font-medium text-[var(--color-text-muted)] tabular-nums shrink-0">
+          {items.length}
+        </span>
+      </div>
+      <div className="rounded-xl border border-[var(--color-border-default)] bg-white shadow-[0_1px_2px_rgba(26,26,46,0.04)] overflow-hidden">
+        {items.map((template, index) => (
+          <TemplateListItem
+            key={template.id}
+            template={template}
+            tab="templates"
+            isSelected={template.id === selectedId}
+            onClick={() => onSelect(template)}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onRestore={onRestore}
+            inCard
+            isLast={index === items.length - 1}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TemplateListItem({
+  template,
+  isSelected,
+  onClick,
+  tab = 'templates',
+  muted = false,
+  inCard = false,
+  isLast = false,
+  onEdit,
+  onDelete,
+  onRestore,
+}) {
+  const showDraftTag = tab === 'deleted' && template.archivedFrom === 'Draft';
+
+  const listActions = (onEdit || onDelete || onRestore) ? (
+    <div
+      className="shrink-0 flex items-center gap-0"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {onRestore && (
+        <TemplateToolbarButton
+          variant="restoreIcon"
+          icon={RotateCcw}
+          label="Restore"
+          className="!h-7 !w-7"
+          onClick={(e) => { e.stopPropagation(); onRestore(template); }}
+        />
+      )}
+      {onEdit && (
+        <TemplateToolbarButton
+          variant="editIcon"
+          icon={Pencil}
+          label="Edit"
+          className="!h-7 !w-7"
+          onClick={(e) => { e.stopPropagation(); onEdit(template); }}
+        />
+      )}
+      {onDelete && (
+        <TemplateToolbarButton
+          variant="binIcon"
+          icon={Trash2}
+          label={tab === 'deleted' ? 'Delete forever' : tab === 'drafts' ? 'Move to deleted' : 'Move to deleted'}
+          iconClassName="w-3.5 h-3.5"
+          className="!h-7 !w-7"
+          onClick={(e) => { e.stopPropagation(); onDelete(template); }}
+        />
+      )}
+    </div>
+  ) : null;
+
+  return (
+    <div
+      className={`${
+        inCard
+          ? `${isLast ? '' : 'border-b border-[var(--color-border-default)]/70'}`
+          : 'border-b border-[var(--color-border-default)]'
+      } ${
+        muted ? 'opacity-75' : ''
+      } ${
         isSelected
-          ? 'bg-[#f4f5f7] border-l-[3px] border-l-[var(--color-brand-primary)]'
+          ? inCard
+            ? 'bg-[var(--color-surface-highlight)]/80'
+            : 'bg-[var(--color-surface-highlight)] border-l-[3px] border-l-[var(--color-brand-primary)]'
           : 'hover:bg-[var(--color-surface-highlight)]/50'
       }`}
     >
-      <div className="min-w-0">
-        <div className={`text-sm truncate ${isSelected ? 'font-semibold text-[var(--color-brand-primary)]' : 'font-medium text-[var(--color-text-primary)]'}`}>
-          {template.name}
+      <div
+        className={`min-w-0 flex items-center gap-2 transition-colors cursor-pointer ${
+          inCard ? 'px-3.5 py-2.5' : 'px-3 py-2.5 pl-[calc(0.75rem-3px)]'
+        } ${isSelected && !inCard ? 'pl-[calc(0.75rem-3px)]' : ''}`}
+        onClick={onClick}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
+        role="button"
+        tabIndex={0}
+      >
+        <div
+          className={`w-7 h-7 rounded-md shrink-0 flex items-center justify-center self-center pointer-events-none ${
+            isSelected ? 'bg-[var(--color-brand-primary)]/10' : 'bg-[var(--color-surface-highlight)]'
+          }`}
+          aria-hidden="true"
+        >
+          <FileText className={`w-3.5 h-3.5 ${isSelected ? 'text-[var(--color-brand-primary)]' : 'text-[var(--color-text-muted)]'}`} />
         </div>
-        <div className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">
-          {template.subject}
-        </div>
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold leading-none ${
-            template.status === 'Active' ? 'bg-emerald-50 text-emerald-700' :
-            template.status === 'Draft' ? 'bg-amber-50 text-amber-700' :
-            'bg-gray-100 text-gray-500'
-          }`}>
-            {template.status}
+        <div className="min-w-0 flex-1 text-left self-center pointer-events-none">
+          <span
+            className={`block text-sm truncate leading-tight ${
+              isSelected ? 'font-semibold text-[var(--color-brand-primary)]' : 'font-medium text-[var(--color-text-primary)]'
+            }`}
+          >
+            {template.name}
           </span>
-          <span className="text-[10px] font-medium text-[var(--color-text-muted)]">{template.category}</span>
+          <span className="block text-[11px] text-[var(--color-text-muted)] truncate leading-tight">
+            {template.subject}
+          </span>
+          <span className="block text-[10px] text-[var(--color-text-muted)] tabular-nums leading-tight pt-0.5">
+            Created {fmtListDate(templateCreatedAt(template))}
+            <span className="px-1 text-[var(--color-border-default)]" aria-hidden="true">·</span>
+            Updated {fmtListDate(template.lastUpdated)}
+          </span>
+          {tab !== 'templates' && (
+            <span className="flex items-center gap-1.5 pt-1 flex-wrap">
+              {showDraftTag && (
+                <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold leading-none bg-amber-50 text-amber-700">
+                  Deleted draft
+                </span>
+              )}
+              {!muted && !showDraftTag && (
+                <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold leading-none ${
+                  template.status === 'Active' ? 'bg-emerald-50 text-emerald-700' :
+                  template.status === 'Draft' ? 'bg-amber-50 text-amber-700' :
+                  'bg-gray-100 text-gray-500'
+                }`}
+                >
+                  {template.status === 'Archived' ? 'Deleted' : template.status}
+                </span>
+              )}
+              <span className="text-[10px] font-medium text-[var(--color-text-muted)]">{template.category}</span>
+            </span>
+          )}
         </div>
+        {listActions}
       </div>
-    </button>
+    </div>
   );
 }
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function TemplateManagement() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   // Template state (single source of truth: the backend database).
   // Cached copy renders instantly; fresh data replaces it, and window focus
   // revalidates so edits from other tabs/devices appear.
   const [templates, setTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [inboxes, setInboxes] = useState([]);
+  const [inboxFilter, setInboxFilter] = useState('');
+  const [libraryTab, setLibraryTab] = useState('templates');
+
+  const templatesRef = useRef([]);
+  const pendingTemplateOpsRef = useRef(new Set());
+  const templateOpEpochRef = useRef(new Map());
+
+  const beginTemplateOp = useCallback((id) => {
+    const epoch = (templateOpEpochRef.current.get(id) || 0) + 1;
+    templateOpEpochRef.current.set(id, epoch);
+    pendingTemplateOpsRef.current.add(id);
+    return epoch;
+  }, []);
+
+  const isCurrentTemplateOp = useCallback(
+    (id, epoch) => templateOpEpochRef.current.get(id) === epoch,
+    [],
+  );
+
+  const endTemplateOp = useCallback((id, epoch) => {
+    if (!isCurrentTemplateOp(id, epoch)) return false;
+    pendingTemplateOpsRef.current.delete(id);
+    return true;
+  }, [isCurrentTemplateOp]);
+
+  const commitTemplates = useCallback((updater) => {
+    setTemplates((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      templatesRef.current = next;
+      if (inboxFilter) {
+        try { writeCache(`templates_${inboxFilter}`, next); } catch { /* quota */ }
+      }
+      return next;
+    });
+  }, [inboxFilter]);
+
+  const reconcileTemplatesFromServer = useCallback((serverRows) => {
+    setTemplates((prev) => {
+      const next = mergeTemplateLists(serverRows, prev, pendingTemplateOpsRef.current);
+      templatesRef.current = next;
+      if (inboxFilter) {
+        try { writeCache(`templates_${inboxFilter}`, next); } catch { /* quota */ }
+      }
+      return next;
+    });
+  }, [inboxFilter]);
+
   useEffect(() => {
+    loadWithCache('inboxes', getInboxes, (rows) => {
+      setInboxes(rows);
+      // Drop the selection if that inbox was deleted meanwhile.
+      setInboxFilter((prev) => (prev && rows.some((r) => r.email === prev) ? prev : rows[0]?.email || ''));
+    }).catch((err) => {
+      showToast(`Could not load inboxes: ${err.message}`, 'error');
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!inboxFilter) return undefined;
     let cancelled = false;
-    const load = () =>
-      loadWithCache('templates', getTemplates, (rows) => {
-        if (!cancelled) {
-          setTemplates(rows);
-          setTemplatesLoading(false);
-        }
-      }).catch((err) => {
-        if (!cancelled) setTemplatesLoading(false);
-        showToast(`Could not load templates: ${err.message}`, 'error');
-      });
-    load();
-    const refresh = () => { if (!document.hidden) load(); };
+    pendingTemplateOpsRef.current = new Set();
+    templateOpEpochRef.current = new Map();
+    setTemplates([]);
+    templatesRef.current = [];
+    setTemplatesLoading(true);
+    const cacheKey = `templates_${inboxFilter}`;
+    loadWithCache(cacheKey, () => getTemplates(inboxFilter), (rows) => {
+      if (cancelled) return;
+      reconcileTemplatesFromServer(rows);
+      setTemplatesLoading(false);
+    }).catch((err) => {
+      if (!cancelled) setTemplatesLoading(false);
+      showToast(`Could not load templates: ${err.message}`, 'error');
+    });
+    const refresh = () => {
+      if (document.hidden || cancelled) return;
+      if (pendingTemplateOpsRef.current.size > 0) return;
+      refreshCache(cacheKey, () => getTemplates(inboxFilter), (rows) => {
+        if (cancelled) return;
+        reconcileTemplatesFromServer(rows);
+      }).catch(() => { /* ignore background refresh errors */ });
+    };
     window.addEventListener('focus', refresh);
     return () => {
       cancelled = true;
       window.removeEventListener('focus', refresh);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [inboxFilter, reconcileTemplatesFromServer]);
 
   // Left pane controls
   const [search, setSearch] = useState('');
-  const [sortMode, setSortMode] = useState('alpha-asc'); // 'alpha-asc' | 'alpha-desc' | 'recent'
+  const [sortMode, setSortMode] = useState('created-desc');
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [page, setPage] = useState(1);
   const [searchOpen, setSearchOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -131,19 +631,315 @@ export default function TemplateManagement() {
   const [isDirty, setIsDirty] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
-  // Delete confirm modal
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-
-  // New template creation mode
+  // Delete confirmation modal
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const discardNewRef = useRef(false);
+  const draftAutoSaveIdRef = useRef(null);
+  const editFormRef = useRef(editForm);
+  const isCreatingNewRef = useRef(isCreatingNew);
+  const isEditingRef = useRef(isEditing);
+  const isDirtyRef = useRef(isDirty);
+  const selectedIdRef = useRef(selectedId);
+  const inboxFilterRef = useRef(inboxFilter);
+  const autoSavePromiseRef = useRef(null);
+  const persistDraftChainRef = useRef(Promise.resolve());
 
-  const categories = TEMPLATE_CATEGORIES;
+  editFormRef.current = editForm;
+  isCreatingNewRef.current = isCreatingNew;
+  isEditingRef.current = isEditing;
+  isDirtyRef.current = isDirty;
+  selectedIdRef.current = selectedId;
+  inboxFilterRef.current = inboxFilter;
+
+  const isPendingDraftId = (id) => typeof id === 'string' && id.startsWith('draft-pending-');
+
+  const resetNewTemplateSession = useCallback(() => {
+    setIsCreatingNew(false);
+    setIsEditing(false);
+    setEditForm(null);
+    setIsDirty(false);
+    discardNewRef.current = false;
+    draftAutoSaveIdRef.current = null;
+  }, []);
+
+  const attachToSavedDraft = useCallback((saved) => {
+    draftAutoSaveIdRef.current = saved.id;
+    setSelectedId(saved.id);
+    setIsCreatingNew(false);
+    setIsEditing(true);
+    setIsDirty(false);
+  }, []);
+
+  const persistNewDraftInner = useCallback(async (form, { silent = false } = {}) => {
+    const inbox = inboxFilterRef.current;
+    if (!form || !inbox) return null;
+    const payload = {
+      inbox,
+      name: form.name?.trim() || 'Untitled draft',
+      subject: form.subject?.trim() || '(No subject)',
+      body: form.body || DEFAULT_NEW_BODY,
+      category: form.category || 'Membership',
+      status: 'Draft',
+    };
+    const existingId = draftAutoSaveIdRef.current;
+    const snapshot = templatesRef.current;
+
+    if (existingId && !isPendingDraftId(existingId)) {
+      const optimisticDraft = touchTemplate(
+        templatesRef.current.find((t) => t.id === existingId) || {
+          id: existingId,
+          inbox,
+          ...payload,
+          intent: null,
+        },
+        {
+          name: payload.name,
+          subject: payload.subject,
+          body: payload.body,
+          category: payload.category,
+        },
+      );
+      commitTemplates((prev) => prev.map((t) => (t.id === existingId ? optimisticDraft : t)));
+
+      try {
+        const saved = await updateTemplate(existingId, {
+          name: payload.name,
+          subject: payload.subject,
+          body: payload.body,
+          category: payload.category,
+          intent: null,
+          status: 'Draft',
+        });
+        draftAutoSaveIdRef.current = saved.id;
+        commitTemplates((prev) => prev.map((t) => (t.id === existingId ? saved : t)));
+        if (!silent) {
+          showToast('Draft saved.', 'success');
+          setLibraryTab('drafts');
+          setSelectedId(saved.id);
+          setIsCreatingNew(false);
+          setIsEditing(false);
+          setIsDirty(false);
+        }
+        return saved;
+      } catch (err) {
+        commitTemplates(() => snapshot);
+        if (!silent) showToast(`Draft save failed: ${err.message}`, 'error');
+        return null;
+      }
+    }
+
+    const optimisticId = `draft-pending-${Date.now()}`;
+    const optimisticDraft = touchTemplate(
+      {
+        id: optimisticId,
+        inbox,
+        name: payload.name,
+        subject: payload.subject,
+        body: payload.body,
+        category: payload.category,
+        status: 'Draft',
+        intent: null,
+      },
+      {},
+    );
+    draftAutoSaveIdRef.current = optimisticId;
+    commitTemplates((prev) => [...prev, optimisticDraft]);
+
+    try {
+      const saved = await createTemplate(payload);
+      draftAutoSaveIdRef.current = saved.id;
+      commitTemplates((prev) => {
+        const withoutPending = prev.filter((t) => t.id !== optimisticId);
+        return [...withoutPending, saved];
+      });
+      if (!silent) {
+        showToast('Draft saved.', 'success');
+        setLibraryTab('drafts');
+        setSelectedId(saved.id);
+        setIsCreatingNew(false);
+        setIsEditing(false);
+        setIsDirty(false);
+      }
+      return saved;
+    } catch (err) {
+      commitTemplates(() => snapshot);
+      draftAutoSaveIdRef.current = null;
+      if (!silent) showToast(`Draft save failed: ${err.message}`, 'error');
+      return null;
+    }
+  }, [showToast, commitTemplates]);
+
+  const persistNewDraft = useCallback((form, options = {}) => {
+    const task = persistDraftChainRef.current
+      .catch(() => {})
+      .then(() => persistNewDraftInner(form, options));
+    persistDraftChainRef.current = task.catch(() => {});
+    return task;
+  }, [persistNewDraftInner]);
+
+  const autoSaveEditsIfNeeded = useCallback(async ({ leaveSession = true } = {}) => {
+    if (autoSavePromiseRef.current) {
+      await autoSavePromiseRef.current;
+    }
+
+    const run = async () => {
+      if (discardNewRef.current) return false;
+
+      if (
+        isCreatingNewRef.current
+        && hasDraftableNewContent(editFormRef.current)
+      ) {
+        const saved = await persistNewDraft(editFormRef.current, { silent: true });
+        if (!saved) return false;
+        if (leaveSession === true) {
+          resetNewTemplateSession();
+        } else if (leaveSession === false) {
+          attachToSavedDraft(saved);
+        }
+        return true;
+      }
+
+      if (
+        isEditingRef.current
+        && isDirtyRef.current
+        && !isCreatingNewRef.current
+      ) {
+        const id = selectedIdRef.current;
+        const form = editFormRef.current;
+        const tmpl = templatesRef.current.find((t) => t.id === id);
+        if (!tmpl || !form || tmpl.status !== 'Draft') return false;
+
+        const snapshot = templatesRef.current;
+        const optimisticUpdated = touchTemplate(tmpl, {
+          name: form.name,
+          subject: form.subject,
+          body: form.body,
+        });
+        commitTemplates((prev) => prev.map((t) => (t.id === id ? optimisticUpdated : t)));
+        if (leaveSession !== 'background') setIsDirty(false);
+
+        try {
+          const updated = await updateTemplate(id, {
+            name: form.name?.trim() || tmpl.name,
+            subject: form.subject?.trim() || tmpl.subject,
+            body: form.body ?? tmpl.body,
+            category: tmpl.category,
+            intent: tmpl.intent,
+            status: 'Draft',
+          });
+          commitTemplates((prev) => prev.map((t) => (t.id === id ? updated : t)));
+        } catch (err) {
+          commitTemplates(() => snapshot);
+          if (leaveSession !== 'background') setIsDirty(true);
+        }
+        return true;
+      }
+
+      return false;
+    };
+
+    const promise = run();
+    autoSavePromiseRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      if (autoSavePromiseRef.current === promise) {
+        autoSavePromiseRef.current = null;
+      }
+    }
+  }, [persistNewDraft, resetNewTemplateSession, attachToSavedDraft, commitTemplates]);
+
+  const focusOutSaveTimerRef = useRef(null);
+
+  const handleEditorFocusOut = useCallback((e) => {
+    const next = e.relatedTarget;
+    if (next && e.currentTarget.contains(next)) return;
+    if (next?.closest?.('[data-template-toolbar]')) return;
+    if (focusOutSaveTimerRef.current) clearTimeout(focusOutSaveTimerRef.current);
+    focusOutSaveTimerRef.current = setTimeout(() => {
+      focusOutSaveTimerRef.current = null;
+      void autoSaveEditsIfNeeded({ leaveSession: false });
+    }, 200);
+  }, [autoSaveEditsIfNeeded]);
+
+  const cancelFocusOutSave = useCallback(() => {
+    if (focusOutSaveTimerRef.current) {
+      clearTimeout(focusOutSaveTimerRef.current);
+      focusOutSaveTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => cancelFocusOutSave(), [cancelFocusOutSave]);
+
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (
+        isCreatingNewRef.current
+        && !discardNewRef.current
+        && hasDraftableNewContent(editFormRef.current)
+      ) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
+
+  // Auto-save draft when navigating away via sidebar / other routes
+  useEffect(() => () => {
+    if (
+      !isCreatingNewRef.current
+      || discardNewRef.current
+      || !hasDraftableNewContent(editFormRef.current)
+    ) return;
+    const existingId = draftAutoSaveIdRef.current;
+    if (existingId && !isPendingDraftId(existingId)) return;
+    void persistNewDraft(editFormRef.current, { silent: true });
+  }, [persistNewDraft]);
+
+  useEffect(() => {
+    setSelectedId(null);
+    setEditForm(null);
+    setIsEditing(false);
+    setIsCreatingNew(false);
+    setIsDirty(false);
+    setCategoryFilter('All Categories');
+    setDateFrom('');
+    setDateTo('');
+    discardNewRef.current = false;
+    draftAutoSaveIdRef.current = null;
+  }, [inboxFilter]);
+
+  const categories = ['All Categories', ...CATEGORY_ORDER];
 
   const sortOptions = useMemo(() => [
     { value: 'alpha-asc', label: 'A → Z' },
     { value: 'alpha-desc', label: 'Z → A' },
-    { value: 'recent', label: 'Recently Updated' }
+    { value: 'updated-desc', label: 'Newest updated' },
+    { value: 'updated-asc', label: 'Oldest updated' },
+    { value: 'created-desc', label: 'Newest created' },
+    { value: 'created-asc', label: 'Oldest created' },
   ], []);
+
+  const hasActiveFilters = categoryFilter !== 'All Categories' || dateFrom || dateTo;
+
+  const accountOptions = useMemo(
+    () => inboxes.map((inbox) => ({
+      value: inbox.email,
+      label: inbox.title,
+    })),
+    [inboxes]
+  );
+
+  const activeInboxTitle = useMemo(
+    () => inboxes.find((inbox) => inbox.email === inboxFilter)?.title || inboxFilter,
+    [inboxes, inboxFilter]
+  );
+
+  const selectedInboxRow = inboxes.find((inbox) => inbox.email === inboxFilter) ?? null;
+  const inboxDisconnected = Boolean(selectedInboxRow && selectedInboxRow.status !== 'Connected');
 
   const categoryOptions = useMemo(
     () => categories.map((category) => ({ value: category, label: category })),
@@ -159,29 +955,99 @@ export default function TemplateManagement() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [sortOpen]);
 
-  // Templates are a central library shared by every inbox.
+  // Templates for the selected inbox.
   const inboxTemplates = templates;
+
+  const tabCounts = useMemo(() => {
+    const counts = { templates: 0, drafts: 0, deleted: 0 };
+    inboxTemplates.forEach((t) => {
+      if (t.status === 'Active') counts.templates += 1;
+      else if (t.status === 'Draft') counts.drafts += 1;
+      else if (t.status === 'Archived') counts.deleted += 1;
+    });
+    return counts;
+  }, [inboxTemplates]);
+
+  const activeTab = LIBRARY_TABS.find((t) => t.id === libraryTab) || LIBRARY_TABS[0];
 
   // ── Filtered + sorted list ──
   const displayedTemplates = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = inboxTemplates.filter((t) => {
+      if (t.status !== activeTab.status) return false;
       const matchSearch = q === '' || t.name.toLowerCase().includes(q) || t.subject.toLowerCase().includes(q);
       const matchCat = categoryFilter === 'All Categories' || t.category === categoryFilter;
-      return matchSearch && matchCat;
+      const matchDate = templateMatchesDateRange(t, dateFrom, dateTo);
+      return matchSearch && matchCat && matchDate;
     });
+    const createdTs = (t) => {
+      const ts = new Date(templateCreatedAt(t)).getTime();
+      return Number.isNaN(ts) ? 0 : ts;
+    };
+    const updatedTs = (t) => templateTimestamp(t);
     return [...filtered].sort((a, b) => {
       if (sortMode === 'alpha-asc') return a.name.localeCompare(b.name);
       if (sortMode === 'alpha-desc') return b.name.localeCompare(a.name);
-      // recent
-      return new Date(b.lastUpdated) - new Date(a.lastUpdated);
+      if (sortMode === 'updated-asc') return updatedTs(a) - updatedTs(b);
+      if (sortMode === 'created-desc') return createdTs(b) - createdTs(a);
+      if (sortMode === 'created-asc') return createdTs(a) - createdTs(b);
+      if (sortMode === 'recent' || sortMode === 'updated-desc') return updatedTs(b) - updatedTs(a);
+      return a.name.localeCompare(b.name);
     });
-  }, [inboxTemplates, search, sortMode, categoryFilter]);
+  }, [inboxTemplates, search, sortMode, categoryFilter, dateFrom, dateTo, activeTab.status]);
+
+  const totalPages = Math.max(1, Math.ceil(displayedTemplates.length / TEMPLATE_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedTemplates = useMemo(() => {
+    const start = (currentPage - 1) * TEMPLATE_PAGE_SIZE;
+    return displayedTemplates.slice(start, start + TEMPLATE_PAGE_SIZE);
+  }, [displayedTemplates, currentPage]);
+
+  const categoryGroups = useMemo(
+    () => (libraryTab === 'templates' ? groupTemplatesByCategory(paginatedTemplates) : []),
+    [paginatedTemplates, libraryTab],
+  );
+
+  const pageStart = displayedTemplates.length === 0 ? 0 : (currentPage - 1) * TEMPLATE_PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * TEMPLATE_PAGE_SIZE, displayedTemplates.length);
+
+  useLayoutEffect(() => {
+    setPage(1);
+  }, [libraryTab, inboxFilter, search, sortMode, categoryFilter, dateFrom, dateTo]);
+
+  useLayoutEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [displayedTemplates.length, page, totalPages]);
+
+  const handleLibraryTabChange = (tab) => {
+    if (tab === libraryTab) return;
+    cancelFocusOutSave();
+    void autoSaveEditsIfNeeded({ leaveSession: 'background' });
+    setSelectedId(null);
+    setEditForm(null);
+    setIsEditing(false);
+    setIsCreatingNew(false);
+    setIsDirty(false);
+    discardNewRef.current = false;
+    draftAutoSaveIdRef.current = null;
+    setLibraryTab(tab);
+  };
+
+  const handleInboxChange = (email) => {
+    if (email === inboxFilter) return;
+    void autoSaveEditsIfNeeded({ leaveSession: 'background' });
+    setInboxFilter(email);
+  };
 
   // ── Select a template ──
   const selectedTemplate = templates.find(t => t.id === selectedId) || null;
 
   const handleSelectTemplate = (tmpl) => {
+    cancelFocusOutSave();
+    void autoSaveEditsIfNeeded({ leaveSession: 'background' });
+    discardNewRef.current = false;
+    draftAutoSaveIdRef.current = null;
     setIsCreatingNew(false);
     setIsDirty(false);
     setIsEditing(false);
@@ -189,44 +1055,71 @@ export default function TemplateManagement() {
     setEditForm({ name: tmpl.name, subject: tmpl.subject, body: tmpl.body, language: 'English' });
   };
 
-  const handleStartEditing = () => {
-    if (!selectedTemplate) return;
+  const handleStartEditing = (template = selectedTemplate) => {
+    if (!template) return;
+    setSelectedId(template.id);
     setIsEditing(true);
     setIsDirty(false);
+    setIsCreatingNew(false);
     setEditForm({
-      name: selectedTemplate.name,
-      subject: selectedTemplate.subject,
-      body: selectedTemplate.body,
-      language: editForm?.language || 'English'
+      name: template.name,
+      subject: template.subject,
+      body: template.body,
+      language: editForm?.language || 'English',
     });
+  };
+
+  const handleListEdit = (template) => {
+    cancelFocusOutSave();
+    void autoSaveEditsIfNeeded({ leaveSession: 'background' });
+    handleStartEditing(template);
   };
 
   // ── Start creating a new template ──
   const handleNewTemplate = () => {
+    if (!inboxFilter) {
+      showToast('Select an inbox first.', 'error');
+      return;
+    }
+    cancelFocusOutSave();
+    void autoSaveEditsIfNeeded({ leaveSession: 'background' });
+    discardNewRef.current = false;
+    draftAutoSaveIdRef.current = null;
     setIsCreatingNew(true);
     setIsEditing(true);
     setSelectedId(null);
     setIsDirty(false);
+    if (libraryTab === 'deleted') setLibraryTab('drafts');
     setEditForm({
       name: '',
       subject: '',
-      body: 'Hi {{first_name}},\n\n\n\nKind regards,\nPower Music Team',
+      body: DEFAULT_NEW_BODY,
       language: 'English',
       category: 'Membership',
-      status: 'Draft'
+      status: libraryTab === 'templates' ? 'Active' : 'Draft',
     });
   };
 
   // ── Language switch ──
   const handleLanguageChange = (lang) => {
     if (!selectedTemplate) return;
-    setEditForm(prev => ({
+    setEditForm((prev) => ({
       ...prev,
       language: lang,
       subject: translateSubject(selectedTemplate.subject, lang),
-      body: translateBody(selectedTemplate.body, lang)
+      body: translateBody(selectedTemplate.body, lang),
     }));
     setIsDirty(true);
+  };
+
+  const handlePreviewLanguageChange = (lang) => {
+    if (!selectedTemplate) return;
+    setEditForm((prev) => ({
+      ...prev,
+      language: lang,
+      subject: translateSubject(selectedTemplate.subject, lang),
+      body: translateBody(selectedTemplate.body, lang),
+    }));
   };
 
   // ── Field change ──
@@ -240,33 +1133,68 @@ export default function TemplateManagement() {
     if (!editForm) return;
 
     if (isCreatingNew) {
-      // Validate required fields
       if (!editForm.name.trim() || !editForm.subject.trim()) {
         showToast('Please fill in the template name and subject.', 'error');
         return;
       }
       try {
-        const created = await createTemplate({
-          name: editForm.name.trim(),
-          subject: editForm.subject.trim(),
-          body: editForm.body,
-          category: editForm.category || 'Membership',
-          status: editForm.status || 'Draft',
-        });
-        setTemplates(prev => [...prev, created]);
+        const targetStatus = editForm.status || 'Active';
+        let created;
+        if (draftAutoSaveIdRef.current) {
+          created = await updateTemplate(draftAutoSaveIdRef.current, {
+            name: editForm.name.trim(),
+            subject: editForm.subject.trim(),
+            body: editForm.body,
+            category: editForm.category || 'Membership',
+            intent: null,
+            status: targetStatus,
+          });
+          commitTemplates((prev) => prev.map((t) => (t.id === created.id ? created : t)));
+        } else {
+          created = await createTemplate({
+            inbox: inboxFilter,
+            name: editForm.name.trim(),
+            subject: editForm.subject.trim(),
+            body: editForm.body,
+            category: editForm.category || 'Membership',
+            status: targetStatus,
+          });
+          commitTemplates((prev) => [...prev, created]);
+        }
+        discardNewRef.current = true;
+        draftAutoSaveIdRef.current = null;
         setSelectedId(created.id);
         setIsCreatingNew(false);
         setIsEditing(false);
         setIsDirty(false);
-        showToast('Template created successfully.', 'success');
+        setLibraryTab(created.status === 'Active' ? 'templates' : 'drafts');
+        showToast(
+          created.status === 'Active' ? 'Template created successfully.' : 'Draft saved.',
+          'success',
+        );
       } catch (err) {
         showToast(`Create failed: ${err.message}`, 'error');
       }
       return;
     }
 
-    // Update existing
+    // Update existing — optimistic UI for instant feedback
     if (!selectedId || !selectedTemplate) return;
+    const snapshot = templatesRef.current;
+    const epoch = beginTemplateOp(selectedId);
+    const optimisticUpdated = touchTemplate(selectedTemplate, {
+      name: editForm.name,
+      subject: editForm.subject,
+      body: editForm.body,
+    });
+
+    commitTemplates((prev) => prev.map((t) => (t.id === selectedId ? optimisticUpdated : t)));
+    setIsDirty(false);
+    setIsEditing(false);
+    if (optimisticUpdated.status === 'Active') setLibraryTab('templates');
+    else if (optimisticUpdated.status === 'Draft') setLibraryTab('drafts');
+    showToast('Template saved successfully.', 'success');
+
     try {
       const updated = await updateTemplate(selectedId, {
         name: editForm.name,
@@ -276,22 +1204,44 @@ export default function TemplateManagement() {
         intent: selectedTemplate.intent,
         status: selectedTemplate.status,
       });
-      setTemplates(prev => prev.map(t => (t.id === selectedId ? updated : t)));
-      setIsDirty(false);
-      setIsEditing(false);
-      showToast('Template saved successfully.', 'success');
+      if (endTemplateOp(selectedId, epoch)) {
+        commitTemplates((prev) => prev.map((t) => (t.id === selectedId ? updated : t)));
+      }
     } catch (err) {
-      showToast(`Save failed: ${err.message}`, 'error');
+      if (endTemplateOp(selectedId, epoch)) {
+        commitTemplates(() => snapshot);
+        setEditForm({
+          name: selectedTemplate.name,
+          subject: selectedTemplate.subject,
+          body: selectedTemplate.body,
+          language: editForm.language || 'English',
+        });
+        setIsEditing(true);
+        setIsDirty(true);
+        showToast(`Save failed: ${err.message}`, 'error');
+      }
     }
   };
 
-  // ── Cancel ──
+  const handleSaveDraft = async () => {
+    if (!editForm || !isCreatingNew) return;
+    if (!hasDraftableNewContent(editForm)) {
+      showToast('Add a name, subject, or edit the body before saving a draft.', 'error');
+      return;
+    }
+    await persistNewDraft(editForm);
+  };
+
+  const handleDiscardNew = () => {
+    discardNewRef.current = true;
+    draftAutoSaveIdRef.current = null;
+    resetNewTemplateSession();
+  };
+
+  // ── Cancel editing (existing templates only) ──
   const handleCancel = () => {
     if (isCreatingNew) {
-      setIsCreatingNew(false);
-      setIsEditing(false);
-      setEditForm(null);
-      setIsDirty(false);
+      handleDiscardNew();
       return;
     }
     if (!selectedTemplate) return;
@@ -305,20 +1255,259 @@ export default function TemplateManagement() {
     setIsEditing(false);
   };
 
-  // ── Delete ──
-  const handleDelete = async () => {
-    try {
-      await deleteTemplate(selectedId);
-      setTemplates(prev => prev.filter(t => t.id !== selectedId));
+  const clearSelectionIfNeeded = (targetId) => {
+    if (selectedId === targetId) {
       setSelectedId(null);
       setEditForm(null);
       setIsDirty(false);
       setIsEditing(false);
-      setShowDeleteModal(false);
-      showToast('Template deleted.', 'success');
-    } catch (err) {
-      showToast(`Delete failed: ${err.message}`, 'error');
     }
+  };
+
+  const openDeleteConfirm = (id, variant = 'active') => {
+    const targetId = id || selectedId;
+    if (!targetId) return;
+    const template = templates.find((t) => t.id === targetId);
+    setPendingDelete({
+      id: targetId,
+      variant,
+      name: template?.name || 'this template',
+    });
+  };
+
+  const confirmPendingDelete = () => {
+    if (!pendingDelete) return;
+    const { id, variant } = pendingDelete;
+    setPendingDelete(null);
+    if (variant === 'forever') void handleDeleteForever(id);
+    else if (variant === 'draft') void handleDeleteDraft(id);
+    else void handleDelete(id);
+  };
+
+  // ── Delete (soft) ──
+  const handleDelete = async (id = selectedId) => {
+    const targetId = id || selectedId;
+    if (!targetId) return;
+    const snapshot = templatesRef.current;
+    const epoch = beginTemplateOp(targetId);
+    commitTemplates((prev) =>
+      prev.map((t) =>
+        t.id === targetId
+          ? touchTemplate(t, {
+              status: 'Archived',
+              archivedFrom: t.status === 'Draft' ? 'Draft' : 'Active',
+            })
+          : t,
+      ),
+    );
+    clearSelectionIfNeeded(targetId);
+    showToast('Template moved to Deleted.', 'success');
+    try {
+      const archived = await deleteTemplate(targetId);
+      if (endTemplateOp(targetId, epoch)) {
+        commitTemplates((prev) => prev.map((t) => (t.id === targetId ? archived : t)));
+      }
+    } catch (err) {
+      if (endTemplateOp(targetId, epoch)) {
+        commitTemplates(() => snapshot);
+        showToast(`Delete failed: ${err.message}`, 'error');
+      }
+    }
+  };
+
+  const handleRestore = async (id = selectedId) => {
+    const targetId = id || selectedId;
+    if (!targetId) return;
+
+    const target = templatesRef.current.find((t) => t.id === targetId);
+    if (!target) return;
+
+    const snapshot = templatesRef.current;
+    const restoredStatus = target.archivedFrom === 'Draft' ? 'Draft' : 'Active';
+    const epoch = beginTemplateOp(targetId);
+    commitTemplates((prev) =>
+      prev.map((t) =>
+        t.id === targetId
+          ? touchTemplate(t, { status: restoredStatus, archivedFrom: null })
+          : t,
+      ),
+    );
+
+    clearSelectionIfNeeded(targetId);
+    showToast('Template restored.', 'success');
+
+    try {
+      const restored = await restoreTemplate(targetId);
+      if (endTemplateOp(targetId, epoch)) {
+        commitTemplates((prev) => prev.map((t) => (t.id === targetId ? restored : t)));
+      }
+    } catch (err) {
+      if (endTemplateOp(targetId, epoch)) {
+        commitTemplates(() => snapshot);
+        showToast(`Restore failed: ${err.message}`, 'error');
+      }
+    }
+  };
+
+  const handleDeleteDraft = async (id = selectedId) => {
+    const targetId = id || selectedId;
+    if (!targetId) return;
+    const snapshot = templatesRef.current;
+    const epoch = beginTemplateOp(targetId);
+    commitTemplates((prev) =>
+      prev.map((t) =>
+        t.id === targetId
+          ? touchTemplate(t, { status: 'Archived', archivedFrom: 'Draft' })
+          : t,
+      ),
+    );
+    clearSelectionIfNeeded(targetId);
+    showToast('Draft moved to Deleted.', 'success');
+    try {
+      const archived = await deleteTemplate(targetId);
+      if (endTemplateOp(targetId, epoch)) {
+        commitTemplates((prev) => prev.map((t) => (t.id === targetId ? archived : t)));
+      }
+    } catch (err) {
+      if (endTemplateOp(targetId, epoch)) {
+        commitTemplates(() => snapshot);
+        showToast(`Delete failed: ${err.message}`, 'error');
+      }
+    }
+  };
+
+  const handleListDelete = (template) => {
+    if (template.status === 'Draft') {
+      openDeleteConfirm(template.id, 'draft');
+      return;
+    }
+    if (template.status === 'Archived') {
+      openDeleteConfirm(template.id, 'forever');
+      return;
+    }
+    openDeleteConfirm(template.id, 'active');
+  };
+
+  const handleDeleteForever = async (id = selectedId) => {
+    const targetId = id || selectedId;
+    if (!targetId) return;
+    const snapshot = templatesRef.current;
+    const epoch = beginTemplateOp(targetId);
+    commitTemplates((prev) => prev.filter((t) => t.id !== targetId));
+    clearSelectionIfNeeded(targetId);
+    showToast('Template permanently deleted.', 'success');
+    try {
+      await deleteTemplateForever(targetId);
+      endTemplateOp(targetId, epoch);
+    } catch (err) {
+      if (endTemplateOp(targetId, epoch)) {
+        commitTemplates(() => snapshot);
+        showToast(`Delete failed: ${err.message}`, 'error');
+      }
+    }
+  };
+
+  const handlePublishDraft = async () => {
+    if (!selectedId || !selectedTemplate || !editForm) return;
+    const snapshot = templatesRef.current;
+    const epoch = beginTemplateOp(selectedId);
+    const optimisticPublished = touchTemplate(selectedTemplate, {
+      name: editForm.name,
+      subject: editForm.subject,
+      body: editForm.body,
+      status: 'Active',
+    });
+
+    commitTemplates((prev) => prev.map((t) => (t.id === selectedId ? optimisticPublished : t)));
+    setIsDirty(false);
+    setIsEditing(false);
+    setLibraryTab('templates');
+    showToast('Draft published as active template.', 'success');
+
+    try {
+      const updated = await updateTemplate(selectedId, {
+        name: editForm.name,
+        subject: editForm.subject,
+        body: editForm.body,
+        category: selectedTemplate.category,
+        intent: selectedTemplate.intent,
+        status: 'Active',
+      });
+      if (endTemplateOp(selectedId, epoch)) {
+        commitTemplates((prev) => prev.map((t) => (t.id === selectedId ? updated : t)));
+      }
+    } catch (err) {
+      if (endTemplateOp(selectedId, epoch)) {
+        commitTemplates(() => snapshot);
+        setLibraryTab('drafts');
+        setIsEditing(true);
+        setIsDirty(true);
+        showToast(`Publish failed: ${err.message}`, 'error');
+      }
+    }
+  };
+
+  const renderTemplateList = () => {
+    if (templatesLoading) {
+      return (
+        <div className="p-4">
+          <CardListSkeleton rows={6} />
+        </div>
+      );
+    }
+    if (displayedTemplates.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-white border border-[var(--color-border-default)] flex items-center justify-center mb-3 shadow-sm">
+            <FileText className="w-6 h-6 text-[var(--color-text-muted)] opacity-50" />
+          </div>
+          <p className="text-sm font-semibold text-[var(--color-text-primary)]">No {activeTab.label.toLowerCase()}</p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1 max-w-[200px] leading-relaxed">
+            {libraryTab === 'templates'
+              ? 'Create a template with New Template above.'
+              : 'Nothing here yet. Try another tab.'}
+          </p>
+        </div>
+      );
+    }
+    if (libraryTab === 'templates') {
+      return (
+        <div className="py-3 space-y-4">
+          {categoryGroups.map(({ category, items }) => (
+            <CategorySection
+              key={category}
+              category={category}
+              items={items}
+              selectedId={selectedId}
+              onSelect={handleSelectTemplate}
+              onEdit={handleListEdit}
+              onDelete={handleListDelete}
+            />
+          ))}
+        </div>
+      );
+    }
+    return (
+      <div className="p-3">
+        <div className="rounded-xl border border-[var(--color-border-default)] bg-white shadow-[0_1px_2px_rgba(26,26,46,0.04)] overflow-hidden">
+          {paginatedTemplates.map((tmpl, index) => (
+            <TemplateListItem
+              key={tmpl.id}
+              template={tmpl}
+              tab={libraryTab}
+              muted={libraryTab === 'deleted'}
+              isSelected={tmpl.id === selectedId}
+              onClick={() => handleSelectTemplate(tmpl)}
+              onEdit={libraryTab === 'deleted' ? undefined : handleListEdit}
+              onDelete={handleListDelete}
+              onRestore={libraryTab === 'deleted' ? (t) => handleRestore(t.id) : undefined}
+              inCard
+              isLast={index === paginatedTemplates.length - 1}
+            />
+          ))}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -331,11 +1520,26 @@ export default function TemplateManagement() {
         description="Create, edit, and preview AI templates."
         workspace
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            <div
+              className="flex items-center gap-1.5 h-9 rounded-lg border border-[var(--color-brand-primary)]/25 bg-gradient-to-r from-[#f4f7fd] via-[#e9eff9] to-[#eef3fb] pl-2.5 pr-1 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
+              title={inboxFilter}
+            >
+              <Mail className="w-3.5 h-3.5 text-[var(--color-brand-primary)] shrink-0" aria-hidden="true" />
+              <SelectDropdown
+                value={inboxFilter}
+                onChange={handleInboxChange}
+                options={accountOptions}
+                size="xs"
+                variant="soft"
+                className="w-32 sm:w-36"
+              />
+            </div>
             <button
               type="button"
               onClick={handleNewTemplate}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer shrink-0"
+              disabled={!inboxFilter || libraryTab === 'deleted' || inboxDisconnected}
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer shrink-0 disabled:opacity-40"
             >
               <Plus className="w-4 h-4" />
               New Template
@@ -345,21 +1549,42 @@ export default function TemplateManagement() {
       />
 
       <div className="flex flex-1 min-h-0 flex-col rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white">
+        {inboxDisconnected ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-8 py-12">
+            <span className="flex items-center justify-center h-14 w-14 rounded-full bg-[var(--color-surface-highlight)] mb-5" aria-hidden="true">
+              <Unlink className="w-6 h-6 text-[var(--color-text-secondary)]" />
+            </span>
+            <h2 className="text-base font-bold text-[var(--color-text-primary)] mb-1.5">
+              {selectedInboxRow?.title} is disconnected
+            </h2>
+            <p className="text-sm text-[var(--color-text-secondary)] max-w-sm leading-relaxed mb-6">
+              Templates for <span className="font-semibold text-[var(--color-text-primary)]">{selectedInboxRow?.email}</span> are
+              hidden while the inbox is disconnected. Connect it again to manage its templates.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/email-accounts')}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
+            >
+              <Link2 className="w-4 h-4" aria-hidden="true" />
+              Connect inbox
+            </button>
+          </div>
+        ) : (
         <div className="flex flex-1 min-h-0">
 
         {/* ── LEFT PANE ─────────────────────────────────────────── */}
-        <div className="w-[320px] shrink-0 flex flex-col border-r border-[var(--color-border-default)] min-h-0 bg-white">
+        <div className="w-[340px] shrink-0 flex flex-col border-r border-[var(--color-border-default)] min-h-0 bg-[var(--color-surface-panel)]/35">
 
-          {/* List header — same position, width, and typography as Email Responses */}
-          <div className="shrink-0 px-4 pt-3 pb-2 border-b border-[var(--color-border-default)]">
-            <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="shrink-0 bg-white border-b border-[var(--color-border-default)]">
+            <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
               <div className="min-w-0">
-                <h2 className="text-base font-bold text-[var(--color-text-primary)]">Templates</h2>
-                <p className="text-[11px] font-medium text-[var(--color-text-muted)] truncate">
-                  Central library — used by all inboxes
+                <h2 className="text-sm font-bold text-[var(--color-text-primary)]">Library</h2>
+                <p className="text-[11px] text-[var(--color-text-muted)] truncate mt-0.5">
+                  {activeInboxTitle || 'Select an inbox'}
                 </p>
               </div>
-              <div className="flex items-center gap-0.5">
+              <div className="flex items-center gap-0.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => { setSearchOpen((o) => !o); setFilterOpen(false); setSortOpen(false); }}
@@ -376,7 +1601,7 @@ export default function TemplateManagement() {
                   type="button"
                   onClick={() => { setFilterOpen((o) => !o); setSearchOpen(false); setSortOpen(false); }}
                   className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                    filterOpen || categoryFilter !== 'All Categories'
+                    filterOpen || hasActiveFilters
                       ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
                       : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
                   }`}
@@ -389,7 +1614,7 @@ export default function TemplateManagement() {
                     type="button"
                     onClick={() => { setSortOpen((o) => !o); setFilterOpen(false); setSearchOpen(false); }}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                      sortOpen || sortMode !== 'alpha-asc'
+                      sortOpen || sortMode !== 'created-desc'
                         ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
                         : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
                     }`}
@@ -418,6 +1643,12 @@ export default function TemplateManagement() {
                 </div>
               </div>
             </div>
+
+            <LibraryTabs
+              activeTab={libraryTab}
+              counts={tabCounts}
+              onChange={handleLibraryTabChange}
+            />
           </div>
 
           {searchOpen && (
@@ -450,51 +1681,94 @@ export default function TemplateManagement() {
                 size="xs"
                 className="w-full"
               />
-              {categoryFilter !== 'All Categories' && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-1">
+                    Created from
+                  </label>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-1">
+                    Created to
+                  </label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)]"
+                  />
+                </div>
+              </div>
+              {hasActiveFilters && (
                 <button
                   type="button"
-                  onClick={() => setCategoryFilter('All Categories')}
+                  onClick={() => {
+                    setCategoryFilter('All Categories');
+                    setDateFrom('');
+                    setDateTo('');
+                  }}
                   className="text-xs font-semibold text-[var(--color-brand-primary)] hover:underline cursor-pointer"
                 >
-                  Clear category filter
+                  Clear filters
                 </button>
               )}
             </div>
           )}
 
           {/* Scrollable template list */}
-          <div className="flex-1 overflow-y-auto min-h-0">
-            {templatesLoading ? (
-              <div className="p-3">
-                <CardListSkeleton rows={6} />
-              </div>
-            ) : displayedTemplates.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full p-6 text-center">
-                <FileText className="w-10 h-10 text-[var(--color-text-muted)] mb-3 opacity-40" />
-                <p className="text-sm font-semibold text-[var(--color-text-primary)]">No templates found</p>
-                <p className="text-xs text-[var(--color-text-muted)] mt-1">Try another inbox or category filter.</p>
-              </div>
-            ) : (
-              displayedTemplates.map((tmpl) => (
-                <TemplateListItem
-                  key={tmpl.id}
-                  template={tmpl}
-                  isSelected={tmpl.id === selectedId}
-                  onClick={() => handleSelectTemplate(tmpl)}
-                />
-              ))
-            )}
+          <div
+            id={`library-panel-${libraryTab}`}
+            role="tabpanel"
+            aria-labelledby={`library-tab-${libraryTab}`}
+            className="flex-1 overflow-y-auto min-h-0"
+          >
+            {renderTemplateList()}
           </div>
 
-          <div className="shrink-0 border-t border-[var(--color-border-default)] px-3 py-2 flex items-center justify-between bg-white">
-            <span className="text-[11px] font-medium text-[var(--color-text-muted)]">
-              {displayedTemplates.length === 0 ? 0 : 1}–{displayedTemplates.length} of {inboxTemplates.length}
+          <div className="shrink-0 border-t border-[var(--color-border-default)] px-4 py-2 flex items-center justify-between gap-2 bg-white/90 backdrop-blur-sm">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] shrink-0">
+              {activeTab.label}
             </span>
+            {displayedTemplates.length > TEMPLATE_PAGE_SIZE ? (
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[11px] font-medium text-[var(--color-text-secondary)] tabular-nums whitespace-nowrap">
+                  {pageStart}–{pageEnd} of {displayedTemplates.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                  className="p-1 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                  className="p-1 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <span className="text-[11px] font-medium text-[var(--color-text-secondary)] tabular-nums">
+                {displayedTemplates.length} shown
+              </span>
+            )}
           </div>
         </div>
 
         {/* ── RIGHT PANE ────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-white overflow-hidden">
           {!selectedTemplate && !isCreatingNew ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--color-text-muted)] p-8 text-center min-h-0">
               <div className="w-14 h-14 rounded-2xl bg-[var(--color-surface-highlight)] flex items-center justify-center">
@@ -510,265 +1784,350 @@ export default function TemplateManagement() {
             </div>
           ) : (
             <>
-              {/* Editor header */}
-              <div className="flex items-start justify-between px-6 py-4 border-b border-[var(--color-border-default)] shrink-0">
-                <div>
+              {/* Detail header */}
+              <div className="shrink-0 border-b border-[var(--color-border-default)] bg-white">
+                <div className="px-5 py-3.5">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      {isCreatingNew ? (
+                        <TemplateModeBadge mode="creating" />
+                      ) : isEditing ? (
+                        <TemplateModeBadge mode="editing" />
+                      ) : null}
+                      {!isCreatingNew && selectedTemplate && (
+                        <>
+                          {libraryTab === 'deleted' && selectedTemplate.archivedFrom === 'Draft' ? (
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold leading-none bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-100">
+                              Deleted draft
+                            </span>
+                          ) : libraryTab === 'deleted' ? (
+                            <TemplateStatusChip status={selectedTemplate.status} label="Deleted template" />
+                          ) : selectedTemplate.status !== 'Active' ? (
+                            <TemplateStatusChip status={selectedTemplate.status} />
+                          ) : null}
+                        </>
+                      )}
+                      {isDirty && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                          Unsaved
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0" data-template-toolbar>
+                      {libraryTab === 'deleted' && selectedTemplate && (
+                        <>
+                          <TemplateToolbarButton variant="restore" icon={RotateCcw} label="Restore" onClick={() => handleRestore()} />
+                          <TemplateToolbarButton variant="deleteForever" icon={Trash2} label="Delete forever" onClick={() => openDeleteConfirm(selectedId, 'forever')} />
+                        </>
+                      )}
+                      {libraryTab !== 'deleted' && !isCreatingNew && !isEditing && (
+                        <>
+                          <TemplateToolbarButton
+                            variant="delete"
+                            icon={Trash2}
+                            label="Delete"
+                            onClick={() => openDeleteConfirm(selectedId, libraryTab === 'drafts' ? 'draft' : 'active')}
+                          />
+                          <TemplateToolbarButton variant="save" icon={Pencil} label="Edit" onClick={() => handleStartEditing()} />
+                        </>
+                      )}
+                      {isCreatingNew && (
+                        <>
+                          <TemplateToolbarButton variant="saveDraft" icon={Save} label="Save draft" onClick={handleSaveDraft} />
+                          {editForm?.status === 'Active' && (
+                            <TemplateToolbarButton variant="save" icon={Save} label="Create template" onClick={handleSave} className="min-w-36" />
+                          )}
+                          <TemplateToolbarButton variant="discard" icon={X} label="Discard" onClick={handleDiscardNew} className="min-w-36" />
+                        </>
+                      )}
+                      {isEditing && !isCreatingNew && libraryTab !== 'deleted' && (
+                        <>
+                          <TemplateToolbarButton
+                            variant="delete"
+                            icon={Trash2}
+                            label="Delete"
+                            onClick={() => openDeleteConfirm(selectedId, libraryTab === 'drafts' ? 'draft' : 'active')}
+                          />
+                          {libraryTab === 'drafts' && (
+                            <TemplateToolbarButton variant="publish" icon={Save} label="Publish" onClick={handlePublishDraft} />
+                          )}
+                          <TemplateToolbarButton
+                            variant="save"
+                            icon={Save}
+                            label={libraryTab === 'drafts' ? 'Save draft' : 'Save'}
+                            onClick={handleSave}
+                          />
+                          <TemplateToolbarButton variant="cancelIcon" icon={X} label="Cancel" onClick={handleCancel} />
+                        </>
+                      )}
+                    </div>
+                  </div>
+
                   <h3 className="text-base font-bold text-[var(--color-text-primary)] leading-snug">
                     {isCreatingNew
-                      ? (editForm?.name?.trim() || 'New Template')
-                      : (editForm?.name || selectedTemplate.name)
-                    }
-                    {isDirty && <span className="ml-2 text-xs font-semibold text-amber-500">● Unsaved</span>}
-                    {isCreatingNew && (
-                      <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 leading-none align-middle">Creating</span>
-                    )}
+                      ? (editForm?.name?.trim() || 'Untitled template')
+                      : (editForm?.name || selectedTemplate.name)}
                   </h3>
-                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5 font-medium">
-                    {isCreatingNew ? 'New template — not yet saved' : `Last updated ${fmtUpdated(selectedTemplate.lastUpdated)}`}
+                  <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-[var(--color-text-muted)] font-medium">
+                    <Clock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    {isCreatingNew ? (
+                      'Not saved yet'
+                    ) : (
+                      <>
+                        <span>Created {fmtUpdated(templateCreatedAt(selectedTemplate))}</span>
+                        <span className="text-[var(--color-border-default)]" aria-hidden="true">·</span>
+                        <span>Updated {fmtUpdated(selectedTemplate.lastUpdated)}</span>
+                      </>
+                    )}
+                    {!isCreatingNew && selectedTemplate?.category && (
+                      <>
+                        <span className="text-[var(--color-border-default)]" aria-hidden="true">·</span>
+                        <span>{selectedTemplate.category}</span>
+                      </>
+                    )}
                   </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0 ml-4">
-                  {!isCreatingNew && !isEditing && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleStartEditing}
-                        aria-label="Edit template"
-                        className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-brand-primary)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowDeleteModal(true)}
-                        aria-label="Delete template"
-                        className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  )}
-                  {(isEditing || isCreatingNew) && (
-                    <>
-                      {!isCreatingNew && (
-                        <button
-                          type="button"
-                          onClick={() => setShowDeleteModal(true)}
-                          aria-label="Delete template"
-                          className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={handleCancel}
-                        aria-label={isCreatingNew ? 'Discard new template' : 'Cancel editing'}
-                        className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSave}
-                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
-                      >
-                        <Save className="w-3.5 h-3.5" />
-                        {isCreatingNew ? 'Create Template' : 'Save'}
-                      </button>
-                    </>
-                  )}
                 </div>
               </div>
 
-              {/* Editor form */}
-              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-5">
-                {!(isEditing || isCreatingNew) && (
-                  <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-3 text-xs text-[var(--color-text-secondary)]">
-                    Preview mode. Click the pencil icon above to edit this template.
-                  </div>
-                )}
-
-                {/* Category + Status — only shown when creating */}
-                {isCreatingNew && (
-                  <div className="grid grid-cols-2 gap-4 pb-5 border-b border-[var(--color-border-default)]">
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                        Category *
-                      </label>
-                      <div className="relative">
-                        <select
-                          value={editForm?.category || 'Membership'}
-                          onChange={(e) => handleFieldChange('category', e.target.value)}
-                          className="w-full appearance-none px-3 py-2.5 pr-8 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer transition-colors"
+              {/* Detail body */}
+              <div className="flex-1 flex flex-col min-h-0 min-w-0 w-full border-t border-[var(--color-border-default)]/60">
+                {!(isEditing || isCreatingNew) ? (
+                  <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
+                    <div className="space-y-5">
+                      {libraryTab === 'deleted' && (
+                        <div
+                          role="status"
+                          className="rounded-lg border border-amber-200/80 bg-amber-50 px-4 py-3 text-xs text-amber-900 leading-relaxed"
                         >
-                          {['Membership', 'Payments', 'Events', 'General Enquiries', 'Other'].map(c => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" />
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                        Status *
-                      </label>
-                      <div className="relative">
-                        <select
-                          value={editForm?.status || 'Draft'}
-                          onChange={(e) => handleFieldChange('status', e.target.value)}
-                          className="w-full appearance-none px-3 py-2.5 pr-8 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer transition-colors"
-                        >
-                          <option value="Draft">Draft</option>
-                          <option value="Active">Active</option>
-                        </select>
-                        <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" />
-                      </div>
-                    </div>
-                  </div>
-                )}
+                          This template is in Deleted. Restore it to use again, or delete forever to remove it permanently.
+                        </div>
+                      )}
 
-                {/* Language — only shown when editing existing */}
-                {!isCreatingNew && (
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                      Translation / Language
-                    </label>
-                    {isEditing ? (
-                      <>
-                        <div className="relative inline-block">
+                      <div className="space-y-1.5">
+                        <label htmlFor="preview-language" className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                          Translation / Language
+                        </label>
+                        <div className="relative max-w-xs">
                           <select
+                            id="preview-language"
                             value={editForm?.language || 'English'}
-                            onChange={(e) => handleLanguageChange(e.target.value)}
-                            className="appearance-none pl-3 pr-8 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm font-semibold text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] cursor-pointer transition-colors"
+                            onChange={(e) => handlePreviewLanguageChange(e.target.value)}
+                            className={`${TEMPLATE_FIELD_INPUT} appearance-none pr-8 cursor-pointer font-medium`}
                           >
-                            {['English', 'German', 'Spanish', 'Japanese'].map(l => (
+                            {['English', 'German', 'Spanish', 'Japanese'].map((l) => (
                               <option key={l} value={l}>{l}</option>
                             ))}
                           </select>
-                          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" />
+                          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" aria-hidden="true" />
                         </div>
-                        <p className="text-xs text-[var(--color-text-muted)]">
-                          Switching language swaps subject and body with translated mock content.
-                        </p>
-                      </>
-                    ) : (
-                      <div className="px-3 py-2.5 bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)]">
-                        {editForm?.language || 'English'}
                       </div>
-                    )}
+
+                      <TemplateReadonlyField label="Template Name">
+                        {editForm?.name || ''}
+                      </TemplateReadonlyField>
+
+                      <TemplateReadonlyField label="Email Subject">
+                        {editForm?.subject || ''}
+                      </TemplateReadonlyField>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                          Email Body
+                        </label>
+                        <pre className={`${TEMPLATE_FIELD_READONLY} min-h-[12rem] px-4 py-3 font-sans leading-relaxed whitespace-pre-wrap break-words overflow-y-auto`}>
+                          {editForm?.body || ''}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="flex-1 min-h-0 overflow-y-auto px-5 py-5"
+                    data-template-editor
+                    onBlur={handleEditorFocusOut}
+                  >
+                    <div className="space-y-5">
+                      {isCreatingNew && (
+                        <p className="text-xs text-[var(--color-text-muted)] leading-relaxed rounded-lg border border-[var(--color-border-default)]/80 bg-white px-3 py-2.5">
+                          Drafts save automatically when you click elsewhere, switch tabs, or select another template after filling in name, subject, or body.
+                          Click <strong className="font-semibold text-[var(--color-text-secondary)]">Discard</strong> to leave without saving.
+                        </p>
+                      )}
+
+                      <section
+                        aria-labelledby="template-details-heading"
+                        className="rounded-xl border border-[var(--color-border-default)] bg-white p-4 shadow-[0_1px_2px_rgba(26,26,46,0.04)] space-y-4"
+                      >
+                        <h4 id="template-details-heading" className="text-xs font-bold text-[var(--color-text-secondary)]">
+                          Details
+                        </h4>
+
+                        {isCreatingNew ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-1.5 min-w-0">
+                              <TemplateFieldLabel htmlFor="template-category">Category</TemplateFieldLabel>
+                              <div className="relative min-w-0">
+                                <select
+                                  id="template-category"
+                                  value={editForm?.category || 'Membership'}
+                                  onChange={(e) => handleFieldChange('category', e.target.value)}
+                                  className={`${TEMPLATE_FIELD_INPUT} w-full appearance-none pr-8 cursor-pointer`}
+                                >
+                                  {['Membership', 'Payments', 'Events', 'General Enquiries', 'Other'].map((c) => (
+                                    <option key={c} value={c}>{c}</option>
+                                  ))}
+                                </select>
+                                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" aria-hidden="true" />
+                              </div>
+                            </div>
+                            <div className="space-y-1.5 min-w-0">
+                              <TemplateFieldLabel htmlFor="template-name">Template name</TemplateFieldLabel>
+                              <input
+                                id="template-name"
+                                type="text"
+                                value={editForm?.name || ''}
+                                onChange={(e) => handleFieldChange('name', e.target.value)}
+                                className={`${TEMPLATE_FIELD_INPUT} w-full`}
+                                placeholder="e.g. Membership enquiry"
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5">
+                            <TemplateFieldLabel htmlFor="template-name">Template name</TemplateFieldLabel>
+                            <input
+                              id="template-name"
+                              type="text"
+                              value={editForm?.name || ''}
+                              onChange={(e) => handleFieldChange('name', e.target.value)}
+                              className={TEMPLATE_FIELD_INPUT}
+                              placeholder="e.g. Membership enquiry"
+                            />
+                          </div>
+                        )}
+
+                        {!isCreatingNew && (
+                          <div className="space-y-1.5">
+                            <TemplateFieldLabel
+                              htmlFor="template-language"
+                              hint="Switching language swaps subject and body with translated mock content."
+                            >
+                              Language
+                            </TemplateFieldLabel>
+                            <div className="relative max-w-xs">
+                              <select
+                                id="template-language"
+                                value={editForm?.language || 'English'}
+                                onChange={(e) => handleLanguageChange(e.target.value)}
+                                className={`${TEMPLATE_FIELD_INPUT} appearance-none pr-8 cursor-pointer font-medium`}
+                              >
+                                {['English', 'German', 'Spanish', 'Japanese'].map((l) => (
+                                  <option key={l} value={l}>{l}</option>
+                                ))}
+                              </select>
+                              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" aria-hidden="true" />
+                            </div>
+                          </div>
+                        )}
+                      </section>
+
+                      <section
+                        aria-labelledby="template-email-heading"
+                        className="rounded-xl border border-[var(--color-border-default)] bg-white p-4 shadow-[0_1px_2px_rgba(26,26,46,0.04)] space-y-4"
+                      >
+                        <h4 id="template-email-heading" className="text-xs font-bold text-[var(--color-text-secondary)]">
+                          Email content
+                        </h4>
+
+                        <div className="space-y-1.5">
+                          <TemplateFieldLabel htmlFor="template-subject">Subject line</TemplateFieldLabel>
+                          <input
+                            id="template-subject"
+                            type="text"
+                            value={editForm?.subject || ''}
+                            onChange={(e) => handleFieldChange('subject', e.target.value)}
+                            className={TEMPLATE_FIELD_INPUT}
+                            placeholder="Re: Your enquiry"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-3 flex-wrap">
+                            <TemplateFieldLabel htmlFor="template-body">Body</TemplateFieldLabel>
+                            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Insert template variables">
+                              {['{{first_name}}', '{{club_name}}', '{{membership_type}}'].map((v) => (
+                                <button
+                                  key={v}
+                                  type="button"
+                                  onClick={() => handleFieldChange('body', `${editForm?.body || ''}${v}`)}
+                                  className="px-2 py-1 rounded-md text-[10px] font-bold font-mono bg-[var(--color-surface-highlight)] text-[var(--color-text-secondary)] hover:bg-[var(--color-brand-primary)]/10 hover:text-[var(--color-brand-primary)] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/25"
+                                >
+                                  {v}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <textarea
+                            id="template-body"
+                            value={editForm?.body || ''}
+                            onChange={(e) => handleFieldChange('body', e.target.value)}
+                            rows={14}
+                            className={`${TEMPLATE_FIELD_INPUT} resize-y font-mono leading-relaxed bg-[var(--color-surface-panel)]/30`}
+                            placeholder="Hi {{first_name}},&#10;&#10;&#10;&#10;Kind regards,&#10;Power Music Team"
+                          />
+                          <p className="text-[11px] text-[var(--color-text-muted)]">
+                            Click a variable chip to append it to the body, or type placeholders manually.
+                          </p>
+                        </div>
+                      </section>
+                    </div>
                   </div>
                 )}
-
-                {/* Field 2: Template Name */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                    Template Name
-                  </label>
-                  {isEditing || isCreatingNew ? (
-                    <input
-                      type="text"
-                      value={editForm?.name || ''}
-                      onChange={(e) => handleFieldChange('name', e.target.value)}
-                      className="w-full px-3 py-2.5 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
-                    />
-                  ) : (
-                    <div className="px-3 py-2.5 bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)]">
-                      {editForm?.name || ''}
-                    </div>
-                  )}
-                </div>
-
-                {/* Field 3: Email Subject */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                    Email Subject
-                  </label>
-                  {isEditing || isCreatingNew ? (
-                    <input
-                      type="text"
-                      value={editForm?.subject || ''}
-                      onChange={(e) => handleFieldChange('subject', e.target.value)}
-                      className="w-full px-3 py-2.5 bg-white border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors"
-                    />
-                  ) : (
-                    <div className="px-3 py-2.5 bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)]">
-                      {editForm?.subject || ''}
-                    </div>
-                  )}
-                </div>
-
-                {/* Field 4: Email Body */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                      Email Body
-                    </label>
-                    {(isEditing || isCreatingNew) && (
-                      <div className="flex gap-1.5">
-                        {['{{first_name}}', '{{club_name}}', '{{membership_type}}'].map(v => (
-                          <button
-                            key={v}
-                            type="button"
-                            onClick={() => handleFieldChange('body', (editForm?.body || '') + v)}
-                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-brand-primary)] transition-colors cursor-pointer font-mono"
-                          >{v}</button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {isEditing || isCreatingNew ? (
-                    <>
-                      <textarea
-                        value={editForm?.body || ''}
-                        onChange={(e) => handleFieldChange('body', e.target.value)}
-                        rows={16}
-                        className="w-full px-4 py-3 bg-[#fafafa] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors resize-y font-mono leading-relaxed"
-                        placeholder="Enter your email template here. Use {{first_name}}, {{club_name}}, {{membership_type}} as variables."
-                      />
-                      <p className="text-[11px] text-[var(--color-text-muted)]">
-                        Click a variable chip above to insert it at the end of the body, or type it manually.
-                      </p>
-                    </>
-                  ) : (
-                    <pre className="w-full px-4 py-3 bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg text-sm text-[var(--color-text-primary)] font-mono leading-relaxed whitespace-pre-wrap">
-                      {editForm?.body || ''}
-                    </pre>
-                  )}
-                </div>
               </div>
             </>
           )}
         </div>
         </div>
+        )}
       </div>
 
-      {/* Delete Confirmation Modal */}
       <Modal
-        isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
-        title="Delete Template"
-        footer={
+        isOpen={pendingDelete != null}
+        onClose={() => setPendingDelete(null)}
+        confirm
+        title={pendingDelete?.variant === 'forever' ? 'Delete template forever' : 'Delete template'}
+        footer={(
           <>
             <button
-              onClick={() => setShowDeleteModal(false)}
+              type="button"
+              onClick={() => setPendingDelete(null)}
               className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium text-[var(--color-text-primary)] hover:bg-gray-50 transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
-              onClick={handleDelete}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-red-600 hover:bg-red-700 transition-colors shadow-sm cursor-pointer"
+              type="button"
+              onClick={confirmPendingDelete}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
             >
-              Delete Template
+              Delete template
             </button>
           </>
-        }
+        )}
       >
-        <div className="text-sm text-[var(--color-text-primary)] space-y-2">
-          <p>Are you sure you want to delete <strong>{selectedTemplate?.name}</strong>?</p>
-          <p className="text-[var(--color-text-secondary)]">This action cannot be undone.</p>
-        </div>
+        <p>
+          {pendingDelete?.variant === 'forever' ? (
+            <>
+              Permanently delete <strong>{pendingDelete?.name}</strong>? This cannot be undone.
+            </>
+          ) : (
+            <>
+              Move <strong>{pendingDelete?.name}</strong> to Deleted?
+            </>
+          )}
+        </p>
       </Modal>
     </div>
   );

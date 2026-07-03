@@ -1,17 +1,108 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Search, Flag, Send, AlertTriangle, Inbox,
   ChevronLeft, ChevronRight, Mail, MailOpen, Sparkles, SlidersHorizontal,
-  SortAsc, Archive, X, Pencil, Trash2, RotateCcw
+  SortAsc, Archive, X, Pencil, Trash2, RotateCcw, Link2, Unlink
 } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
-import { patchEmail, sendEmail, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache, getPilot2Workspace } from '../utils/pilot2Api';
-import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton } from '../components/ui';
+import { patchEmail, sendEmail, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache, refreshCache, patchCache, getPilot2Workspace } from '../utils/pilot2Api';
+import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton, DraftCreatingPanel } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
 const SIGNATURE = 'Kind regards,\nPower Music Team';
+
+function normalizeEmail(email) {
+  return {
+    ...email,
+    read: Boolean(email.read),
+    deleted: Boolean(email.deleted),
+    archived: Boolean(email.archived),
+    flagged: Boolean(email.flagged),
+  };
+}
+
+function shouldRevalidateAfterMutation(result) {
+  if (result == null) return true;
+  if (Array.isArray(result)) return false;
+  if (typeof result === 'object' && 'deleted' in result) {
+    const { deleted } = result;
+    return typeof deleted !== 'number' && typeof deleted !== 'string';
+  }
+  return true;
+}
+
+// ── Optimistic-mutation ledger ──
+// Lives at module scope so it survives unmount/remount: navigating away and
+// back mid-save must not resurrect state an in-flight mutation is changing.
+// Every server snapshot is reconciled against it, so a stale fetch can never
+// flash the pre-mutation state (e.g. a restored email reappearing in Bin).
+const PENDING_PATCH_TTL = 15000;
+const pendingEmailPatches = new Map(); // id -> { patch, until }
+const pendingEmailRemovals = new Map(); // id -> until
+
+function notePendingPatches(ids, patch) {
+  const now = Date.now();
+  ids.forEach((id) => {
+    const existing = pendingEmailPatches.get(id);
+    const base = existing && existing.until > now ? existing.patch : {};
+    pendingEmailPatches.set(id, { patch: { ...base, ...patch }, until: now + PENDING_PATCH_TTL });
+  });
+}
+
+function clearPendingPatches(ids, keys) {
+  ids.forEach((id) => {
+    const entry = pendingEmailPatches.get(id);
+    if (!entry) return;
+    if (!keys) {
+      pendingEmailPatches.delete(id);
+      return;
+    }
+    const rest = { ...entry.patch };
+    keys.forEach((key) => delete rest[key]);
+    if (Object.keys(rest).length === 0) pendingEmailPatches.delete(id);
+    else pendingEmailPatches.set(id, { ...entry, patch: rest });
+  });
+}
+
+function notePendingRemovals(ids) {
+  const until = Date.now() + PENDING_PATCH_TTL;
+  ids.forEach((id) => pendingEmailRemovals.set(id, until));
+}
+
+function clearPendingRemovals(ids) {
+  ids.forEach((id) => pendingEmailRemovals.delete(id));
+}
+
+const sameValue = (a, b) => a === b || (a == null && b == null);
+
+// Overlay unconfirmed local changes onto server rows. With `retire: true`
+// (full workspace snapshots) an entry is dropped once the server reflects it;
+// mutation responses must NOT retire entries, because a stale fetch dispatched
+// before the mutation can still land afterwards and needs the overlay.
+function reconcileWithPending(rows, { retire = false } = {}) {
+  const now = Date.now();
+  pendingEmailPatches.forEach((entry, id) => {
+    if (entry.until < now) pendingEmailPatches.delete(id);
+  });
+  pendingEmailRemovals.forEach((until, id) => {
+    if (until < now) pendingEmailRemovals.delete(id);
+  });
+  return (rows ?? [])
+    .filter((raw) => !pendingEmailRemovals.has(raw.id))
+    .map((raw) => {
+      const email = normalizeEmail(raw);
+      const entry = pendingEmailPatches.get(email.id);
+      if (!entry) return email;
+      const caughtUp = Object.entries(entry.patch).every(([key, value]) => sameValue(email[key], value));
+      if (caughtUp) {
+        if (retire) pendingEmailPatches.delete(email.id);
+        return email;
+      }
+      return { ...email, ...entry.patch };
+    });
+}
 
 const MAILBOXES = [
   { id: 'inbox', label: 'Inbox', shortLabel: 'Inbox', icon: Inbox },
@@ -36,10 +127,17 @@ function getFirstName(from) {
 }
 
 function buildDraft(email) {
-  // The AI-composed draft comes from the backend; fall back to a plain
-  // acknowledgement only if a draft is somehow missing.
-  if (email.draftBody) return email.draftBody;
+  if (email.draftBody?.trim()) return email.draftBody;
   return `Hi ${getFirstName(email.from)},\n\nThank you for your message. A member of our team will review your enquiry and respond shortly.\n\n${SIGNATURE}`;
+}
+
+// Only Imported/Processing mean the AI is still working. Statuses like
+// Flagged or No Draft must NOT show the composing panel (they never get a
+// draft automatically), otherwise flagging a stuck email looks like it did
+// nothing and "Composing your reply" spins forever.
+function isDraftPending(email) {
+  if (!email || email.deleted) return false;
+  return email.draftStatus === 'Imported' || email.draftStatus === 'Processing';
 }
 
 function formatListTime(iso) {
@@ -68,10 +166,11 @@ function groupEmailsByDateAndIntent(emails) {
   const dateMap = new Map();
   emails.forEach((email) => {
     const dateLabel = getDateGroupLabel(email.receivedAt);
+    const intent = email.intent || 'Pending';
     if (!dateMap.has(dateLabel)) dateMap.set(dateLabel, new Map());
     const intentMap = dateMap.get(dateLabel);
-    if (!intentMap.has(email.intent)) intentMap.set(email.intent, []);
-    intentMap.get(email.intent).push(email);
+    if (!intentMap.has(intent)) intentMap.set(intent, []);
+    intentMap.get(intent).push(email);
   });
 
   return Array.from(dateMap.entries()).map(([dateLabel, intentMap]) => ({
@@ -145,10 +244,12 @@ function BulkActionChip({ icon: Icon, label, onClick, variant = 'default', disab
       default: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]',
       outline: 'text-[var(--color-brand-primary)] hover:bg-[var(--color-surface-highlight-strong)]',
       soft: 'text-[var(--color-brand-primary)] hover:bg-[var(--color-surface-highlight-strong)]',
+      delete: 'text-[var(--color-text-secondary)] hover:text-red-600 hover:bg-red-50',
       danger: 'text-red-600 hover:bg-red-50 hover:text-red-700',
       dangerSolid: 'text-red-600 hover:bg-red-50 hover:text-red-700',
     };
     const activeVariants = {
+      delete: 'text-red-600 bg-red-50 hover:bg-red-100',
       danger: 'text-red-700 bg-red-50 hover:bg-red-100',
       default: 'text-[var(--color-brand-primary)] bg-[var(--color-surface-highlight-strong)] hover:bg-[var(--color-surface-highlight)]',
     };
@@ -162,13 +263,15 @@ function BulkActionChip({ icon: Icon, label, onClick, variant = 'default', disab
           disabled={disabled}
           aria-label={label}
           aria-pressed={active || undefined}
-          className={`inline-flex items-center justify-center h-8 w-8 rounded-full transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 disabled:opacity-40 disabled:cursor-not-allowed ${active ? activeCls : idle}`}
+          className={`peer inline-flex items-center justify-center h-8 w-8 rounded-full transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 disabled:opacity-40 disabled:cursor-not-allowed ${active ? activeCls : idle}`}
         >
           <Icon className={`w-4 h-4 ${iconClass}`} aria-hidden="true" />
         </button>
+        {/* peer-focus-visible (not focus-within): a mouse click leaves the
+            button focused, which used to pin the tooltip open after hover. */}
         <span
           role="tooltip"
-          className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-[calc(100%+4px)] z-40 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 scale-95 transition-all duration-100 group-hover:opacity-100 group-hover:scale-100 group-focus-within:opacity-100 group-focus-within:scale-100"
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-[calc(100%+4px)] z-40 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 scale-95 transition-all duration-100 group-hover:opacity-100 group-hover:scale-100 peer-focus-visible:opacity-100 peer-focus-visible:scale-100"
         >
           {label}
         </span>
@@ -187,6 +290,8 @@ function BulkActionChip({ icon: Icon, label, onClick, variant = 'default', disab
       'text-[var(--color-brand-primary)] bg-white border border-[var(--color-border-default)] hover:bg-[var(--color-surface-highlight)]',
     soft:
       'text-[var(--color-brand-primary)] bg-[var(--color-surface-highlight-strong)]/70 hover:bg-[var(--color-surface-highlight-strong)]',
+    delete:
+      'text-[var(--color-text-secondary)] bg-white border border-[var(--color-border-default)] hover:text-red-600 hover:border-red-200 hover:bg-red-50',
     danger:
       'text-red-700 bg-red-50 border border-red-200/70 hover:bg-red-100',
     dangerSolid:
@@ -285,6 +390,7 @@ function EmailListItem({ email, selected, checked, onClick, onCheck }) {
 
 export default function EmailQueue() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const mailboxFromUrl = searchParams.get('mailbox');
   const [emails, setEmails] = useState([]);
@@ -309,20 +415,51 @@ export default function EmailQueue() {
   const [isEditingDraft, setIsEditingDraft] = useState(false);
   const [archivedIds, setArchivedIds] = useState(() => new Set());
   const [listLoading, setListLoading] = useState(true);
+  const [pendingAiCount, setPendingAiCount] = useState(0);
   const sortRef = useRef(null);
 
   // Load emails and inboxes: cached copy renders instantly, then fresh data
   // replaces it. Refreshes on window focus and every 30s so changes made in
-  // Gmail (or another tab) show up without a manual reload.
+  // Gmail (or another tab) show up without a manual reload. Every snapshot is
+  // reconciled against the pending-mutation ledger so unconfirmed local
+  // changes (restore, delete, archive, read…) are never flashed away.
   const applyEmails = useCallback((emailRows) => {
-    setEmails(emailRows.map((e) => ({ ...e, read: Boolean(e.read) })));
-    setArchivedIds(new Set(emailRows.filter((e) => e.archived).map((e) => e.id)));
+    const next = reconcileWithPending(emailRows, { retire: true });
+    setArchivedIds(new Set(next.filter((e) => e.archived).map((e) => e.id)));
+    patchCache('pilot2_workspace', { emails: next });
+    setEmails(next);
   }, []);
 
+  const updateEmailsOptimistic = useCallback((updater) => {
+    setEmails((prev) => {
+      const next = updater(prev);
+      patchCache('pilot2_workspace', { emails: next });
+      return next;
+    });
+  }, []);
+
+  // Merge a mutation response into local state. The response goes through the
+  // same ledger reconciliation, which also retires ledger entries the server
+  // has confirmed.
+  const mergeEmailPatches = useCallback((patches) => {
+    const rows = Array.isArray(patches) ? patches : [patches];
+    const byId = new Map(reconcileWithPending(rows).map((email) => [email.id, email]));
+    setEmails((prev) => {
+      const next = prev.map((email) => (byId.has(email.id) ? { ...email, ...byId.get(email.id) } : email));
+      patchCache('pilot2_workspace', { emails: next });
+      return next;
+    });
+  }, []);
+
+  // Keep every inbox selectable (a disconnected one shows a "connect again"
+  // state), but drop the selection if the inbox was deleted.
   const applyInboxes = useCallback((inboxRows) => {
-    const connected = inboxRows.filter((i) => i.status === 'Connected');
-    setInboxes(connected.length > 0 ? connected : inboxRows);
-    setInboxFilter((prev) => prev || (connected[0] ?? inboxRows[0])?.email || '');
+    setInboxes(inboxRows);
+    setInboxFilter((prev) => {
+      if (prev && inboxRows.some((i) => i.email === prev)) return prev;
+      const connected = inboxRows.filter((i) => i.status === 'Connected');
+      return (connected[0] ?? inboxRows[0])?.email || '';
+    });
   }, []);
 
   // In-flight mutation counter. Background refreshes are skipped while a
@@ -332,9 +469,10 @@ export default function EmailQueue() {
   const cancelledRef = useRef(false);
 
   const revalidate = useCallback(() => {
-    loadWithCache('pilot2_workspace', getPilot2Workspace, (data) => {
+    refreshCache('pilot2_workspace', getPilot2Workspace, (data) => {
       if (!cancelledRef.current && pendingRef.current === 0) applyEmails(data.emails ?? []);
       if (!cancelledRef.current) applyInboxes(data.inboxes ?? []);
+      if (!cancelledRef.current) setPendingAiCount(data.pendingAiCount ?? 0);
       if (!cancelledRef.current) setListLoading(false);
     }).catch(() => {});
   }, [applyEmails, applyInboxes]);
@@ -343,11 +481,17 @@ export default function EmailQueue() {
   // and cache from the server as soon as the last save lands.
   const track = useCallback(async (promise) => {
     pendingRef.current += 1;
+    let result;
     try {
-      return await promise;
+      result = await promise;
+      return result;
     } finally {
       pendingRef.current -= 1;
-      if (pendingRef.current === 0) setTimeout(revalidate, 250);
+      // Bulk-patch / bin responses already carry saved state — re-fetching can
+      // race Gmail sync and briefly revert bin actions.
+      if (pendingRef.current === 0 && shouldRevalidateAfterMutation(result)) {
+        setTimeout(revalidate, 250);
+      }
     }
   }, [revalidate]);
 
@@ -356,6 +500,7 @@ export default function EmailQueue() {
     loadWithCache('pilot2_workspace', getPilot2Workspace, (data) => {
       if (!cancelledRef.current && pendingRef.current === 0) applyEmails(data.emails ?? []);
       if (!cancelledRef.current) applyInboxes(data.inboxes ?? []);
+      if (!cancelledRef.current) setPendingAiCount(data.pendingAiCount ?? 0);
       if (!cancelledRef.current) setListLoading(false);
     }).catch((err) => {
       setListLoading(false);
@@ -383,6 +528,20 @@ export default function EmailQueue() {
     document.addEventListener('mousedown', onClickOutside);
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [sortOpen]);
+
+  const selectedEmail = emails.find((e) => e.id === selectedId) ?? null;
+  const selectedDraftPending = selectedEmail ? isDraftPending(selectedEmail) : false;
+
+  useEffect(() => {
+    if (!selectedId || !selectedDraftPending) return undefined;
+
+    const refresh = () => {
+      if (!document.hidden) revalidate();
+    };
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
+  }, [selectedId, selectedDraftPending, revalidate]);
 
   const intentOptions = useMemo(
     () => INTENTS.map((intent) => ({ value: intent, label: intent === 'All' ? 'All intents' : intent })),
@@ -435,12 +594,12 @@ export default function EmailQueue() {
   }, [emails, mailbox, inboxFilter, intentFilter, readFilter, search, dateFrom, dateTo, sortOrder, archivedIds]);
 
   const totalPages = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
+  const currentPage = Math.min(page, totalPages);
 
   const paginatedEmails = useMemo(() => {
-    const start = (safePage - 1) * PAGE_SIZE;
+    const start = (currentPage - 1) * PAGE_SIZE;
     return filteredEmails.slice(start, start + PAGE_SIZE);
-  }, [filteredEmails, safePage]);
+  }, [filteredEmails, currentPage]);
 
   const listGroups = useMemo(() => groupEmailsByDateAndIntent(paginatedEmails), [paginatedEmails]);
 
@@ -451,6 +610,22 @@ export default function EmailQueue() {
     })),
     [inboxes]
   );
+
+  const selectedInbox = inboxes.find((i) => i.email === inboxFilter) ?? null;
+  const inboxDisconnected = Boolean(selectedInbox && selectedInbox.status !== 'Connected');
+
+  // Import/AI drafting still in progress: show the sync banner and poll
+  // faster so newly drafted emails appear promptly.
+  const isSyncing = pendingAiCount > 0 || selectedInbox?.backfillStatus === 'running';
+
+  useEffect(() => {
+    if (!isSyncing) return undefined;
+    const refresh = () => {
+      if (!document.hidden) revalidate();
+    };
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
+  }, [isSyncing, revalidate]);
 
   const allPageChecked = paginatedEmails.length > 0 && paginatedEmails.every((e) => checkedIds.has(e.id));
   const somePageChecked = paginatedEmails.some((e) => checkedIds.has(e.id));
@@ -484,10 +659,16 @@ export default function EmailQueue() {
   const activeMailboxLabel = activeMailbox?.label ?? 'Inbox';
   const ActiveMailboxIcon = activeMailbox?.icon;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setPage(1);
     setCheckedIds(new Set());
+    setSelectedId(null);
   }, [mailbox, inboxFilter, intentFilter, readFilter, search, dateFrom, dateTo, sortOrder]);
+
+  useLayoutEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE));
+    if (page > maxPage) setPage(maxPage);
+  }, [filteredEmails.length, page]);
 
   const hasActiveSearch = Boolean(search.trim());
   const hasActiveFilters = intentFilter !== 'All' || readFilter !== 'all' || dateFrom || dateTo;
@@ -498,8 +679,6 @@ export default function EmailQueue() {
     setDateFrom('');
     setDateTo('');
   };
-
-  const selectedEmail = emails.find((e) => e.id === selectedId) ?? null;
 
   const getDraftForEmail = useCallback((email) => {
     if (draftEdits[email.id] != null) return draftEdits[email.id];
@@ -512,12 +691,15 @@ export default function EmailQueue() {
     setIsEditingDraft(false);
     // Only auto-mark read when opening a different email (not re-clicking the same row).
     if (isNewSelection && !email.read) {
-      setEmails((prev) =>
+      notePendingPatches([email.id], { read: true });
+      updateEmailsOptimistic((prev) =>
         prev.map((e) => (e.id === email.id ? { ...e, read: true } : e))
       );
-      track(patchEmail(email.id, { read: true })).catch(() => {});
+      track(patchEmail(email.id, { read: true }))
+        .then((updated) => mergeEmailPatches(updated))
+        .catch(() => clearPendingPatches([email.id], ['read']));
     }
-    if (draftEdits[email.id] == null) {
+    if (draftEdits[email.id] == null && !isDraftPending(email)) {
       setDraftEdits((prev) => ({ ...prev, [email.id]: buildDraft(email) }));
     }
   };
@@ -536,28 +718,46 @@ export default function EmailQueue() {
       showToast('Select one or more emails to archive.', 'error');
       return;
     }
+    notePendingPatches(ids, { archived: true });
     setArchivedIds((prev) => new Set([...prev, ...ids]));
-    setEmails((prev) => prev.map((e) => (ids.includes(e.id) ? { ...e, archived: true } : e)));
+    updateEmailsOptimistic((prev) => prev.map((e) => (ids.includes(e.id) ? { ...e, archived: true } : e)));
     setCheckedIds(new Set());
     if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-    track(bulkPatchEmails(ids, { archived: true })).catch(() => {});
     showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} moved to Archive.`, 'success');
-    setMailbox('archive');
+    track(bulkPatchEmails(ids, { archived: true }))
+      .then((updated) => mergeEmailPatches(updated))
+      .catch(() => {
+        clearPendingPatches(ids, ['archived']);
+        setArchivedIds((prev) => {
+          const next = new Set(prev);
+          ids.forEach((id) => next.delete(id));
+          return next;
+        });
+        updateEmailsOptimistic((prev) => prev.map((e) => (ids.includes(e.id) ? { ...e, archived: false } : e)));
+        showToast('Could not archive email.', 'error');
+      });
   };
 
   const unarchiveEmails = (ids) => {
     if (ids.length === 0) return;
+    notePendingPatches(ids, { archived: false });
     setArchivedIds((prev) => {
       const next = new Set(prev);
       ids.forEach((id) => next.delete(id));
       return next;
     });
-    setEmails((prev) => prev.map((e) => (ids.includes(e.id) ? { ...e, archived: false } : e)));
+    updateEmailsOptimistic((prev) => prev.map((e) => (ids.includes(e.id) ? { ...e, archived: false } : e)));
     setCheckedIds(new Set());
     if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-    track(bulkPatchEmails(ids, { archived: false })).catch(() => {});
     showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} restored to Inbox.`, 'success');
-    setMailbox('inbox');
+    track(bulkPatchEmails(ids, { archived: false }))
+      .then((updated) => mergeEmailPatches(updated))
+      .catch(() => {
+        clearPendingPatches(ids, ['archived']);
+        setArchivedIds((prev) => new Set([...prev, ...ids]));
+        updateEmailsOptimistic((prev) => prev.map((e) => (ids.includes(e.id) ? { ...e, archived: true } : e)));
+        showToast('Could not restore email to Inbox.', 'error');
+      });
   };
 
   // ── Read / unread (bulk, one request) ──
@@ -566,19 +766,16 @@ export default function EmailQueue() {
     const idSet = new Set(ids);
     const previous = emails.filter((e) => idSet.has(e.id)).map((e) => ({ id: e.id, read: e.read }));
 
-    setEmails((prev) => prev.map((e) => (idSet.has(e.id) ? { ...e, read } : e)));
+    notePendingPatches(ids, { read });
+    updateEmailsOptimistic((prev) => prev.map((e) => (idSet.has(e.id) ? { ...e, read } : e)));
 
     try {
       const updated = await track(bulkPatchEmails(ids, { read }));
-      if (updated?.length) {
-        const byId = Object.fromEntries(updated.map((e) => [e.id, e]));
-        setEmails((prev) => prev.map((e) => (
-          byId[e.id] ? { ...e, read: Boolean(byId[e.id].read) } : e
-        )));
-      }
+      if (updated?.length) mergeEmailPatches(updated);
       showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} marked as ${read ? 'read' : 'unread'}.`, 'success');
     } catch (err) {
-      setEmails((prev) => prev.map((e) => {
+      clearPendingPatches(ids, ['read']);
+      updateEmailsOptimistic((prev) => prev.map((e) => {
         const prior = previous.find((p) => p.id === e.id);
         return prior ? { ...e, read: prior.read } : e;
       }));
@@ -594,45 +791,97 @@ export default function EmailQueue() {
       showToast('Select one or more emails to delete.', 'error');
       return;
     }
-    setEmails((prev) => prev.map((e) => (ids.includes(e.id) ? { ...e, deleted: true } : e)));
+    notePendingPatches(ids, { deleted: true });
+    updateEmailsOptimistic((prev) =>
+      prev.map((e) => (ids.includes(e.id) ? { ...e, deleted: true } : e)),
+    );
     setCheckedIds(new Set());
     if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-    setMailbox('bin');
-    track(bulkPatchEmails(ids, { deleted: true })).catch(() => {});
     showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} moved to Bin.`, 'success');
+    track(bulkPatchEmails(ids, { deleted: true }))
+      .then((updated) => {
+        mergeEmailPatches(updated);
+      })
+      .catch(() => {
+        clearPendingPatches(ids, ['deleted']);
+        updateEmailsOptimistic((prev) =>
+          prev.map((e) => (ids.includes(e.id) ? { ...e, deleted: false } : e)),
+        );
+        showToast('Could not move email to Bin.', 'error');
+      });
   };
 
   const restoreEmails = (ids) => {
     if (ids.length === 0) return;
-    setEmails((prev) => prev.map((e) => (ids.includes(e.id) ? { ...e, deleted: false } : e)));
+    const snapshot = emails;
+
+    notePendingPatches(ids, { deleted: false });
+    updateEmailsOptimistic((prev) =>
+      prev.map((e) => (ids.includes(e.id) ? { ...e, deleted: false, deletedAt: null } : e)),
+    );
     setCheckedIds(new Set());
     if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-    if (mailbox === 'bin') setMailbox('inbox');
-    track(bulkPatchEmails(ids, { deleted: false })).catch(() => {});
     showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} restored from Bin.`, 'success');
+
+    track(bulkPatchEmails(ids, { deleted: false }))
+      .then((updated) => {
+        mergeEmailPatches(updated);
+      })
+      .catch(() => {
+        clearPendingPatches(ids, ['deleted']);
+        updateEmailsOptimistic(() => snapshot);
+        showToast('Could not restore email from Bin.', 'error');
+      });
   };
 
-  const handleConfirmedDelete = async () => {
+  const handleConfirmedDelete = () => {
     if (!confirmDelete) return;
-    try {
-      if (confirmDelete.type === 'empty') {
-        const result = await track(emptyBin());
-        setEmails((prev) => prev.filter((e) => !e.deleted));
-        showToast(`Bin emptied — ${result.deleted} email${result.deleted === 1 ? '' : 's'} deleted forever.`, 'success');
-      } else {
-        await track(Promise.all(confirmDelete.ids.map((id) => deleteEmailForever(id))));
-        setEmails((prev) => prev.filter((e) => !confirmDelete.ids.includes(e.id)));
-        showToast(`${confirmDelete.ids.length} email${confirmDelete.ids.length > 1 ? 's' : ''} deleted forever.`, 'success');
-      }
-      if (selectedId && (confirmDelete.type === 'empty' || confirmDelete.ids.includes(selectedId))) {
-        setSelectedId(null);
-      }
+
+    const action = confirmDelete;
+    const snapshot = emails;
+    setConfirmDelete(null);
+
+    if (action.type === 'empty') {
+      const binnedIds = [...new Set(emails.filter((e) => e.deleted).map((e) => e.id))];
+
+      notePendingRemovals(binnedIds);
+      updateEmailsOptimistic((prev) => prev.filter((e) => !e.deleted));
       setCheckedIds(new Set());
-    } catch (err) {
-      showToast(`Delete failed: ${err.message}`, 'error');
-    } finally {
-      setConfirmDelete(null);
+      if (selectedId && binnedIds.includes(selectedId)) setSelectedId(null);
+
+      track(emptyBin())
+        .then((result) => {
+          showToast(
+            `Bin emptied. ${result.deleted} email${result.deleted === 1 ? '' : 's'} deleted forever.`,
+            'success',
+          );
+        })
+        .catch((err) => {
+          clearPendingRemovals(binnedIds);
+          updateEmailsOptimistic(() => snapshot);
+          showToast(`Could not empty bin: ${err.message}`, 'error');
+        });
+      return;
     }
+
+    const ids = action.ids;
+    notePendingRemovals(ids);
+    updateEmailsOptimistic((prev) => prev.filter((e) => !ids.includes(e.id)));
+    setCheckedIds(new Set());
+    if (selectedId && ids.includes(selectedId)) setSelectedId(null);
+
+    track(Promise.all(ids.map((id) => deleteEmailForever(id))))
+      .then(() => {
+        showToast(
+          `${ids.length} email${ids.length > 1 ? 's' : ''} deleted forever.`,
+          'success',
+        );
+      })
+      .catch((err) => {
+        clearPendingRemovals(ids);
+        updateEmailsOptimistic(() => snapshot);
+        showToast(`Delete failed: ${err.message}`, 'error');
+      });
   };
 
   const flagSelected = () => {
@@ -646,26 +895,32 @@ export default function EmailQueue() {
   };
 
   const flagEmails = (ids) => {
-    setEmails((prev) =>
+    notePendingPatches(ids, { flagged: true });
+    updateEmailsOptimistic((prev) =>
       prev.map((e) =>
         ids.includes(e.id)
           ? { ...e, flagged: true, draftStatus: e.draftStatus === 'Sent' ? 'Sent' : 'Flagged', flagReason: 'Manual review requested' }
           : e
       )
     );
-    track(bulkPatchEmails(ids, { flagged: true })).catch(() => {});
+    track(bulkPatchEmails(ids, { flagged: true }))
+      .then((updated) => mergeEmailPatches(updated))
+      .catch(() => clearPendingPatches(ids, ['flagged']));
     showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} flagged.`, 'warning');
   };
 
   const unflagEmails = (ids) => {
-    setEmails((prev) =>
+    notePendingPatches(ids, { flagged: false });
+    updateEmailsOptimistic((prev) =>
       prev.map((e) => {
         if (!ids.includes(e.id) || !e.flagged) return e;
         const nextStatus = e.draftStatus === 'Sent' ? 'Sent' : 'Draft Created';
         return { ...e, flagged: false, draftStatus: nextStatus, flagReason: undefined };
       })
     );
-    track(bulkPatchEmails(ids, { flagged: false })).catch(() => {});
+    track(bulkPatchEmails(ids, { flagged: false }))
+      .then((updated) => mergeEmailPatches(updated))
+      .catch(() => clearPendingPatches(ids, ['flagged']));
     showToast(`${ids.length} email${ids.length > 1 ? 's' : ''} unflagged.`, 'success');
   };
 
@@ -698,7 +953,8 @@ export default function EmailQueue() {
       // The backend sends via Gmail and records the draft-vs-sent diff
       // (the learning signal) in the same call.
       const updated = await track(sendEmail(selectedEmail.id, getDraftForEmail(selectedEmail)));
-      setEmails((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+      notePendingPatches([updated.id], { draftStatus: updated.draftStatus });
+      updateEmailsOptimistic((prev) => prev.map((e) => (e.id === updated.id ? normalizeEmail(updated) : e)));
       showToast(`Reply sent to ${selectedEmail.fromEmail} via Gmail.`, 'success');
       setIsEditingDraft(false);
       setMailbox('sent');
@@ -707,8 +963,8 @@ export default function EmailQueue() {
     }
   };
 
-  const pageStart = filteredEmails.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(safePage * PAGE_SIZE, filteredEmails.length);
+  const pageStart = filteredEmails.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredEmails.length);
 
   return (
     <div className="max-w-7xl mx-auto flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden select-none">
@@ -738,6 +994,44 @@ export default function EmailQueue() {
       />
 
       <div className="flex flex-1 min-h-0 flex-col rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white">
+        {inboxDisconnected ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-8 py-12">
+            <span className="flex items-center justify-center h-14 w-14 rounded-full bg-[var(--color-surface-highlight)] mb-5" aria-hidden="true">
+              <Unlink className="w-6 h-6 text-[var(--color-text-secondary)]" />
+            </span>
+            <h2 className="text-base font-bold text-[var(--color-text-primary)] mb-1.5">
+              {selectedInbox?.title} is disconnected
+            </h2>
+            <p className="text-sm text-[var(--color-text-secondary)] max-w-sm leading-relaxed mb-6">
+              Emails for <span className="font-semibold text-[var(--color-text-primary)]">{selectedInbox?.email}</span> are
+              hidden while the inbox is disconnected. Connect it again to load its mail.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/email-accounts')}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
+            >
+              <Link2 className="w-4 h-4" aria-hidden="true" />
+              Connect inbox
+            </button>
+          </div>
+        ) : (
+        <>
+        {isSyncing && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="shrink-0 flex items-center gap-2.5 px-4 py-2 border-b border-[var(--color-border-default)] bg-gradient-to-r from-[#f4f7fd] via-[#e9eff9] to-[#eef3fb]"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[var(--color-brand-primary)] shrink-0 animate-pulse" aria-hidden="true" />
+            <p className="flex-1 min-w-0 text-[11px] leading-snug text-[var(--color-text-secondary)]">
+              <span className="font-semibold text-[var(--color-text-primary)]">Importing and drafting emails.</span>{' '}
+              {pendingAiCount > 0
+                ? `${pendingAiCount} email${pendingAiCount === 1 ? '' : 's'} being classified — they'll appear here once their drafts are ready.`
+                : 'New mail is being imported — emails appear here once their drafts are ready.'}
+            </p>
+          </div>
+        )}
         <div className="flex flex-1 min-h-0">
         {/* ── Email list (Team Inbox style) ── */}
         <div className="w-[320px] shrink-0 flex flex-col border-r border-[var(--color-border-default)] min-h-0 bg-white">
@@ -985,7 +1279,7 @@ export default function EmailQueue() {
                             icon={Trash2}
                             label="Delete forever"
                             onClick={() => setConfirmDelete({ type: 'forever', ids: [...checkedIds] })}
-                            variant="danger"
+                            variant="delete"
                             iconOnly
                           />
                         </>
@@ -1033,7 +1327,7 @@ export default function EmailQueue() {
                             icon={Trash2}
                             label="Delete"
                             onClick={() => deleteEmails([...checkedIds])}
-                            variant="danger"
+                            variant="delete"
                             iconOnly
                           />
                         </>
@@ -1152,7 +1446,7 @@ export default function EmailQueue() {
               <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  disabled={safePage <= 1}
+                  disabled={currentPage <= 1}
                   onClick={() => setPage((p) => p - 1)}
                   className="p-1.5 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                   aria-label="Previous page"
@@ -1160,11 +1454,11 @@ export default function EmailQueue() {
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <span className="text-xs font-semibold text-[var(--color-text-primary)] px-1">
-                  {safePage}/{totalPages}
+                  {currentPage}/{totalPages}
                 </span>
                 <button
                   type="button"
-                  disabled={safePage >= totalPages}
+                  disabled={currentPage >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                   className="p-1.5 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                   aria-label="Next page"
@@ -1200,14 +1494,14 @@ export default function EmailQueue() {
                             icon={RotateCcw}
                             label="Restore from bin"
                             onClick={() => restoreEmails([...checkedIds])}
-                            variant="outline"
+                            variant="primary"
                             fullWidth
                           />
                           <BulkActionChip
                             icon={Trash2}
                             label="Delete forever"
                             onClick={() => setConfirmDelete({ type: 'forever', ids: [...checkedIds] })}
-                            variant="dangerSolid"
+                            variant="delete"
                             fullWidth
                           />
                         </>
@@ -1255,7 +1549,7 @@ export default function EmailQueue() {
                             icon={Trash2}
                             label="Move to bin"
                             onClick={() => deleteEmails([...checkedIds])}
-                            variant="danger"
+                            variant="delete"
                             fullWidth
                           />
                         </>
@@ -1313,7 +1607,7 @@ export default function EmailQueue() {
                           icon={Trash2}
                           label="Delete forever"
                           onClick={() => setConfirmDelete({ type: 'forever', ids: [selectedEmail.id] })}
-                          variant="danger"
+                          variant="delete"
                           iconOnly
                         />
                       </>
@@ -1357,7 +1651,7 @@ export default function EmailQueue() {
                           icon={Trash2}
                           label="Delete"
                           onClick={() => deleteEmails([selectedEmail.id])}
-                          variant="danger"
+                          variant="delete"
                           iconOnly
                         />
                       </>
@@ -1393,15 +1687,22 @@ export default function EmailQueue() {
                   <div className={`rounded-xl border border-[var(--color-border-default)] bg-white shadow-sm overflow-hidden ${selectedEmail.deleted ? 'opacity-60 pointer-events-none' : ''}`}>
                     <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--color-border-default)]/70">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="inline-flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-md bg-[var(--color-surface-highlight)] text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]">
-                          <Sparkles className="w-3 h-3" />
-                          Reply draft generated
-                        </span>
+                        {selectedDraftPending ? (
+                          <span className="inline-flex items-center gap-1.5 shrink-0 px-2 py-0.5 rounded-md bg-[#edf4fc] text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]">
+                            <Sparkles className="w-3 h-3 animate-pulse" style={{ animationDuration: '1.6s' }} />
+                            Creating reply draft
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-md bg-[var(--color-surface-highlight)] text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]">
+                            <Sparkles className="w-3 h-3" />
+                            Reply draft ready
+                          </span>
+                        )}
                         {selectedEmail.draftStatus === 'Sent' && (
                           <span className="text-[10px] font-medium text-[var(--color-text-muted)]">Sent</span>
                         )}
                       </div>
-                      {selectedEmail.draftStatus !== 'Sent' && (
+                      {selectedEmail.draftStatus !== 'Sent' && !selectedDraftPending && (
                         <div className="flex items-center gap-2 shrink-0">
                           {!isEditingDraft ? (
                             <button
@@ -1426,7 +1727,9 @@ export default function EmailQueue() {
                     </div>
 
                     <div className="px-4 py-4 bg-[var(--color-surface-bg)]/40">
-                      {selectedEmail.draftStatus === 'Sent' || !isEditingDraft ? (
+                      {selectedDraftPending ? (
+                        <DraftCreatingPanel subject={selectedEmail.subject} />
+                      ) : selectedEmail.draftStatus === 'Sent' || !isEditingDraft ? (
                         <div className="rounded-lg bg-white px-4 py-3.5 text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-wrap min-h-[120px] border border-[var(--color-border-default)]/60">
                           {getDraftForEmail(selectedEmail)}
                         </div>
@@ -1440,7 +1743,7 @@ export default function EmailQueue() {
                       )}
                     </div>
 
-                    {selectedEmail.draftStatus !== 'Sent' && (
+                    {selectedEmail.draftStatus !== 'Sent' && !selectedDraftPending && (
                       <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-[var(--color-border-default)]/70 bg-white">
                         <p className="text-[11px] text-[var(--color-text-muted)] truncate min-w-0">
                           From <span className="font-medium text-[var(--color-text-secondary)]">{selectedEmail.inbox}</span>
@@ -1485,12 +1788,15 @@ export default function EmailQueue() {
           )}
         </div>
       </div>
+        </>
+        )}
     </div>
 
       {/* Destructive-action confirmation (Gmail-style: deletion is forever) */}
       <Modal
         isOpen={confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
+        confirm
         title={confirmDelete?.type === 'empty' ? 'Empty bin' : 'Delete forever'}
         footer={
           <>
@@ -1502,21 +1808,21 @@ export default function EmailQueue() {
             </button>
             <button
               onClick={handleConfirmedDelete}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-red-600 hover:bg-red-700 transition-colors shadow-sm cursor-pointer"
+              className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
             >
               {confirmDelete?.type === 'empty' ? 'Empty bin' : 'Delete forever'}
             </button>
           </>
         }
       >
-        <div className="text-sm text-[var(--color-text-primary)] space-y-2">
+        <div className="space-y-2">
           <p>
             {confirmDelete?.type === 'empty'
               ? `Permanently delete all ${mailboxCounts.bin} email${mailboxCounts.bin === 1 ? '' : 's'} in the Bin?`
               : `Permanently delete ${confirmDelete?.ids?.length === 1 ? 'this email' : `these ${confirmDelete?.ids?.length} emails`}?`}
           </p>
-          <p className="text-[var(--color-text-secondary)]">
-            This only removes them from this dashboard — the original messages stay in Gmail.
+          <p>
+            This only removes them from this dashboard. The original messages stay in Gmail.
             This action cannot be undone here.
           </p>
         </div>

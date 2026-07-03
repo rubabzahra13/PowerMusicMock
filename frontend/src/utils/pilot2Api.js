@@ -39,10 +39,26 @@ export async function loadWithCache(key, fetcher, apply) {
   return fresh;
 }
 
+// Network-only refresh for post-mutation revalidation. Skips the stale
+// sessionStorage apply so optimistic updates are not briefly reverted.
+export async function refreshCache(key, fetcher, apply) {
+  const fresh = await fetcher();
+  if (isApiErrorPayload(fresh)) {
+    throw new Error(fresh.detail);
+  }
+  try { sessionStorage.setItem(`pm_cache_${key}`, JSON.stringify(fresh)); } catch { /* quota */ }
+  apply(fresh, false);
+  return fresh;
+}
+
 // Write-through: keep the cache in step with an optimistic local update so
 // navigating away and back never shows the pre-change data.
 export function writeCache(key, data) {
   try { sessionStorage.setItem(`pm_cache_${key}`, JSON.stringify(data)); } catch { /* quota */ }
+}
+
+export function clearCache(key) {
+  try { sessionStorage.removeItem(`pm_cache_${key}`); } catch { /* ignore */ }
 }
 
 export function patchCache(key, patch) {
@@ -66,6 +82,10 @@ export const connectInbox = (email, title) =>
   request('/api/pilot2/inboxes/connect', { method: 'POST', body: JSON.stringify({ email, title }) });
 export const disconnectInbox = (id) =>
   request(`/api/pilot2/inboxes/${id}/disconnect`, { method: 'POST' });
+export const updateInbox = (id, title) =>
+  request(`/api/pilot2/inboxes/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) });
+export const deleteInbox = (id) =>
+  request(`/api/pilot2/inboxes/${id}`, { method: 'DELETE' });
 
 // Emails
 export const getEmails = () => request('/api/pilot2/emails');
@@ -83,10 +103,17 @@ export const emptyBin = () =>
   request('/api/pilot2/emails/bin/empty', { method: 'POST' });
 
 // Templates
-export const getTemplates = () => request('/api/pilot2/templates');
+export const getTemplates = (inbox) => {
+  const query = inbox ? `?inbox=${encodeURIComponent(inbox)}` : '';
+  return request(`/api/pilot2/templates${query}`);
+};
 export const createTemplate = (template) =>
   request('/api/pilot2/templates', { method: 'POST', body: JSON.stringify(template) });
 export const updateTemplate = (id, template) =>
   request(`/api/pilot2/templates/${id}`, { method: 'PUT', body: JSON.stringify(template) });
 export const deleteTemplate = (id) =>
   request(`/api/pilot2/templates/${id}`, { method: 'DELETE' });
+export const restoreTemplate = (id) =>
+  request(`/api/pilot2/templates/${id}/restore`, { method: 'POST' });
+export const deleteTemplateForever = (id) =>
+  request(`/api/pilot2/templates/${id}/forever`, { method: 'DELETE' });
