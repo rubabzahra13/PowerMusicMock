@@ -23,12 +23,20 @@ dist-ssr
 *.sln
 *.sw?
 
-# Explicit Sensitive Files & Folders
+# Environment and Virtual Environments
 .env
 .env.*
+.venv/
+venv/
 backend/.env
 frontend/.env.local
 backend/venv/
+
+# Python cache
+__pycache__/
 backend/**/__pycache__/
+*.pyc
 backend/**/*.pyc
 
+# Testing
+.pytest_cache/

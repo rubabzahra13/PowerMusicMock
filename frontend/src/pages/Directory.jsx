@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
-import { authenticatedFetch } from '../utils/api';
 import { format, parseISO } from 'date-fns';
 
-import { DataTable, Tag, Drawer, SelectDropdown } from '../components/ui';
+import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
+import { loadWithCache } from '../utils/pilot2Api';
+import { fetchJson } from '../utils/api';
 
 const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (oldest first)' },
@@ -200,12 +201,27 @@ const TimestampCell = ({ val }) => {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function UserLedger() {
   const [liveUserLedger, setLiveUserLedger] = useState([]);
+  const [tableLoading, setTableLoading] = useState(true);
 
   useEffect(() => {
-    authenticatedFetch('http://localhost:8000/api/persons')
-      .then((res) => res.json())
-      .then((data) => setLiveUserLedger(data))
-      .catch((err) => console.error(err));
+    // Cached copy renders instantly; fresh data replaces it.
+    const applyPersons = (data) => {
+      setLiveUserLedger(Array.isArray(data) ? data : []);
+      setTableLoading(false);
+    };
+    const load = () => {
+      loadWithCache('directory_persons', () =>
+        fetchJson('/api/persons'),
+        applyPersons,
+      ).catch((err) => {
+        console.error(err);
+        setTableLoading(false);
+      });
+    };
+    load();
+    const refresh = () => { if (!document.hidden) load(); };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
   }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -329,82 +345,91 @@ export default function UserLedger() {
     {
       key: 'displayId',
       label: '#',
-      width: '60px',
+      width: '52px',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
       render: (val) => (
-        <span className="text-xs font-bold text-[var(--color-text-muted)]">{formatDisplayId(val)}</span>
+        <span className="text-xs font-bold text-[var(--color-text-muted)] whitespace-nowrap tabular-nums">
+          {formatDisplayId(val)}
+        </span>
       )
     },
     {
       key: 'dateAdded',
       label: 'Timestamp',
-      width: '130px',
+      width: '108px',
+      noShrink: true,
+      cellClassName: 'align-middle whitespace-nowrap',
       render: (val) => <TimestampCell val={val} />
     },
     {
       key: 'status',
       label: 'Status',
-      width: '80px',
+      width: '72px',
+      noShrink: true,
+      cellClassName: 'align-middle whitespace-nowrap',
       render: (val) => <Tag variant={val === 'Added' ? 'added' : 'removed'} label={val} />
     },
     {
-      key: 'personName',
-      label: 'Person Name',
-      width: '110px',
+      key: 'person',
+      label: 'Person',
+      width: '19%',
       render: (_, row) => (
-        <span className="font-semibold text-sm text-[var(--color-text-primary)]">
-          {row.firstName} {row.lastName}
-        </span>
+        <StackedTextCell
+          primary={`${row.firstName} ${row.lastName}`.trim()}
+          secondary={row.email}
+        />
       )
-    },
-    {
-      key: 'email',
-      label: 'Person Email',
-      width: '150px',
-      render: (val) => <span className="text-xs text-[var(--color-text-secondary)]">{val}</span>
     },
     {
       key: 'location',
       label: 'Location',
-      width: '95px',
-      render: (val) => <span className="text-xs text-[var(--color-text-secondary)]">{val}</span>
-    },
-    {
-      key: 'managerName',
-      label: 'Manager Name',
-      width: '120px',
-      render: (_, row) => (
-        <span className="font-semibold text-sm text-[var(--color-text-primary)]">{row.addedBy}</span>
+      width: '9%',
+      render: (val) => (
+        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
+          {val || '—'}
+        </TruncateCell>
       )
     },
     {
-      key: 'managerEmail',
-      label: 'Manager Email',
-      width: '155px',
+      key: 'manager',
+      label: 'Manager',
+      width: '19%',
       render: (_, row) => (
-        <span className="text-xs text-[var(--color-text-secondary)]">{row.managerEmail || '—'}</span>
+        <StackedTextCell
+          primary={row.addedBy}
+          secondary={row.managerEmail || '—'}
+        />
       )
     },
     {
       key: 'club',
       label: 'Manager Club',
-      width: '130px',
-      cellClassName: 'align-middle whitespace-normal break-words leading-snug',
-      render: (val) => <span className="text-xs text-[var(--color-text-secondary)]">{val}</span>
+      width: '13%',
+      cellClassName: 'align-middle max-w-0 overflow-hidden',
+      render: (val) => (
+        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
+          {val}
+        </TruncateCell>
+      )
     },
     {
       key: 'notes',
       label: 'Notes',
-      cellClassName: 'align-middle whitespace-normal break-words leading-snug',
+      width: '12%',
+      cellClassName: 'align-middle max-w-0 overflow-hidden',
       render: (val) => (
-        <span className="text-xs text-[var(--color-text-secondary)]">
-          {val?.trim() || ''}
-        </span>
+        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
+          {val?.trim() || '—'}
+        </TruncateCell>
       )
     },
     {
       key: 'actions',
       label: '',
       width: '48px',
+      noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'text-center align-middle whitespace-nowrap',
       render: (_, row) => (
@@ -412,7 +437,7 @@ export default function UserLedger() {
           type="button"
           onClick={(e) => { e.stopPropagation(); setSelectedUser(row); }}
           aria-label="View user details"
-          className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer"
+          className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer shrink-0"
         >
           <Eye className="h-4 w-4" />
         </button>
@@ -502,6 +527,7 @@ export default function UserLedger() {
           emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
           compact
           centerHeaders
+          loading={tableLoading}
         />
       </div>
 

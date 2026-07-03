@@ -1,31 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search, FileText, Trash2, Save, X, ChevronDown, Plus, Pencil,
-  Mail, SlidersHorizontal, SortAsc
+  SlidersHorizontal, SortAsc
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { templates as mockTemplates } from '../data/mockData';
-import { Toast, useToast, Modal, SelectDropdown } from '../components/ui';
+import { getTemplates, createTemplate, updateTemplate, deleteTemplate, loadWithCache } from '../utils/pilot2Api';
+import { Toast, useToast, Modal, SelectDropdown, CardListSkeleton } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
-
-const INBOXES = [
-  { email: 'cc@powermusic.com', title: 'Customer Care' },
-  { email: 'cc@powermusicapp.com', title: 'Music Apps' },
-  { email: 'info@powermusic.com', title: 'General Info' },
-  { email: 'tracks@powermusic.com', title: 'Tracks' },
-  { email: 'royaltyfree@powermusic.com', title: 'Royalty Free Music' }
-];
-
-function inboxTitle(email) {
-  return INBOXES.find((inbox) => inbox.email === email)?.title ?? 'Inbox';
-}
-
-function ensureTemplateInboxes(list) {
-  return list.map((template, index) => ({
-    ...template,
-    inbox: template.inbox || INBOXES[index % INBOXES.length].email
-  }));
-}
 
 // ─── Language content swapper ──────────────────────────────────────────────────
 const LANG_VARIANTS = {
@@ -108,19 +89,35 @@ function TemplateListItem({ template, isSelected, onClick }) {
 export default function TemplateManagement() {
   const { showToast } = useToast();
 
-  // Template state (persisted in localStorage)
-  const [templates, setTemplates] = useState(() => {
-    const stored = localStorage.getItem('power_music_templates_v2');
-    if (stored) { try { return ensureTemplateInboxes(JSON.parse(stored)); } catch { /* fallthrough */ } }
-    return ensureTemplateInboxes(mockTemplates);
-  });
+  // Template state (single source of truth: the backend database).
+  // Cached copy renders instantly; fresh data replaces it, and window focus
+  // revalidates so edits from other tabs/devices appear.
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
   useEffect(() => {
-    localStorage.setItem('power_music_templates_v2', JSON.stringify(templates));
-  }, [templates]);
+    let cancelled = false;
+    const load = () =>
+      loadWithCache('templates', getTemplates, (rows) => {
+        if (!cancelled) {
+          setTemplates(rows);
+          setTemplatesLoading(false);
+        }
+      }).catch((err) => {
+        if (!cancelled) setTemplatesLoading(false);
+        showToast(`Could not load templates: ${err.message}`, 'error');
+      });
+    load();
+    const refresh = () => { if (!document.hidden) load(); };
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', refresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Left pane controls
   const [search, setSearch] = useState('');
-  const [inboxFilter, setInboxFilter] = useState(() => INBOXES[0]?.email ?? '');
   const [sortMode, setSortMode] = useState('alpha-asc'); // 'alpha-asc' | 'alpha-desc' | 'recent'
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -142,10 +139,6 @@ export default function TemplateManagement() {
 
   const categories = TEMPLATE_CATEGORIES;
 
-  const inboxOptions = useMemo(() => [
-    ...INBOXES.map((inbox) => ({ value: inbox.email, label: inbox.title }))
-  ], []);
-
   const sortOptions = useMemo(() => [
     { value: 'alpha-asc', label: 'A → Z' },
     { value: 'alpha-desc', label: 'Z → A' },
@@ -166,9 +159,8 @@ export default function TemplateManagement() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [sortOpen]);
 
-  const inboxTemplates = useMemo(() => {
-    return templates.filter((t) => t.inbox === inboxFilter);
-  }, [templates, inboxFilter]);
+  // Templates are a central library shared by every inbox.
+  const inboxTemplates = templates;
 
   // ── Filtered + sorted list ──
   const displayedTemplates = useMemo(() => {
@@ -244,7 +236,7 @@ export default function TemplateManagement() {
   };
 
   // ── Save (handles both create and update) ──
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editForm) return;
 
     if (isCreatingNew) {
@@ -253,36 +245,44 @@ export default function TemplateManagement() {
         showToast('Please fill in the template name and subject.', 'error');
         return;
       }
-      const newTemplate = {
-        id: `tmpl-${Date.now()}`,
-        name: editForm.name.trim(),
-        subject: editForm.subject.trim(),
-        body: editForm.body,
-        category: editForm.category || 'Membership',
-        status: editForm.status || 'Draft',
-        timesUsed: 0,
-        lastUpdated: new Date().toISOString(),
-        inbox: inboxFilter
-      };
-      setTemplates(prev => [...prev, newTemplate]);
-      setSelectedId(newTemplate.id);
-      setIsCreatingNew(false);
-      setIsEditing(false);
-      setIsDirty(false);
-      showToast('Template created successfully.', 'success');
+      try {
+        const created = await createTemplate({
+          name: editForm.name.trim(),
+          subject: editForm.subject.trim(),
+          body: editForm.body,
+          category: editForm.category || 'Membership',
+          status: editForm.status || 'Draft',
+        });
+        setTemplates(prev => [...prev, created]);
+        setSelectedId(created.id);
+        setIsCreatingNew(false);
+        setIsEditing(false);
+        setIsDirty(false);
+        showToast('Template created successfully.', 'success');
+      } catch (err) {
+        showToast(`Create failed: ${err.message}`, 'error');
+      }
       return;
     }
 
     // Update existing
-    if (!selectedId) return;
-    setTemplates(prev => prev.map(t =>
-      t.id === selectedId
-        ? { ...t, name: editForm.name, subject: editForm.subject, body: editForm.body, lastUpdated: new Date().toISOString() }
-        : t
-    ));
-    setIsDirty(false);
-    setIsEditing(false);
-    showToast('Template saved successfully.', 'success');
+    if (!selectedId || !selectedTemplate) return;
+    try {
+      const updated = await updateTemplate(selectedId, {
+        name: editForm.name,
+        subject: editForm.subject,
+        body: editForm.body,
+        category: selectedTemplate.category,
+        intent: selectedTemplate.intent,
+        status: selectedTemplate.status,
+      });
+      setTemplates(prev => prev.map(t => (t.id === selectedId ? updated : t)));
+      setIsDirty(false);
+      setIsEditing(false);
+      showToast('Template saved successfully.', 'success');
+    } catch (err) {
+      showToast(`Save failed: ${err.message}`, 'error');
+    }
   };
 
   // ── Cancel ──
@@ -306,14 +306,19 @@ export default function TemplateManagement() {
   };
 
   // ── Delete ──
-  const handleDelete = () => {
-    setTemplates(prev => prev.filter(t => t.id !== selectedId));
-    setSelectedId(null);
-    setEditForm(null);
-    setIsDirty(false);
-    setIsEditing(false);
-    setShowDeleteModal(false);
-    showToast('Template deleted.', 'success');
+  const handleDelete = async () => {
+    try {
+      await deleteTemplate(selectedId);
+      setTemplates(prev => prev.filter(t => t.id !== selectedId));
+      setSelectedId(null);
+      setEditForm(null);
+      setIsDirty(false);
+      setIsEditing(false);
+      setShowDeleteModal(false);
+      showToast('Template deleted.', 'success');
+    } catch (err) {
+      showToast(`Delete failed: ${err.message}`, 'error');
+    }
   };
 
   return (
@@ -327,20 +332,6 @@ export default function TemplateManagement() {
         workspace
         actions={
           <div className="flex items-center gap-2">
-            <div
-              className="flex items-center gap-1.5 h-9 rounded-lg border border-[var(--color-brand-primary)]/25 bg-gradient-to-r from-[#f4f7fd] via-[#e9eff9] to-[#eef3fb] pl-2.5 pr-1 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
-              title={inboxFilter}
-            >
-              <Mail className="w-3.5 h-3.5 text-[var(--color-brand-primary)] shrink-0" aria-hidden="true" />
-              <SelectDropdown
-                value={inboxFilter}
-                onChange={setInboxFilter}
-                options={inboxOptions}
-                size="xs"
-                variant="soft"
-                className="w-32 sm:w-36"
-              />
-            </div>
             <button
               type="button"
               onClick={handleNewTemplate}
@@ -365,7 +356,7 @@ export default function TemplateManagement() {
               <div className="min-w-0">
                 <h2 className="text-base font-bold text-[var(--color-text-primary)]">Templates</h2>
                 <p className="text-[11px] font-medium text-[var(--color-text-muted)] truncate">
-                  {inboxTitle(inboxFilter)}
+                  Central library — used by all inboxes
                 </p>
               </div>
               <div className="flex items-center gap-0.5">
@@ -473,7 +464,11 @@ export default function TemplateManagement() {
 
           {/* Scrollable template list */}
           <div className="flex-1 overflow-y-auto min-h-0">
-            {displayedTemplates.length === 0 ? (
+            {templatesLoading ? (
+              <div className="p-3">
+                <CardListSkeleton rows={6} />
+              </div>
+            ) : displayedTemplates.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full p-6 text-center">
                 <FileText className="w-10 h-10 text-[var(--color-text-muted)] mb-3 opacity-40" />
                 <p className="text-sm font-semibold text-[var(--color-text-primary)]">No templates found</p>
