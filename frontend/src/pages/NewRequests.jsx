@@ -2,12 +2,13 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
-import { authenticatedFetch } from '../utils/api';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
-import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown } from '../components/ui';
+import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell } from '../components/ui';
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
+import { loadWithCache, patchCache, getNewRequestsPage } from '../utils/pilot2Api';
+import { getApiUrl } from '../utils/api';
 
 const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (newest first)' },
@@ -242,17 +243,25 @@ export default function Requests() {
   // ── New requests data ──
   const [newRequests, setNewRequests] = useState([]);
   const [liveDirectory, setLiveDirectory] = useState([]);
+  const [tableLoading, setTableLoading] = useState(true);
 
   useEffect(() => {
-    authenticatedFetch('http://localhost:8000/api/admin/requests?status=new')
-      .then((res) => res.json())
-      .then((data) => setNewRequests(data))
-      .catch((err) => console.error(err));
-
-    authenticatedFetch('http://localhost:8000/api/persons')
-      .then((res) => res.json())
-      .then((data) => setLiveDirectory(data))
-      .catch((err) => console.error(err));
+    const applyPage = (data) => {
+      setNewRequests(data.requests);
+      setLiveDirectory(data.persons);
+      setTableLoading(false);
+    };
+    const load = () => {
+      loadWithCache('requests_page', getNewRequestsPage, applyPage)
+        .catch((err) => {
+          console.error(err);
+          setTableLoading(false);
+        });
+    };
+    load();
+    const refresh = () => { if (!document.hidden) load(); };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
   }, []);
 
   // ── Filter / Sort states ──
@@ -429,8 +438,9 @@ export default function Requests() {
     if (!isModalFormValid) return;
 
     try {
-      const response = await authenticatedFetch('http://localhost:8000/api/admin/requests/manual', {
+      const response = await fetch(getApiUrl('/api/admin/requests/manual'), {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           submittedBy: managerForm,
           people: personForms,
@@ -441,7 +451,11 @@ export default function Requests() {
       if (!response.ok) throw new Error('Failed to create manual requests');
       const created = await response.json();
 
-      setNewRequests((prev) => [...created, ...prev]);
+      setNewRequests((prev) => {
+        const next = [...created, ...prev];
+        patchCache('requests_page', { requests: next });
+        return next;
+      });
       showToast(
         created.length === 1 ? 'Request created.' : `${created.length} requests created.`,
         'success'
@@ -456,12 +470,16 @@ export default function Requests() {
 
   const completeRequest = async (req) => {
     try {
-      const response = await authenticatedFetch(`http://localhost:8000/api/admin/requests/${req.id}/mark-handled`, {
+      const response = await fetch(getApiUrl(`/api/admin/requests/${req.id}/mark-handled`), {
         method: 'POST'
       });
       if (!response.ok) throw new Error('Failed to mark handled');
       
-      setNewRequests((prev) => prev.filter((r) => r.id !== req.id));
+      setNewRequests((prev) => {
+        const next = prev.filter((r) => r.id !== req.id);
+        patchCache('requests_page', { requests: next });
+        return next;
+      });
       showToast(
         `${req.person.firstName} ${req.person.lastName} marked as ${req.action === 'Add' ? 'Added' : 'Removed'}.`,
         'success'
@@ -479,67 +497,74 @@ export default function Requests() {
     {
       key: 'displayId',
       label: '#',
-      width: '60px',
+      width: '52px',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
       render: (val) => (
-        <span className="text-xs font-bold text-[var(--color-text-muted)]">{formatDisplayId(val)}</span>
+        <span className="text-xs font-bold text-[var(--color-text-muted)] whitespace-nowrap tabular-nums">
+          {formatDisplayId(val)}
+        </span>
       )
     },
     {
       key: 'timestamp',
       label: 'Timestamp',
-      width: '130px',
+      width: '108px',
+      noShrink: true,
+      cellClassName: 'align-middle whitespace-nowrap',
       render: (_, row) => <TimestampCell val={row.receivedAt} />
     },
     {
       key: 'action',
       label: 'Type',
-      width: '80px',
+      width: '72px',
+      noShrink: true,
+      cellClassName: 'align-middle whitespace-nowrap',
       render: (val) => <Tag variant={val === 'Add' ? 'add-action' : 'remove-action'} label={val} />
     },
     {
-      key: 'personName',
-      label: 'Person Name',
-      width: '110px',
+      key: 'person',
+      label: 'Person',
+      width: '19%',
       render: (_, row) => (
-        <span className="font-semibold text-sm text-[var(--color-text-primary)]">
-          {row.person.firstName} {row.person.lastName}
-        </span>
+        <StackedTextCell
+          primary={`${row.person.firstName} ${row.person.lastName}`.trim()}
+          secondary={row.person.email}
+        />
       )
-    },
-    {
-      key: 'personEmail',
-      label: 'Person Email',
-      width: '150px',
-      render: (_, row) => <span className="text-xs text-[var(--color-text-secondary)]">{row.person.email}</span>
     },
     {
       key: 'personLocation',
       label: 'Location',
-      width: '95px',
-      render: (_, row) => <span className="text-xs text-[var(--color-text-secondary)]">{row.person.location || '—'}</span>
-    },
-    {
-      key: 'managerName',
-      label: 'Manager Name',
-      width: '120px',
+      width: '9%',
       render: (_, row) => (
-        <span className="font-semibold text-sm text-[var(--color-text-primary)]">
-          {getManagerDisplayName(row.submittedBy)}
-        </span>
+        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
+          {row.person.location || '—'}
+        </TruncateCell>
       )
     },
     {
-      key: 'managerEmail',
-      label: 'Manager Email',
-      width: '155px',
-      render: (_, row) => <span className="text-xs text-[var(--color-text-secondary)]">{row.submittedBy?.email || '—'}</span>
+      key: 'manager',
+      label: 'Manager',
+      width: '19%',
+      render: (_, row) => (
+        <StackedTextCell
+          primary={getManagerDisplayName(row.submittedBy)}
+          secondary={row.submittedBy?.email || '—'}
+        />
+      )
     },
     {
       key: 'managerClub',
       label: 'Manager Club',
-      width: '130px',
-      cellClassName: 'align-middle whitespace-normal break-words leading-snug',
-      render: (_, row) => <span className="text-xs text-[var(--color-text-secondary)]">{row.submittedBy?.club}</span>
+      width: '13%',
+      cellClassName: 'align-middle max-w-0 overflow-hidden',
+      render: (_, row) => (
+        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
+          {row.submittedBy?.club}
+        </TruncateCell>
+      )
     }
   ];
 
@@ -548,10 +573,10 @@ export default function Requests() {
     {
       key: 'tags',
       label: 'Tags',
-      width: '100px',
-      cellClassName: 'align-middle whitespace-nowrap pl-2 pr-1',
+      width: '10%',
+      cellClassName: 'align-middle max-w-0 overflow-hidden pl-2 pr-1',
       render: (val) => (
-        <div className="flex items-center justify-start -ml-1">
+        <div className="flex items-center justify-start min-w-0 -ml-1">
           {(val || []).map((t) => (
             <Tag key={t} variant={t === 'Already Exists' ? 'already-exists' : 'neutral'} label={t} compact={t === 'Already Exists'} />
           ))}
@@ -562,6 +587,7 @@ export default function Requests() {
       key: 'actions',
       label: 'Mark as',
       width: '128px',
+      noShrink: true,
       cellClassName: 'text-right align-middle whitespace-nowrap pl-0 pr-2',
       render: (_, row) => (
         <div
@@ -691,6 +717,7 @@ export default function Requests() {
           emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
           compact
           centerHeaders
+          loading={tableLoading}
         />
       </div>
 

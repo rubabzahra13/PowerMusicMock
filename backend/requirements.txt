@@ -5,5 +5,8 @@ pydantic
 python-dotenv
 psycopg[binary]
 alembic
-pyjwt[crypto]
-
+apscheduler
+google-genai
+google-api-python-client
+google-auth
+google-auth-oauthlib

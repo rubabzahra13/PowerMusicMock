@@ -1,7 +1,29 @@
 {
-  "buildCommand": "cd frontend && npm install && npm run build",
-  "outputDirectory": "frontend/dist",
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "frontend": {
+      "root": "frontend",
+      "rewrites": [
+        { "source": "/(.*)", "destination": "/index.html" }
+      ]
+    },
+    "backend": {
+      "root": "backend",
+      "entrypoint": "index:app",
+      "functions": {
+        "index.py": {
+          "maxDuration": 60,
+          "includeFiles": "app/**"
+        }
+      }
+    }
+  },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/health", "destination": { "service": "backend" } },
+    { "source": "/docs", "destination": { "service": "backend" } },
+    { "source": "/docs/(.*)", "destination": { "service": "backend" } },
+    { "source": "/openapi.json", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
   ]
 }
