@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.api.dependencies import get_db
-from app.pilot2 import config, diffing, gmail, pipeline
+from app.pilot2 import config, diffing, gmail, oauth_pages, pipeline, sync
 from app.pilot2 import schemas
 from app.pilot2.ai.distiller import run_distillation
 
@@ -28,13 +28,21 @@ def list_inboxes(db: Session = Depends(get_db)):
 @router.get("/workspace", response_model=schemas.Pilot2WorkspaceOut)
 def get_workspace(db: Session = Depends(get_db)):
     inboxes = db.query(models.EmailAccount).order_by(models.EmailAccount.id).all()
+    # Emails awaiting AI (Imported/Processing) are withheld: the queue must
+    # only ever grow. An email appears once, fully classified, instead of
+    # showing up and then vanishing when the classifier marks it Ignored.
     emails = (
         db.query(models.Email)
-        .filter(models.Email.draft_status != "Ignored")
+        .filter(models.Email.draft_status.notin_(["Ignored", "Imported", "Processing"]))
         .order_by(models.Email.received_at.desc())
         .all()
     )
-    return {"emails": emails, "inboxes": inboxes}
+    pending_ai = (
+        db.query(models.Email)
+        .filter(models.Email.draft_status.in_(["Imported", "Processing"]))
+        .count()
+    )
+    return {"emails": emails, "inboxes": inboxes, "pendingAiCount": pending_ai}
 
 
 @router.post("/inboxes/connect")
@@ -70,7 +78,10 @@ def oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
     try:
         authorized_email, refresh_token = gmail.exchange_code(code, state)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Google authorization failed: {exc}") from exc
+        return HTMLResponse(
+            oauth_pages.oauth_error_page(message=str(exc)),
+            status_code=400,
+        )
 
     account = (
         db.query(models.EmailAccount)
@@ -78,17 +89,37 @@ def oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
         .first()
     )
     if account is None:
-        raise HTTPException(
+        return HTMLResponse(
+            oauth_pages.oauth_error_page(
+                message=(
+                    f"Authorized Gmail account {authorized_email} does not match a "
+                    f"configured inbox (expected {state})."
+                )
+            ),
             status_code=400,
-            detail=f"Authorized Gmail account {authorized_email} does not match a "
-                   f"configured inbox (expected {state}).",
         )
     account.oauth_refresh_token = refresh_token
     account.status = "Connected"
     account.connected_at = datetime.now(timezone.utc)
+    try:
+        profile = gmail.get_profile(account)
+        account.gmail_history_id = str(profile.get("historyId", "")) or None
+    except Exception:
+        pass
     pipeline.log(db, "inbox_connected", f"Inbox {account.email} connected via Google OAuth.")
     db.commit()
-    return "<html><body><h3>Inbox connected.</h3>You can close this tab and return to the dashboard.</body></html>"
+    sync.start_backfill(account.id)
+    return HTMLResponse(
+        oauth_pages.oauth_success_page(email=account.email, title=account.title)
+    )
+
+
+@router.get("/inboxes/{inbox_id}/sync-status", response_model=schemas.InboxSyncStatusOut)
+def inbox_sync_status(inbox_id: str, db: Session = Depends(get_db)):
+    account = db.query(models.EmailAccount).filter(models.EmailAccount.id == inbox_id).first()
+    if account is None:
+        raise HTTPException(status_code=404, detail="Inbox not found")
+    return account
 
 
 @router.post("/inboxes/{inbox_id}/disconnect", response_model=schemas.InboxOut)
@@ -102,6 +133,44 @@ def disconnect_inbox(inbox_id: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(account)
     return account
+
+
+@router.patch("/inboxes/{inbox_id}", response_model=schemas.InboxOut)
+def update_inbox(inbox_id: str, payload: schemas.InboxUpdateIn, db: Session = Depends(get_db)):
+    account = db.query(models.EmailAccount).filter(models.EmailAccount.id == inbox_id).first()
+    if account is None:
+        raise HTTPException(status_code=404, detail="Inbox not found")
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+    account.title = title
+    pipeline.log(db, "inbox_renamed", f"Inbox {account.email} renamed to '{title}'.")
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+@router.delete("/inboxes/{inbox_id}")
+def delete_inbox(inbox_id: str, db: Session = Depends(get_db)):
+    account = db.query(models.EmailAccount).filter(models.EmailAccount.id == inbox_id).first()
+    if account is None:
+        raise HTTPException(status_code=404, detail="Inbox not found")
+    email = account.email
+    if account.status == "Connected":
+        account.status = "Disconnected"
+        account.oauth_refresh_token = None
+    db.query(models.EmailTemplate).filter(
+        models.EmailTemplate.account_email == email
+    ).delete(synchronize_session=False)
+    # Remove the inbox's imported emails too, otherwise they linger as
+    # orphans in the workspace payload after the inbox is gone.
+    db.query(models.Email).filter(
+        models.Email.account_email == email
+    ).delete(synchronize_session=False)
+    db.delete(account)
+    pipeline.log(db, "inbox_deleted", f"Inbox {email} removed.")
+    db.commit()
+    return {"deleted": inbox_id}
 
 
 # ── Emails ───────────────────────────────────────────────────
@@ -171,6 +240,8 @@ def patch_email(email_id: str, payload: schemas.EmailPatchIn, db: Session = Depe
     email = db.query(models.Email).filter(models.Email.id == email_id).first()
     if email is None:
         raise HTTPException(status_code=404, detail="Email not found")
+    if payload.deleted is not None:
+        pipeline.note_bin_state_change([email_id])
     _apply_email_patch(email, payload)
     # Mirror the change onto the real Gmail message (best-effort).
     pipeline.sync_flags_to_gmail(
@@ -184,6 +255,8 @@ def patch_email(email_id: str, payload: schemas.EmailPatchIn, db: Session = Depe
 
 @router.post("/emails/bulk-patch", response_model=List[schemas.EmailOut])
 def bulk_patch_emails(payload: schemas.EmailBulkPatchIn, db: Session = Depends(get_db)):
+    if payload.deleted is not None:
+        pipeline.note_bin_state_change(payload.ids)
     emails = db.query(models.Email).filter(models.Email.id.in_(payload.ids)).all()
     for email in emails:
         _apply_email_patch(email, payload)
@@ -293,14 +366,26 @@ def send_email(email_id: str, payload: schemas.SendIn, db: Session = Depends(get
 
 
 @router.get("/templates", response_model=List[schemas.TemplateOut])
-def list_templates(db: Session = Depends(get_db)):
-    return db.query(models.EmailTemplate).order_by(models.EmailTemplate.id).all()
+def list_templates(inbox: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(models.EmailTemplate)
+    if inbox:
+        query = query.filter(models.EmailTemplate.account_email == inbox)
+    return query.order_by(models.EmailTemplate.name).all()
 
 
 @router.post("/templates", response_model=schemas.TemplateOut)
 def create_template(payload: schemas.TemplateIn, db: Session = Depends(get_db)):
+    account = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.email == payload.inbox)
+        .first()
+    )
+    if account is None:
+        raise HTTPException(status_code=400, detail=f"Inbox {payload.inbox} not found")
+    now = datetime.now(timezone.utc)
     template = models.EmailTemplate(
         id=pipeline.next_id(db, models.EmailTemplate, "tmpl"),
+        account_email=payload.inbox,
         name=payload.name,
         category=payload.category,
         intent=payload.intent,
@@ -308,7 +393,8 @@ def create_template(payload: schemas.TemplateIn, db: Session = Depends(get_db)):
         subject=payload.subject,
         body=payload.body,
         times_used=0,
-        last_updated=datetime.now(timezone.utc),
+        created_at=now,
+        last_updated=now,
     )
     db.add(template)
     pipeline.log(db, "template_created", f"Template created: {template.name}")
@@ -318,7 +404,7 @@ def create_template(payload: schemas.TemplateIn, db: Session = Depends(get_db)):
 
 
 @router.put("/templates/{template_id}", response_model=schemas.TemplateOut)
-def update_template(template_id: str, payload: schemas.TemplateIn, db: Session = Depends(get_db)):
+def update_template(template_id: str, payload: schemas.TemplateUpdateIn, db: Session = Depends(get_db)):
     template = (
         db.query(models.EmailTemplate)
         .filter(models.EmailTemplate.id == template_id)
@@ -339,8 +425,9 @@ def update_template(template_id: str, payload: schemas.TemplateIn, db: Session =
     return template
 
 
-@router.delete("/templates/{template_id}")
+@router.delete("/templates/{template_id}", response_model=schemas.TemplateOut)
 def delete_template(template_id: str, db: Session = Depends(get_db)):
+    """Soft-delete: move template to Deleted (Archived)."""
     template = (
         db.query(models.EmailTemplate)
         .filter(models.EmailTemplate.id == template_id)
@@ -348,8 +435,46 @@ def delete_template(template_id: str, db: Session = Depends(get_db)):
     )
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
+    if template.status != "Archived":
+        template.archived_from = template.status
+    template.status = "Archived"
+    template.last_updated = datetime.now(timezone.utc)
+    pipeline.log(db, "template_archived", f"Template moved to deleted: {template.name}")
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+@router.post("/templates/{template_id}/restore", response_model=schemas.TemplateOut)
+def restore_template(template_id: str, db: Session = Depends(get_db)):
+    template = (
+        db.query(models.EmailTemplate)
+        .filter(models.EmailTemplate.id == template_id)
+        .first()
+    )
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    template.status = template.archived_from or "Active"
+    template.archived_from = None
+    template.last_updated = datetime.now(timezone.utc)
+    pipeline.log(db, "template_restored", f"Template restored: {template.name}")
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+@router.delete("/templates/{template_id}/forever")
+def delete_template_forever(template_id: str, db: Session = Depends(get_db)):
+    template = (
+        db.query(models.EmailTemplate)
+        .filter(models.EmailTemplate.id == template_id)
+        .first()
+    )
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    name = template.name
     db.delete(template)
-    pipeline.log(db, "template_deleted", f"Template deleted: {template.name}")
+    pipeline.log(db, "template_deleted", f"Template deleted forever: {name}")
     db.commit()
     return {"deleted": template_id}
 
@@ -397,8 +522,12 @@ def approve_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
         template.body = suggestion.suggested_body
         template.last_updated = now
     else:
+        account = db.query(models.EmailAccount).order_by(models.EmailAccount.id).first()
+        if account is None:
+            raise HTTPException(status_code=400, detail="No inbox configured for new template")
         template = models.EmailTemplate(
             id=pipeline.next_id(db, models.EmailTemplate, "tmpl"),
+            account_email=account.email,
             name=suggestion.suggested_name,
             category="General Enquiries",
             intent=suggestion.intent,
@@ -406,6 +535,7 @@ def approve_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
             subject=suggestion.suggested_subject,
             body=suggestion.suggested_body,
             times_used=0,
+            created_at=now,
             last_updated=now,
         )
         db.add(template)

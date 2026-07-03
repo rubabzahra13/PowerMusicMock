@@ -1,3 +1,5 @@
+import { Sparkles } from 'lucide-react';
+
 export function Skeleton({ className = '' }) {
   return (
     <div
@@ -90,6 +92,53 @@ export function CardListSkeleton({ rows = 3 }) {
           <Skeleton className="h-3 w-2/3" />
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Shown in the reading pane while AI is still composing a reply draft. */
+export function DraftCreatingPanel({ subject }) {
+  return (
+    <div
+      className="relative rounded-lg border border-[var(--color-border-default)]/60 bg-gradient-to-br from-white via-[#f8fafc] to-[#edf4fc] px-4 py-5 min-h-[120px] overflow-hidden"
+      role="status"
+      aria-live="polite"
+      aria-label="Reply draft is being created"
+    >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-40"
+        aria-hidden="true"
+        style={{
+          background:
+            'linear-gradient(105deg, transparent 40%, rgba(107, 175, 240, 0.12) 50%, transparent 60%)',
+          backgroundSize: '200% 100%',
+          animation: 'draft-shimmer 2.2s ease-in-out infinite',
+        }}
+      />
+      <div className="relative flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-highlight)] text-[var(--color-brand-primary)] shadow-sm">
+          <Sparkles className="w-4 h-4 animate-pulse" style={{ animationDuration: '1.8s' }} />
+        </div>
+        <div className="flex-1 min-w-0 space-y-3 pt-0.5">
+          <div>
+            <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+              Composing your reply…
+            </p>
+            <p className="text-xs text-[var(--color-text-secondary)] mt-1 leading-relaxed">
+              {subject
+                ? `Drafting a response to “${subject.length > 48 ? `${subject.slice(0, 48)}…` : subject}”.`
+                : 'AI is preparing a reply draft for this message.'}
+              {' '}This usually takes a few seconds.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-[92%]" />
+            <Skeleton className="h-3 w-[78%]" />
+            <Skeleton className="h-3 w-[55%]" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

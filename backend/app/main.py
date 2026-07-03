@@ -43,6 +43,9 @@ origins = [
     "http://localhost:3000",
     "http://localhost:5173",
     "http://localhost:5174",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
     "https://power-music-mock.vercel.app",
 ]
 # Extra allowed frontend origins for deployment, comma-separated.
@@ -72,6 +75,14 @@ app.include_router(pilot2.router)
 @app.on_event("startup")
 def start_background_jobs():
     scheduler.start()
+    # Recover backfills interrupted by a restart; a stuck "running" status
+    # would otherwise block history sync (new mail) for that inbox forever.
+    try:
+        from app.pilot2 import sync
+
+        sync.resume_interrupted_backfills()
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: could not resume interrupted backfills: {exc}")
 
 
 @app.on_event("shutdown")

@@ -33,6 +33,7 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv(
     "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/pilot2/inboxes/oauth/callback"
 )
+FRONTEND_URL = os.getenv("PILOT2_FRONTEND_URL", "http://localhost:5173")
 
 # Shared secret for the poll/distill trigger endpoints. When set, callers
 # must send it (X-Cron-Secret header, Authorization: Bearer, or ?secret=).
@@ -44,6 +45,13 @@ POLL_INTERVAL_MINUTES = int(os.getenv("PILOT2_POLL_INTERVAL_MINUTES", "1"))
 DISTILL_HOUR_UTC = int(os.getenv("PILOT2_DISTILL_HOUR_UTC", "2"))
 _default_scheduler = "false" if os.getenv("VERCEL") else "true"
 SCHEDULER_ENABLED = os.getenv("PILOT2_SCHEDULER_ENABLED", _default_scheduler).lower() == "true"
+
+# Gmail sync — initial backfill window and pacing.
+BACKFILL_DAYS = int(os.getenv("PILOT2_BACKFILL_DAYS", "10"))
+BACKFILL_MAX_MESSAGES_PER_QUERY = int(os.getenv("PILOT2_BACKFILL_MAX_MESSAGES", "500"))
+GMAIL_API_PAUSE_SECONDS = float(os.getenv("PILOT2_GMAIL_API_PAUSE", "0.08"))
+AI_BATCH_SIZE = int(os.getenv("PILOT2_AI_BATCH_SIZE", "5"))
+AI_JOB_INTERVAL_SECONDS = int(os.getenv("PILOT2_AI_JOB_INTERVAL_SECONDS", "15"))
 
 SIGNATURE = os.getenv("PILOT2_SIGNATURE", "Kind regards,\nPower Music Team")
 

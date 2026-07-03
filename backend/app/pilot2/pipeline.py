@@ -5,8 +5,8 @@ poller or the /ingest endpoint, so both paths behave identically.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Iterable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -48,6 +48,7 @@ def process_incoming(
     received_at: Optional[datetime] = None,
     gmail_message_id: Optional[str] = None,
     gmail_thread_id: Optional[str] = None,
+    label_ids: Optional[list] = None,
 ) -> models.Email:
     """Run one inbound email through the full pipeline and persist it.
 
@@ -61,15 +62,9 @@ def process_incoming(
             .first()
         )
         if existing:
+            if existing.draft_status == "Imported":
+                return run_ai_for_email(db, existing)
             return existing
-
-    templates = (
-        db.query(models.EmailTemplate)
-        .filter(models.EmailTemplate.status == "Active")
-        .all()
-    )
-
-    classification = classifier.classify(from_name, from_email, subject, body, templates)
 
     email = models.Email(
         id=next_id(db, models.Email, "email"),
@@ -81,19 +76,73 @@ def process_incoming(
         subject=subject,
         body=body,
         received_at=received_at or datetime.now(timezone.utc),
-        intent=classification.intent,
-        intent_confidence=classification.confidence,
-        language=classification.language,
-        sender_first_name=classification.sender_first_name,
-        urgent=classification.urgent,
+        draft_status="Processing",
     )
+    if label_ids is not None:
+        from app.pilot2 import gmail_labels
+
+        flags = gmail_labels.derive_label_flags(
+            label_ids,
+            account_email=account_email,
+            from_email=from_email,
+        )
+        gmail_labels.apply_label_flags(email, flags)
     db.add(email)
+    db.flush()
+    return run_ai_for_email(db, email)
+
+
+def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
+    """Classify and compose a draft for one stored email row."""
+    if email.draft_status == "No Draft":
+        return email
+    if email.draft_status not in ("Imported", "Processing") and email.draft_body:
+        return email
+
+    # Nobody can answer a no-reply sender, so composing a draft is pure
+    # waste. Import normally filters these; this guard covers every other
+    # path an email can take into the AI queue.
+    from app.pilot2.sync import _is_no_reply_sender
+
+    if _is_no_reply_sender(email.from_email):
+        email.draft_status = "Ignored"
+        email.archived = True
+        email.read = True
+        email.flagged = False
+        email.flag_reason = None
+        log(db, "email_ignored", f"Ignored no-reply sender {email.from_email}.", email.id)
+        db.commit()
+        db.refresh(email)
+        return email
+
+    templates = (
+        db.query(models.EmailTemplate)
+        .filter(
+            models.EmailTemplate.status == "Active",
+            models.EmailTemplate.account_email == email.account_email,
+        )
+        .all()
+    )
+
+    classification = classifier.classify(
+        email.from_name,
+        email.from_email,
+        email.subject,
+        email.body,
+        templates,
+    )
+
+    email.intent = classification.intent
+    email.intent_confidence = classification.confidence
+    email.language = classification.language
+    email.sender_first_name = classification.sender_first_name
+    email.urgent = classification.urgent
 
     if classification.should_ignore:
         email.draft_status = "Ignored"
         email.archived = True
         email.read = True
-        log(db, "email_ignored", f"Ignored email from {from_email} (spam/noise).", email.id)
+        log(db, "email_ignored", f"Ignored email from {email.from_email} (spam/noise).", email.id)
         db.commit()
         db.refresh(email)
         return email
@@ -122,7 +171,7 @@ def process_incoming(
     guidance_rules = list(note.rules) if note else []
 
     draft = composer.compose(
-        body, subject, classification, matched, translations_by_template, guidance_rules
+        email.body, email.subject, classification, matched, translations_by_template, guidance_rules
     )
 
     email.template_ids = [t.id for t in matched]
@@ -143,7 +192,7 @@ def process_incoming(
 
     log(
         db, "draft_created",
-        f"Draft ({draft.tweak_level}) created for '{subject}' — intent "
+        f"Draft ({draft.tweak_level}) created for '{email.subject}' — intent "
         f"{classification.intent} at {classification.confidence}% confidence.",
         email.id,
     )
@@ -220,109 +269,108 @@ def delete_forever_in_gmail(db: Session, email: models.Email) -> None:
         logger.exception("Gmail permanent delete failed for %s", email.gmail_message_id)
 
 
+# Grace period after a dashboard bin action before Gmail label sync may
+# override local deleted/restored state (trash propagation can lag).
+GMAIL_BIN_SYNC_GRACE_SECONDS = 120
+_bin_sync_grace_until: dict[str, datetime] = {}
+
+
+def note_bin_state_change(email_ids: Iterable[str]) -> None:
+    """Pause bidirectional Gmail trash sync for these rows after a bin action."""
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=GMAIL_BIN_SYNC_GRACE_SECONDS)
+    for email_id in email_ids:
+        _bin_sync_grace_until[email_id] = deadline
+
+
+def _in_bin_sync_grace(email_id: str, now: datetime) -> bool:
+    deadline = _bin_sync_grace_until.get(email_id)
+    if deadline is None:
+        return False
+    if now >= deadline:
+        _bin_sync_grace_until.pop(email_id, None)
+        return False
+    return True
+
+
 def _sync_states_from_gmail(db: Session, account: models.EmailAccount) -> None:
-    """Pull Gmail's state so the dashboard mirrors it (Gmail is the truth):
+    """Reconcile dashboard read/archive/bin from stored Gmail label snapshots.
 
-    - trash  → Bin (both directions, including mail we never processed)
-    - UNREAD → read/unread state
-    - INBOX  → archived state (archived in Gmail = no INBOX label)
+    Rows imported before label mirroring still fall back to live label fetches.
     """
-    trash_ids = gmail.fetch_label_ids(account, "TRASH")
-    unread_ids = gmail.fetch_label_ids(account, "UNREAD")
-    inbox_ids = gmail.fetch_label_ids(account, "INBOX")
-    now = datetime.now(timezone.utc)
+    from app.pilot2 import gmail_labels
 
+    now = datetime.now(timezone.utc)
     rows = (
         db.query(models.Email)
         .filter(models.Email.account_email == account.email,
                 models.Email.gmail_message_id.isnot(None))
         .all()
     )
-    known_ids = set()
+
+    needs_live = [r for r in rows if not r.gmail_label_ids]
+    trash_ids = inbox_ids = unread_ids = None
+    if needs_live and gmail.is_live():
+        trash_ids = gmail.fetch_label_ids(account, "TRASH")
+        unread_ids = gmail.fetch_label_ids(account, "UNREAD")
+        inbox_ids = gmail.fetch_label_ids(account, "INBOX")
+
     for row in rows:
-        known_ids.add(row.gmail_message_id)
+        if _in_bin_sync_grace(row.id, now):
+            continue
+
+        if row.gmail_label_ids:
+            flags = gmail_labels.derive_label_flags(
+                row.gmail_label_ids,
+                account_email=account.email,
+                from_email=row.from_email,
+            )
+            gmail_labels.apply_label_flags(row, flags, now=now)
+            continue
+
+        if trash_ids is None:
+            continue
         if row.gmail_message_id in trash_ids and not row.deleted:
             row.deleted = True
             row.deleted_at = now
         elif row.deleted and row.gmail_message_id not in trash_ids:
             row.deleted = False
             row.deleted_at = None
-
         row.read = row.gmail_message_id not in unread_ids
         if not row.deleted:
             row.archived = row.gmail_message_id not in inbox_ids
 
-    for message_id in trash_ids - known_ids:
-        try:
-            message = gmail.fetch_message(account, message_id)
-        except Exception:
-            logger.exception("Could not fetch trashed message %s", message_id)
-            continue
-        if message is None:
-            continue
-        db.add(models.Email(
-            id=next_id(db, models.Email, "email"),
-            account_email=account.email,
-            gmail_message_id=message.gmail_message_id,
-            gmail_thread_id=message.gmail_thread_id,
-            from_name=message.from_name,
-            from_email=message.from_email,
-            subject=message.subject,
-            body=message.body,
-            received_at=message.received_at,
-            draft_status="No Draft",
-            read=True,
-            deleted=True,
-            deleted_at=now,
-        ))
-        db.commit()  # commit per row so next_id stays unique
-
 
 def poll_all_accounts(db: Session) -> int:
-    """Fetch new Gmail messages for every connected inbox (live mode)."""
+    """History-sync every connected inbox, then run a small AI batch."""
     if not gmail.is_live():
         return 0
 
-    processed = 0
+    from app.pilot2 import sync
+
+    changes = 0
     accounts = (
         db.query(models.EmailAccount)
         .filter(models.EmailAccount.status == "Connected")
         .all()
     )
-    known_ids = {
-        gid for (gid,) in db.query(models.Email.gmail_message_id).all() if gid
-    }
     for account in accounts:
         try:
-            messages = gmail.fetch_new_messages(account, known_ids)
+            changes += sync.sync_account_history(db, account)
         except Exception:
-            logger.exception("Polling failed for %s", account.email)
+            logger.exception("History sync failed for %s", account.email)
+            db.rollback()
             continue
-        for message in messages:
-            # One bad email must not abort the rest of the batch.
-            try:
-                process_incoming(
-                    db,
-                    account_email=account.email,
-                    from_name=message.from_name,
-                    from_email=message.from_email,
-                    subject=message.subject,
-                    body=message.body,
-                    received_at=message.received_at,
-                    gmail_message_id=message.gmail_message_id,
-                    gmail_thread_id=message.gmail_thread_id,
-                )
-                processed += 1
-            except Exception:
-                db.rollback()
-                logger.exception(
-                    "Failed to process message %s for %s",
-                    message.gmail_message_id, account.email,
-                )
         try:
             _sync_states_from_gmail(db, account)
         except Exception:
             logger.exception("State sync failed for %s", account.email)
         account.last_synced_at = datetime.now(timezone.utc)
     db.commit()
-    return processed
+
+    try:
+        changes += sync.process_ai_batch(db)
+    except Exception:
+        logger.exception("AI batch failed during poll")
+        db.rollback()
+
+    return changes
