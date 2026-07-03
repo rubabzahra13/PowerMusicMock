@@ -1,4 +1,4 @@
-import { X, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
+import { X, AlertCircle, AlertTriangle } from 'lucide-react';
 import { useToast } from './useToast';
 
 const animationStyle = `
@@ -27,9 +27,9 @@ export default function Toast() {
       <style>{animationStyle}</style>
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-3 pointer-events-none select-none">
         {toasts.map((toast) => {
-          let borderClass = 'border-l-[var(--color-signal-green)]';
-          let Icon = CheckCircle2;
-          let iconColor = 'text-[var(--color-signal-green)]';
+          let borderClass = 'border-l-[var(--color-brand-accent)]';
+          let Icon = null;
+          let iconColor = '';
 
           if (toast.type === 'error') {
             borderClass = 'border-l-[var(--color-signal-red)]';
@@ -46,11 +46,9 @@ export default function Toast() {
               key={toast.id}
               className={`w-[320px] bg-white border border-[var(--color-border-default)] border-l-4 ${borderClass} rounded shadow-[var(--shadow-modal)] p-4 flex items-start gap-3 pointer-events-auto transform transition-all duration-300 animate-toast-slide-in`}
             >
-              {/* Status Icon */}
-              <Icon className={`w-5 h-5 shrink-0 ${iconColor}`} />
+              {Icon && <Icon className={`w-5 h-5 shrink-0 ${iconColor}`} aria-hidden="true" />}
 
-              {/* Message */}
-              <div className="flex-1 text-sm text-[var(--color-text-primary)] font-medium leading-tight pt-0.5">
+              <div className={`flex-1 text-sm text-[var(--color-text-primary)] font-medium leading-tight ${Icon ? 'pt-0.5' : ''}`}>
                 {toast.message}
               </div>
 

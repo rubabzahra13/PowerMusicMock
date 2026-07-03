@@ -78,6 +78,11 @@ class EmailAccount(Base):
     oauth_refresh_token = Column(Text, nullable=True)
     gmail_history_id = Column(String, nullable=True)
 
+    # Initial Gmail backfill (last N days on first connect).
+    backfill_status = Column(String, nullable=False, default="idle")  # idle|running|done|failed
+    backfill_imported_count = Column(Integer, nullable=False, default=0)
+    backfill_error = Column(Text, nullable=True)
+
 
 class Email(Base):
     """An inbound email plus the AI-generated draft attached to it."""
@@ -88,6 +93,15 @@ class Email(Base):
     account_email = Column(String, nullable=False, index=True)
     gmail_message_id = Column(String, nullable=True, unique=True)
     gmail_thread_id = Column(String, nullable=True)
+    gmail_label_ids = Column(ARRAY(String), nullable=False, server_default="{}")
+
+    # Snapshot of Gmail label state (derived on import / history sync).
+    gmail_in_inbox = Column(Boolean, nullable=False, default=False)
+    gmail_in_trash = Column(Boolean, nullable=False, default=False)
+    gmail_in_sent = Column(Boolean, nullable=False, default=False)
+    gmail_starred = Column(Boolean, nullable=False, default=False)
+    gmail_archived = Column(Boolean, nullable=False, default=False)
+    gmail_is_outbound = Column(Boolean, nullable=False, default=False)
 
     from_name = Column(String, nullable=False)
     from_email = Column(String, nullable=False)
@@ -108,7 +122,7 @@ class Email(Base):
     draft_body = Column(Text, nullable=True)
     draft_tweak_level = Column(String, nullable=True)  # verbatim | personalized | merged | fallback
     draft_status = Column(String, nullable=False, default="Processing")
-    # Processing | Draft Created | Flagged | Reviewed | Sent | Ignored
+    # Imported | Processing | Draft Created | Flagged | Reviewed | Sent | Ignored
 
     flagged = Column(Boolean, nullable=False, default=False)
     flag_reason = Column(String, nullable=True)
@@ -129,13 +143,16 @@ class EmailTemplate(Base):
     __tablename__ = "email_templates"
 
     id = Column(String, primary_key=True)
+    account_email = Column(String, nullable=False, index=True)
     name = Column(String, nullable=False)
     category = Column(String, nullable=False)
     intent = Column(String, nullable=True)  # which classifier intent this answers
     status = Column(String, nullable=False, default="Active")  # Active | Draft | Archived
+    archived_from = Column(String, nullable=True)  # Active | Draft — set when moved to Archived
     subject = Column(String, nullable=False)
     body = Column(Text, nullable=False)
     times_used = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False)
     last_updated = Column(DateTime(timezone=True), nullable=False)
 
 

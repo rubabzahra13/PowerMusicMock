@@ -874,6 +874,7 @@ export default function Requests() {
       <Modal
         isOpen={confirmActionRequest !== null}
         onClose={() => setConfirmActionRequest(null)}
+        confirm
         title="Confirm action"
         footer={
           <>
@@ -893,9 +894,9 @@ export default function Requests() {
         }
       >
         {confirmActionRequest && (
-          <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed text-left">
+          <p>
             Confirm you have {confirmActionRequest.action === 'Add' ? 'added' : 'removed'}{' '}
-            <strong className="text-[var(--color-text-primary)] font-bold">
+            <strong>
               {confirmActionRequest.person.firstName} {confirmActionRequest.person.lastName}
             </strong>{' '}
             in Power Music before continuing. This cannot be undone.

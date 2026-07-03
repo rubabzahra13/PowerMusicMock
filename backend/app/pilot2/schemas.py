@@ -19,11 +19,30 @@ class InboxOut(BaseModel):
     status: str
     connectedAt: Optional[datetime] = Field(default=None, validation_alias="connected_at")
     lastSyncedAt: Optional[datetime] = Field(default=None, validation_alias="last_synced_at")
+    backfillStatus: str = Field(default="idle", validation_alias="backfill_status")
+    backfillImportedCount: int = Field(default=0, validation_alias="backfill_imported_count")
+    backfillError: Optional[str] = Field(default=None, validation_alias="backfill_error")
 
 
 class InboxConnectIn(BaseModel):
     email: str
     title: str
+
+
+class InboxUpdateIn(BaseModel):
+    title: str
+
+
+class InboxSyncStatusOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: str
+    email: str
+    backfillStatus: str = Field(validation_alias="backfill_status")
+    backfillImportedCount: int = Field(validation_alias="backfill_imported_count")
+    backfillError: Optional[str] = Field(default=None, validation_alias="backfill_error")
+    gmailHistoryId: Optional[str] = Field(default=None, validation_alias="gmail_history_id")
+    lastSyncedAt: Optional[datetime] = Field(default=None, validation_alias="last_synced_at")
 
 
 class EmailOut(BaseModel):
@@ -97,17 +116,30 @@ class TemplateOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str
+    inbox: str = Field(validation_alias="account_email")
     name: str
     category: str
     intent: Optional[str] = None
     status: str
+    archivedFrom: Optional[str] = Field(default=None, validation_alias="archived_from")
     subject: str
     body: str
     timesUsed: int = Field(validation_alias="times_used")
+    createdAt: Optional[datetime] = Field(default=None, validation_alias="created_at")
     lastUpdated: datetime = Field(validation_alias="last_updated")
 
 
 class TemplateIn(BaseModel):
+    inbox: str
+    name: str
+    category: str
+    intent: Optional[str] = None
+    status: str = "Active"
+    subject: str
+    body: str
+
+
+class TemplateUpdateIn(BaseModel):
     name: str
     category: str
     intent: Optional[str] = None
@@ -159,3 +191,6 @@ class DistillResultOut(BaseModel):
 class Pilot2WorkspaceOut(BaseModel):
     emails: List[EmailOut]
     inboxes: List[InboxOut]
+    # Emails imported but still awaiting AI classification/drafting. They are
+    # kept out of `emails` so the visible queue only ever grows.
+    pendingAiCount: int = 0

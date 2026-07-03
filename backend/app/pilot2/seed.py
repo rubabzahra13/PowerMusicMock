@@ -101,26 +101,39 @@ def seed():
                 ))
                 db.commit()
 
-        for spec in TEMPLATES:
-            exists = (
-                db.query(models.EmailTemplate)
-                .filter(models.EmailTemplate.name == spec["name"])
-                .first()
-            )
-            if not exists:
-                db.add(models.EmailTemplate(
-                    id=pipeline.next_id(db, models.EmailTemplate, "tmpl"),
-                    name=spec["name"],
-                    category=spec["category"],
-                    intent=spec["intent"],
-                    status="Active",
-                    subject=spec["subject"],
-                    body=spec["body"],
-                    times_used=0,
-                    last_updated=now,
-                ))
-                db.commit()
-        print(f"Seeded {len(INBOXES)} inboxes and {len(TEMPLATES)} templates.")
+        accounts = (
+            db.query(models.EmailAccount)
+            .order_by(models.EmailAccount.id)
+            .all()
+        )
+        template_count = 0
+        for account in accounts:
+            for spec in TEMPLATES:
+                exists = (
+                    db.query(models.EmailTemplate)
+                    .filter(
+                        models.EmailTemplate.name == spec["name"],
+                        models.EmailTemplate.account_email == account.email,
+                    )
+                    .first()
+                )
+                if not exists:
+                    db.add(models.EmailTemplate(
+                        id=pipeline.next_id(db, models.EmailTemplate, "tmpl"),
+                        account_email=account.email,
+                        name=spec["name"],
+                        category=spec["category"],
+                        intent=spec["intent"],
+                        status="Active",
+                        subject=spec["subject"],
+                        body=spec["body"],
+                        times_used=0,
+                        created_at=now,
+                        last_updated=now,
+                    ))
+                    template_count += 1
+                    db.commit()
+        print(f"Seeded {len(INBOXES)} inboxes and {template_count} inbox-scoped templates.")
     finally:
         db.close()
 

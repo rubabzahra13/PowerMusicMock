@@ -23,9 +23,23 @@ def _poll_job():
     try:
         processed = pipeline.poll_all_accounts(db)
         if processed:
-            logger.info("Gmail poll processed %d new emails", processed)
+            logger.info("Gmail sync processed %d changes", processed)
     except Exception:
         logger.exception("Gmail poll job failed")
+    finally:
+        db.close()
+
+
+def _ai_job():
+    db = SessionLocal()
+    try:
+        from app.pilot2 import sync
+
+        n = sync.process_ai_batch(db)
+        if n:
+            logger.info("AI batch processed %d emails", n)
+    except Exception:
+        logger.exception("AI batch job failed")
     finally:
         db.close()
 
@@ -51,6 +65,11 @@ def start() -> None:
     _scheduler = BackgroundScheduler(timezone="UTC")
     if config.GMAIL_MODE == "live":
         _scheduler.add_job(_poll_job, "interval", minutes=config.POLL_INTERVAL_MINUTES)
+        _scheduler.add_job(
+            _ai_job,
+            "interval",
+            seconds=config.AI_JOB_INTERVAL_SECONDS,
+        )
     _scheduler.add_job(_distill_job, "cron", hour=config.DISTILL_HOUR_UTC, minute=0)
     _scheduler.start()
 
