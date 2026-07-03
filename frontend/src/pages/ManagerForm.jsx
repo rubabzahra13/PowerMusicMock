@@ -1,20 +1,16 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Zap, CheckCircle, Search, LogOut } from 'lucide-react';
+import { Zap, CheckCircle, Search } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { directoryData } from '../data/mockData';
 import { Toast, useToast } from '../components/ui';
-import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
-import { authenticatedFetch } from '../utils/api';
+import { getApiUrl } from '../utils/api';
 
 export default function ManagerForm() {
-  const { user, profile, appConfig, logout } = useAuth();
-  const navigate = useNavigate();
   const { showToast } = useToast();
   const [liveDirectoryData, setLiveDirectoryData] = useState([]);
 
   useEffect(() => {
-    authenticatedFetch('http://localhost:8000/api/persons')
+    fetch(getApiUrl('/api/persons'))
       .then((res) => res.json())
       .then((data) => setLiveDirectoryData(data))
       .catch((err) => console.error(err));
@@ -32,17 +28,6 @@ export default function ManagerForm() {
     email: '',
     club: ''
   });
-
-  useEffect(() => {
-    if (profile) {
-      setManagerForm({
-        firstName: profile.firstName || '',
-        lastName: profile.lastName || '',
-        email: profile.email || '',
-        club: profile.club || ''
-      });
-    }
-  }, [profile]);
 
   // Person state
   const [personForm, setPersonForm] = useState({
@@ -86,11 +71,8 @@ export default function ManagerForm() {
   const managerEmailValid = useMemo(() => {
     const email = managerForm.email.trim();
     if (email === '') return true; // don't show error until something is typed
-    
-    if (appConfig && !appConfig.enforceDomainCheck) return true;
-
     return email.toLowerCase().endsWith('@puregym.com');
-  }, [managerForm.email, appConfig]);
+  }, [managerForm.email]);
 
   // Submit check
   const isFormValid = useMemo(() => {
@@ -113,8 +95,9 @@ export default function ManagerForm() {
     if (!isFormValid) return;
 
     try {
-      const response = await authenticatedFetch('http://localhost:8000/api/requests', {
+      const response = await fetch(getApiUrl('/api/requests'), {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           submittedBy: managerForm,
           person: personForm,
@@ -162,30 +145,12 @@ export default function ManagerForm() {
       <Toast />
       
       {/* Standalone Header */}
-      <header className="h-14 bg-white border-b border-[var(--color-border-default)] flex items-center justify-between px-6 shrink-0 z-10">
+      <header className="h-14 bg-white border-b border-[var(--color-border-default)] flex items-center px-6 shrink-0 z-10">
         <div className="flex items-center gap-2">
           <Zap className="w-5 h-5 text-[var(--color-brand-accent)] fill-[var(--color-brand-accent)]" />
           <span className="text-[15px] font-bold text-[var(--color-text-primary)] tracking-wide">
             Power Music
           </span>
-        </div>
-        <div className="flex items-center gap-4">
-          {user && (
-            <span className="text-xs font-semibold text-[var(--color-text-secondary)] bg-gray-50 border border-[var(--color-border-default)] px-3 py-1 rounded-full max-w-[300px] truncate hidden sm:inline-block">
-              {user.user_metadata?.firstName} {user.user_metadata?.lastName} ({user.user_metadata?.club})
-            </span>
-          )}
-          <button
-            onClick={async () => {
-              await logout();
-              navigate('/login');
-            }}
-            title="Sign Out"
-            className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-red-500 transition-colors cursor-pointer"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sign Out</span>
-          </button>
         </div>
       </header>
 
@@ -284,14 +249,16 @@ export default function ManagerForm() {
                       required
                       value={managerForm.email}
                       onChange={(e) => handleManagerChange('email', e.target.value)}
-                      className={`w-full px-3 py-1.5 bg-white border rounded-md text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors ${
-                        !managerEmailValid ? 'border-red-500 focus:border-red-500' : 'border-[var(--color-border-default)]'
+                      className={`w-full px-3 py-1.5 bg-white border rounded-md text-sm text-[var(--color-text-primary)] focus:outline-none transition-colors ${
+                        !managerEmailValid && managerForm.email.trim() !== ''
+                          ? 'border-red-400 focus:border-red-500 bg-red-50'
+                          : 'border-[var(--color-border-default)] focus:border-[var(--color-border-focus)]'
                       }`}
                     />
-                    {!managerEmailValid && (
-                      <span className="block text-[10px] text-red-500 font-semibold mt-1">
-                        Email must end with @puregym.com
-                      </span>
+                    {!managerEmailValid && managerForm.email.trim() !== '' && (
+                      <p className="mt-1 text-[11px] font-medium text-red-600 leading-snug">
+                        Manager email address must use a @puregym.com domain. Other domains are not permitted.
+                      </p>
                     )}
                   </div>
 
