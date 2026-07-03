@@ -26,6 +26,8 @@ dist-ssr
 # Explicit Sensitive Files & Folders
 .env
 .env.*
+backend/.env
+frontend/.env.local
 backend/venv/
 backend/**/__pycache__/
 backend/**/*.pyc
