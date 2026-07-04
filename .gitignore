@@ -26,6 +26,8 @@ dist-ssr
 # Environment and Virtual Environments
 .env
 .env.*
+!.env.example
+!**/.env.example
 .venv/
 venv/
 backend/.env
@@ -40,3 +42,5 @@ backend/**/*.pyc
 
 # Testing
 .pytest_cache/
+.vercel
+.env*

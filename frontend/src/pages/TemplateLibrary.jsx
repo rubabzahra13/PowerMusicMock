@@ -10,7 +10,7 @@ import {
   getTemplates, createTemplate, updateTemplate, deleteTemplate,
   restoreTemplate, deleteTemplateForever, getInboxes, loadWithCache, refreshCache, writeCache,
 } from '../utils/pilot2Api';
-import { Toast, useToast, SelectDropdown, CardListSkeleton, Modal } from '../components/ui';
+import { Toast, useToast, SelectDropdown, CardListSkeleton, Modal, EMPTY_CELL } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 
 // ─── Language content swapper ──────────────────────────────────────────────────
@@ -50,13 +50,13 @@ function translateSubject(originalSubject, lang) {
 
 // ─── Shared format helpers ─────────────────────────────────────────────────────
 const fmtUpdated = (iso) => {
-  if (!iso) return '—';
+  if (!iso) return EMPTY_CELL;
   try { return format(parseISO(iso), "dd MMM yyyy, hh:mm a"); }
   catch { return iso; }
 };
 
 const fmtListDate = (iso) => {
-  if (!iso) return '—';
+  if (!iso) return EMPTY_CELL;
   try { return format(parseISO(iso), 'd MMM yyyy'); }
   catch { return iso; }
 };

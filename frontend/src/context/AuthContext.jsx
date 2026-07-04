@@ -1,19 +1,59 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '../supabaseClient';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { getSupabase, isSupabaseConfigured } from '../supabaseClient';
+import { isAdminEmail } from '../utils/adminAccess';
+import {
+  validateManagerEmail,
+  validateManagerSignupFields,
+  MANAGER_ACCOUNT_EXISTS_MESSAGE,
+  MANAGER_ACCOUNT_NOT_FOUND_MESSAGE,
+} from '../utils/managerAuth';
+import { getAuthCallbackUrl } from '../utils/authRedirect';
+import { clearAuthCache, readAuthCache, writeAuthCache } from '../utils/authCache';
+import { readInitialAuthState, clearStoredSession, readStoredSession } from '../utils/authBootstrap';
+import { setAccessTokenProvider } from '../utils/api';
+import { requestManagerPasswordReset, resendManagerSignupConfirmation } from '../utils/managerAuthEmail';
 
-const AuthContext = createContext({});
+const AuthContext = createContext(null);
 
-const fetchUserProfile = async (accessToken) => {
-  const response = await fetch('http://localhost:8000/api/auth/me', {
-    headers: {
-      'Authorization': `Bearer ${accessToken}`
+async function fetchUserProfile(userId) {
+  const supabase = getSupabase();
+  if (!supabase) throw new Error('Supabase is not configured.');
+
+  let lastError = null;
+  let triedEnsure = false;
+  const maxAttempts = 5;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, email, full_name, role')
+      .eq('id', userId)
+      .single();
+
+    if (!error && data) return data;
+
+    lastError = error;
+
+    if (error?.code === 'PGRST116' && !triedEnsure) {
+      triedEnsure = true;
+      const { data: ensured, error: ensureError } = await supabase.rpc('ensure_manager_profile');
+      if (!ensureError && ensured) return ensured;
+      if (ensureError) lastError = ensureError;
     }
-  });
-  if (!response.ok) {
-    throw new Error('Failed to retrieve user role from database.');
+
+    if (attempt < maxAttempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
   }
-  return response.json();
-};
+
+  throw lastError ?? new Error('Failed to retrieve user role from database.');
+}
+
+function applyProfile(setRole, setProfile, profileData) {
+  setRole(profileData.role);
+  setProfile(profileData);
+  writeAuthCache(profileData.id, profileData);
+}
 
 const getLoginFriendlyError = (error) => {
   if (!error) return 'Authentication failed.';
@@ -37,7 +77,7 @@ const getSignupFriendlyError = (error) => {
   if (!error) return 'Registration failed.';
   const msg = error.message || '';
   if (msg.includes('already registered') || msg.includes('User already exists')) {
-    return 'An account with this email address is already registered. Please sign in instead.';
+    return MANAGER_ACCOUNT_EXISTS_MESSAGE;
   }
   if (msg.includes('Password should be at least 6 characters')) {
     return 'Password is too weak. It must be at least 6 characters long.';
@@ -48,107 +88,177 @@ const getSignupFriendlyError = (error) => {
   return error.message || 'Registration failed. Please check your details and try again.';
 };
 
+const getOtpFriendlyError = (error) => {
+  if (!error) return 'Could not send sign-in link.';
+  const msg = error.message || '';
+  if (msg.includes('too many requests') || msg.includes('rate limit') || msg.includes('429')) {
+    return 'Too many sign-up attempts. Wait at least 60 seconds, then try again. If this keeps happening, check Supabase → Authentication → Rate Limits or wait up to an hour after heavy testing.';
+  }
+  if (msg.includes('Signups not allowed')) {
+    return 'New registrations are temporarily unavailable. Please contact support.';
+  }
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+    return 'Network error: Please check your internet connection and try again.';
+  }
+  return error.message || 'Could not send sign-in link.';
+};
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [session, setSession] = useState(null);
-  const [role, setRole] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [appConfig, setAppConfig] = useState({ enforceDomainCheck: true });
-  const [loading, setLoading] = useState(true);
+  const initialAuth = readInitialAuthState();
+  const [user, setUser] = useState(initialAuth.user);
+  const [session, setSession] = useState(initialAuth.session);
+  const [role, setRole] = useState(initialAuth.role);
+  const [profile, setProfile] = useState(initialAuth.profile);
+  const [appConfig] = useState({ enforceDomainCheck: true });
+  const [initializing, setInitializing] = useState(false);
+  const [authReady, setAuthReady] = useState(
+    () => !isSupabaseConfigured() || Boolean(initialAuth.user),
+  );
+  const initialSessionHandled = useRef(false);
+  const authEpoch = useRef(0);
+  const authTransitionRef = useRef(false);
+
+  const bumpAuthEpoch = () => {
+    authEpoch.current += 1;
+    return authEpoch.current;
+  };
+
+  const isStaleAuthEpoch = (epoch) => epoch !== authEpoch.current;
+
+  useEffect(() => {
+    setAccessTokenProvider(async () => {
+      if (session?.access_token) return session.access_token;
+
+      const stored = readStoredSession();
+      if (stored?.access_token) return stored.access_token;
+
+      const supabase = getSupabase();
+      if (!supabase) return null;
+
+      const { data } = await supabase.auth.getSession();
+      return data.session?.access_token ?? null;
+    });
+  }, [session]);
 
   useEffect(() => {
     let active = true;
+    const supabase = getSupabase();
 
-    // Fetch config and initial session concurrently
-    Promise.all([
-      supabase.auth.getSession(),
-      fetch('http://localhost:8000/api/config')
-        .then(res => res.json())
-        .catch(err => {
-          console.error('Failed to fetch backend configuration:', err);
-          return { enforceDomainCheck: true }; // secure fallback
-        })
-    ]).then(async ([sessionData, configData]) => {
+    if (!isSupabaseConfigured() || !supabase) {
+      setAuthReady(true);
+      return undefined;
+    }
+
+    async function clearAuthState() {
+      clearAuthCache();
+      await supabase.auth.signOut();
       if (!active) return;
+      setSession(null);
+      setUser(null);
+      setRole(null);
+      setProfile(null);
+    }
 
-      setAppConfig(configData);
+    async function refreshProfile(currentSession, { allowCachedFallback = false } = {}) {
+      const currentUser = currentSession?.user ?? null;
+      if (!currentUser) return;
 
-      const initialSession = sessionData.data.session;
-      setSession(initialSession);
-      const currentUser = initialSession?.user ?? null;
-      setUser(currentUser);
-
-      if (initialSession) {
-        try {
-          const profileData = await fetchUserProfile(initialSession.access_token);
-          if (active) {
-            setRole(profileData.role);
-            setProfile(profileData);
-          }
-        } catch (err) {
-          console.error('Error fetching initial profile:', err);
-          await supabase.auth.signOut();
-          if (active) {
-            setUser(null);
-            setSession(null);
-            setRole(null);
-            setProfile(null);
-          }
-        }
-      } else {
-        if (active) {
-          setRole(null);
-          setProfile(null);
+      try {
+        const profileData = await fetchUserProfile(currentUser.id);
+        if (!active) return;
+        applyProfile(setRole, setProfile, profileData);
+      } catch (err) {
+        console.error('Error fetching profile:', err);
+        if (!allowCachedFallback) {
+          await clearAuthState();
         }
       }
-      if (active) {
-        setLoading(false);
-      }
-    });
+    }
 
-    // 2. Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
-      if (!active) return;
-
-      if (event === 'SIGNED_OUT') {
-        setSession(null);
-        setUser(null);
-        setRole(null);
-        setProfile(null);
-        setLoading(false);
-        return;
-      }
+    async function hydrateSession(currentSession, epoch) {
+      if (isStaleAuthEpoch(epoch)) return;
 
       setSession(currentSession);
       const currentUser = currentSession?.user ?? null;
       setUser(currentUser);
 
-      if (currentSession) {
-        try {
-          const profileData = await fetchUserProfile(currentSession.access_token);
-          if (active) {
-            setRole(profileData.role);
-            setProfile(profileData);
-          }
-        } catch (err) {
-          console.error('Error fetching updated profile:', err);
-          await supabase.auth.signOut();
-          if (active) {
-            setSession(null);
-            setUser(null);
-            setRole(null);
-            setProfile(null);
-          }
-        }
-      } else {
-        if (active) {
-          setRole(null);
-          setProfile(null);
-        }
+      if (!currentUser) {
+        clearAuthCache();
+        setRole(null);
+        setProfile(null);
+        return;
       }
-      if (active) {
-        setLoading(false);
+
+      const cached = readAuthCache(currentUser.id);
+      if (cached) {
+        setRole(cached.role);
+        setProfile(cached.profile);
+        await refreshProfile(currentSession, { allowCachedFallback: true });
+        return;
       }
+
+      await refreshProfile(currentSession, { allowCachedFallback: false });
+    }
+
+    const bootEpoch = authEpoch.current;
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!active || isStaleAuthEpoch(bootEpoch)) return;
+      initialSessionHandled.current = true;
+      await hydrateSession(data.session, bootEpoch);
+      if (active) setAuthReady(true);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+      if (!active) return;
+      const eventEpoch = authEpoch.current;
+
+      if (event === 'INITIAL_SESSION') {
+        if (initialSessionHandled.current) return;
+        initialSessionHandled.current = true;
+        await hydrateSession(currentSession, eventEpoch);
+        setAuthReady(true);
+        return;
+      }
+
+      if (event === 'SIGNED_OUT') {
+        if (authTransitionRef.current) return;
+        bumpAuthEpoch();
+        clearAuthCache();
+        clearStoredSession();
+        setSession(null);
+        setUser(null);
+        setRole(null);
+        setProfile(null);
+        return;
+      }
+
+      if (event === 'TOKEN_REFRESHED') {
+        if (isStaleAuthEpoch(eventEpoch)) return;
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
+        await refreshProfile(currentSession, { allowCachedFallback: true });
+        return;
+      }
+
+      if (isStaleAuthEpoch(eventEpoch)) return;
+
+      setSession(currentSession);
+      setUser(currentSession?.user ?? null);
+
+      if (!currentSession?.user) {
+        clearAuthCache();
+        setRole(null);
+        setProfile(null);
+        return;
+      }
+
+      const cached = readAuthCache(currentSession.user.id);
+      if (cached) {
+        setRole(cached.role);
+        setProfile(cached.profile);
+      }
+
+      await refreshProfile(currentSession, { allowCachedFallback: Boolean(cached) });
     });
 
     return () => {
@@ -158,12 +268,15 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = async (email, password, expectedRole) => {
-    setLoading(true);
+    const supabase = getSupabase();
+    if (!supabase) {
+      throw new Error(
+        'Authentication is not configured. Create frontend/.env.local with VITE_SUPABASE_ANON_KEY, then hard-refresh the page.'
+      );
+    }
+
+    authTransitionRef.current = true;
     try {
-      // 1. Force logout first to guarantee clean session transition
-      await supabase.auth.signOut();
-      
-      // 2. Perform authentication
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -172,71 +285,282 @@ export function AuthProvider({ children }) {
         throw new Error(getLoginFriendlyError(error));
       }
 
-      // 3. Fetch verified database role from backend
-      const profileData = await fetchUserProfile(data.session.access_token);
-      
-      // 4. Validate role
+      const profileData = await fetchUserProfile(data.user.id);
+
       if (profileData.role !== expectedRole) {
         await supabase.auth.signOut();
+        clearAuthCache();
         throw new Error(`Access Denied: You do not have permission to access the ${expectedRole} portal.`);
       }
 
       setUser(data.user);
       setSession(data.session);
-      setRole(profileData.role);
-      setProfile(profileData);
+      applyProfile(setRole, setProfile, profileData);
+      setAuthReady(true);
       return data;
-    } catch (err) {
-      throw err;
     } finally {
-      setLoading(false);
+      authTransitionRef.current = false;
     }
   };
 
   const signup = async (email, password, metadata = {}) => {
-    setLoading(true);
+    const supabase = getSupabase();
+    if (!supabase) {
+      throw new Error(
+        'Authentication is not configured. Create frontend/.env.local with VITE_SUPABASE_ANON_KEY, then hard-refresh the page.'
+      );
+    }
+    setInitializing(true);
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: {
-            ...metadata
-          }
-        }
+          data: metadata,
+        },
       });
       if (error) {
         throw new Error(getSignupFriendlyError(error));
       }
       return data;
-    } catch (err) {
-      throw err;
     } finally {
-      setLoading(false);
+      setInitializing(false);
     }
   };
 
   const logout = async () => {
-    setLoading(true);
+    const supabase = getSupabase();
+    bumpAuthEpoch();
+    clearAuthCache();
+    clearStoredSession();
+    setUser(null);
+    setSession(null);
+    setRole(null);
+    setProfile(null);
+
+    if (!supabase) return;
+
     try {
-      const { error } = await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (error) throw error;
-      setUser(null);
-      setSession(null);
-      setRole(null);
-      setProfile(null);
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      console.error('Sign out failed:', err);
     }
   };
 
+  /** Admin portal — passwordless magic link (only for allowlisted emails). */
+  const sendAdminMagicLink = async (email) => {
+    const supabase = getSupabase();
+    if (!supabase) {
+      throw new Error(
+        'Authentication is not configured. Create frontend/.env.local with VITE_SUPABASE_ANON_KEY, then hard-refresh the page.'
+      );
+    }
+
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) {
+      throw new Error('Please enter your email address.');
+    }
+
+    await supabase.auth.signOut();
+    clearAuthCache();
+
+    if (isAdminEmail(normalized)) {
+      const redirectTo = getAuthCallbackUrl();
+      const { error } = await supabase.auth.signInWithOtp({
+        email: normalized,
+        options: {
+          shouldCreateUser: false,
+          emailRedirectTo: redirectTo,
+        },
+      });
+      if (error) {
+        throw new Error(error.message || 'Could not send sign-in link.');
+      }
+    }
+
+    return { email: normalized };
+  };
+
+  /** Check whether a manager profile exists for this email (sign-in pre-check). */
+  const checkManagerAccountExists = async (email, { enforceDomain = true } = {}) => {
+    const supabase = getSupabase();
+    if (!supabase) {
+      throw new Error(
+        'Authentication is not configured. Create frontend/.env.local with VITE_SUPABASE_ANON_KEY, then hard-refresh the page.'
+      );
+    }
+
+    const validated = validateManagerEmail(email, { enforceDomain });
+    if (!validated.ok) {
+      throw new Error(validated.error);
+    }
+
+    const { data, error } = await supabase.rpc('manager_account_exists', {
+      p_email: validated.value,
+    });
+
+    if (error) {
+      throw new Error('Could not check your account. Please try again.');
+    }
+
+    return { email: validated.value, exists: Boolean(data) };
+  };
+
+  /** Manager portal — email + password sign-in for existing accounts. */
+  const signInManager = async (email, password, { enforceDomain = true } = {}) => {
+    const { email: normalized, exists } = await checkManagerAccountExists(email, { enforceDomain });
+
+    if (!exists) {
+      throw new Error(MANAGER_ACCOUNT_NOT_FOUND_MESSAGE);
+    }
+
+    return login(normalized, password, 'manager');
+  };
+
+  /** Manager portal — send a password reset email (same Send Email hook as signup). */
+  const resetManagerPassword = (email, options) => requestManagerPasswordReset(email, options);
+
+  /** Manager portal — passwordless magic link for sign-in (existing accounts). */
+  const sendManagerMagicLink = async (email, { enforceDomain = true } = {}) => {
+    const supabase = getSupabase();
+    if (!supabase) {
+      throw new Error(
+        'Authentication is not configured. Create frontend/.env.local with VITE_SUPABASE_ANON_KEY, then hard-refresh the page.'
+      );
+    }
+
+    const validated = validateManagerEmail(email, { enforceDomain });
+    if (!validated.ok) {
+      throw new Error(validated.error);
+    }
+
+    await supabase.auth.signOut();
+    clearAuthCache();
+
+    const redirectTo = getAuthCallbackUrl();
+    const { error } = await supabase.auth.signInWithOtp({
+      email: validated.value,
+      options: {
+        shouldCreateUser: false,
+        emailRedirectTo: redirectTo,
+      },
+    });
+
+    if (error) {
+      throw new Error(getOtpFriendlyError(error));
+    }
+
+    return { email: validated.value };
+  };
+
+  /** Manager portal — register with email + password (one email verify if enabled in Supabase). */
+  const registerManager = async (fields, { enforceDomain = true } = {}) => {
+    const supabase = getSupabase();
+    if (!supabase) {
+      throw new Error(
+        'Authentication is not configured. Create frontend/.env.local with VITE_SUPABASE_ANON_KEY, then hard-refresh the page.'
+      );
+    }
+
+    const validated = validateManagerSignupFields(fields, { enforceDomain });
+    if (!validated.ok) {
+      throw new Error(validated.error);
+    }
+
+    const { email, firstName, lastName, club, full_name, password } = validated.value;
+
+    const { exists } = await checkManagerAccountExists(email, { enforceDomain });
+    if (exists) {
+      throw new Error(MANAGER_ACCOUNT_EXISTS_MESSAGE);
+    }
+
+    await supabase.auth.signOut();
+    clearAuthCache();
+
+    const redirectTo = getAuthCallbackUrl();
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: redirectTo,
+        data: {
+          firstName,
+          lastName,
+          club,
+          full_name,
+        },
+      },
+    });
+
+    if (error) {
+      throw new Error(getSignupFriendlyError(error));
+    }
+
+    if (data.user?.identities?.length === 0) {
+      try {
+        await resendManagerSignupConfirmation(email, { enforceDomain });
+        return {
+          email,
+          full_name,
+          club,
+          needsConfirmation: true,
+        };
+      } catch (resendErr) {
+        throw new Error(
+          resendErr.message?.includes('sign in')
+            ? resendErr.message
+            : MANAGER_ACCOUNT_EXISTS_MESSAGE,
+        );
+      }
+    }
+
+    if (data.session) {
+      const profileData = await fetchUserProfile(data.user.id);
+      setUser(data.user);
+      setSession(data.session);
+      applyProfile(setRole, setProfile, profileData);
+    }
+
+    return {
+      email,
+      full_name,
+      club,
+      needsConfirmation: !data.session,
+    };
+  };
+
   return (
-    <AuthContext.Provider value={{ user, session, role, profile, appConfig, loading, login, signup, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        role,
+        profile,
+        appConfig,
+        authReady,
+        initializing,
+        loading: initializing,
+        login,
+        signup,
+        logout,
+        sendAdminMagicLink,
+        sendManagerMagicLink,
+        checkManagerAccountExists,
+        signInManager,
+        resetManagerPassword,
+        registerManager,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
 
 export function useAuth() {
-  return useContext(AuthContext);
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 }

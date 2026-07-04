@@ -18,7 +18,11 @@ const toastState = {
   dismissToast: (id) => {
     toasts = toasts.filter((t) => t.id !== id);
     listeners.forEach((listener) => listener(toasts));
-  }
+  },
+  clearToasts: () => {
+    toasts = [];
+    listeners.forEach((listener) => listener(toasts));
+  },
 };
 
 export function useToast() {
@@ -39,9 +43,14 @@ export function useToast() {
     toastState.dismissToast(id);
   }, []);
 
+  const clearToasts = useCallback(() => {
+    toastState.clearToasts();
+  }, []);
+
   return {
     toasts: localToasts,
     showToast,
-    dismissToast
+    dismissToast,
+    clearToasts,
   };
 }

@@ -1,7 +1,18 @@
 from sqlalchemy import Boolean, Column, DateTime, Float, String, Text, Integer
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 
 from app.database import Base
+
+
+class Profile(Base):
+    """Supabase auth profile (role source of truth for API authorization)."""
+
+    __tablename__ = "profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    email = Column(String, nullable=False)
+    full_name = Column(String, nullable=True)
+    role = Column(String, nullable=False)
 
 
 class Request(Base):
