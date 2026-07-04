@@ -1,35 +1,39 @@
 #!/usr/bin/env node
 /**
- * Seeds the single admin account (Andrea) in Supabase Auth.
+ * One-time admin bootstrap — run manually with secrets, never on deploy.
  *
- * Usage:
- *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/seed-admin.mjs
- *
- * Optional:
- *   ADMIN_EMAIL=andrea@powermusic.io
- *   ADMIN_PASSWORD=your-strong-password
- *   ADMIN_FULL_NAME=Andrea
+ *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+ *   ADMIN_EMAIL=... ADMIN_PASSWORD=... \
+ *   node scripts/seed-admin.mjs
  */
-
 import { createClient } from '@supabase/supabase-js';
 import { randomBytes } from 'node:crypto';
+import { isProduction, resolveAdminCredentials } from './lib/seed-guards.mjs';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-const adminEmail = process.env.ADMIN_EMAIL || 'andrea@powermusic.io';
 const adminFullName = process.env.ADMIN_FULL_NAME || 'Andrea';
-let adminPassword = process.env.ADMIN_PASSWORD;
 
 if (!supabaseUrl || !serviceRoleKey) {
   console.error('Missing SUPABASE_URL (or VITE_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY.');
   process.exit(1);
 }
 
-if (!adminPassword) {
-  adminPassword = generatePassword();
+if (isProduction() && process.env.VERCEL === '1') {
+  console.error(
+    'Refusing to seed admin during a Vercel build/deploy. '
+      + 'Run this script manually from a trusted machine with secrets.',
+  );
+  process.exit(1);
+}
+
+const { email: adminEmail, password: adminPassword } = resolveAdminCredentials();
+let finalPassword = adminPassword;
+
+if (!finalPassword) {
+  finalPassword = generatePassword();
   console.log('No ADMIN_PASSWORD provided — generated a strong password (save it now):');
-  console.log(`\n  ${adminPassword}\n`);
+  console.log(`\n  ${finalPassword}\n`);
 }
 
 const supabase = createClient(supabaseUrl, serviceRoleKey, {
@@ -51,10 +55,7 @@ async function findExistingAdminProfile() {
     .eq('role', 'admin')
     .maybeSingle();
 
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return data;
 }
 
@@ -63,22 +64,20 @@ async function main() {
 
   if (existingAdmin) {
     console.log(`Admin account already exists: ${existingAdmin.email} (${existingAdmin.id})`);
-    console.log('To change the password, use the Supabase Dashboard or auth.admin.updateUserById.');
+    console.log('No changes made. Rotate password via Supabase Dashboard or auth.admin.updateUserById.');
     return;
   }
 
   const { data: created, error: createError } = await supabase.auth.admin.createUser({
     email: adminEmail,
-    password: adminPassword,
+    password: finalPassword,
     email_confirm: true,
     user_metadata: {
       full_name: adminFullName,
     },
   });
 
-  if (createError) {
-    throw createError;
-  }
+  if (createError) throw createError;
 
   const userId = created.user.id;
 
@@ -91,19 +90,16 @@ async function main() {
       role: 'admin',
     });
 
-  if (profileError) {
-    throw profileError;
-  }
+  if (profileError) throw profileError;
 
   console.log('Admin account created successfully.');
   console.log(`  Email: ${adminEmail}`);
   console.log(`  Name:  ${adminFullName}`);
   console.log(`  ID:    ${userId}`);
-
   if (process.env.ADMIN_PASSWORD) {
-    console.log('  Password: (from ADMIN_PASSWORD env var)');
+    console.log('  Password: (from ADMIN_PASSWORD env var — store in your password manager)');
   } else {
-    console.log('  Password: (generated above — store securely before deploy)');
+    console.log('  Password: (generated above — store securely before closing the terminal)');
   }
 }
 

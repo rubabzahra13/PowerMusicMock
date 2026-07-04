@@ -3,12 +3,12 @@ import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
-import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell } from '../components/ui';
+import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL } from '../components/ui';
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 import { loadWithCache, patchCache, getNewRequestsPage } from '../utils/pilot2Api';
-import { getApiUrl } from '../utils/api';
+import { fetchJson } from '../utils/api';
 
 const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (newest first)' },
@@ -438,7 +438,7 @@ export default function Requests() {
     if (!isModalFormValid) return;
 
     try {
-      const response = await fetch(getApiUrl('/api/admin/requests/manual'), {
+      const created = await fetchJson('/api/admin/requests/manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -448,8 +448,6 @@ export default function Requests() {
           notes: notes
         })
       });
-      if (!response.ok) throw new Error('Failed to create manual requests');
-      const created = await response.json();
 
       setNewRequests((prev) => {
         const next = [...created, ...prev];
@@ -470,11 +468,7 @@ export default function Requests() {
 
   const completeRequest = async (req) => {
     try {
-      const response = await fetch(getApiUrl(`/api/admin/requests/${req.id}/mark-handled`), {
-        method: 'POST'
-      });
-      if (!response.ok) throw new Error('Failed to mark handled');
-      
+      await fetchJson(`/api/admin/requests/${req.id}/mark-handled`, { method: 'POST' });
       setNewRequests((prev) => {
         const next = prev.filter((r) => r.id !== req.id);
         patchCache('requests_page', { requests: next });
@@ -540,7 +534,7 @@ export default function Requests() {
       width: '9%',
       render: (_, row) => (
         <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {row.person.location || '—'}
+          {row.person.location || EMPTY_CELL}
         </TruncateCell>
       )
     },
@@ -551,7 +545,7 @@ export default function Requests() {
       render: (_, row) => (
         <StackedTextCell
           primary={getManagerDisplayName(row.submittedBy)}
-          secondary={row.submittedBy?.email || '—'}
+          secondary={row.submittedBy?.email || EMPTY_CELL}
         />
       )
     },

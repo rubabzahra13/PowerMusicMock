@@ -7,7 +7,9 @@ React app can swap its mock imports for API calls without remapping.
 from datetime import datetime
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.input_validation import normalize_person_name, normalize_text
 
 
 class InboxOut(BaseModel):
@@ -103,13 +105,23 @@ class EmailBulkPatchIn(EmailPatchIn):
 
 
 class DraftUpdateIn(BaseModel):
-    draftBody: str
+    draftBody: str = Field(max_length=100_000)
+
+    @field_validator("draftBody", mode="before")
+    @classmethod
+    def clean_draft(cls, value):
+        return normalize_text(value, max_length=100_000, field_name="draftBody")
 
 
 class SendIn(BaseModel):
     """Final body as it appears in the editor when the admin clicks Send."""
 
-    finalBody: str
+    finalBody: str = Field(max_length=100_000)
+
+    @field_validator("finalBody", mode="before")
+    @classmethod
+    def clean_body(cls, value):
+        return normalize_text(value, max_length=100_000, field_name="finalBody")
 
 
 class TemplateOut(BaseModel):
@@ -130,22 +142,62 @@ class TemplateOut(BaseModel):
 
 
 class TemplateIn(BaseModel):
-    inbox: str
-    name: str
-    category: str
-    intent: Optional[str] = None
-    status: str = "Active"
-    subject: str
-    body: str
+    inbox: str = Field(max_length=254)
+    name: str = Field(max_length=200)
+    category: str = Field(max_length=100)
+    intent: Optional[str] = Field(default=None, max_length=50)
+    status: str = Field(default="Active", max_length=20)
+    subject: str = Field(max_length=500)
+    body: str = Field(max_length=100_000)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def clean_name(cls, value):
+        return normalize_text(value, max_length=200, field_name="name")
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def clean_category(cls, value):
+        return normalize_text(value, max_length=100, field_name="category")
+
+    @field_validator("subject", mode="before")
+    @classmethod
+    def clean_subject(cls, value):
+        return normalize_text(value, max_length=500, field_name="subject")
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def clean_template_body(cls, value):
+        return normalize_text(value, max_length=100_000, field_name="body")
 
 
 class TemplateUpdateIn(BaseModel):
-    name: str
-    category: str
-    intent: Optional[str] = None
-    status: str = "Active"
-    subject: str
-    body: str
+    name: str = Field(max_length=200)
+    category: str = Field(max_length=100)
+    intent: Optional[str] = Field(default=None, max_length=50)
+    status: str = Field(default="Active", max_length=20)
+    subject: str = Field(max_length=500)
+    body: str = Field(max_length=100_000)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def clean_name(cls, value):
+        return normalize_text(value, max_length=200, field_name="name")
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def clean_category(cls, value):
+        return normalize_text(value, max_length=100, field_name="category")
+
+    @field_validator("subject", mode="before")
+    @classmethod
+    def clean_subject(cls, value):
+        return normalize_text(value, max_length=500, field_name="subject")
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def clean_template_body(cls, value):
+        return normalize_text(value, max_length=100_000, field_name="body")
 
 
 class GuidanceNoteOut(BaseModel):

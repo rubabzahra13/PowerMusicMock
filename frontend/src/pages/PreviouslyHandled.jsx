@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Search, Download, Info, SortAsc, SortDesc, ChevronDown, Filter } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { handledRequests } from '../data/mockData';
-import { DataTable, Tag, Drawer } from '../components/ui';
+import { DataTable, Tag, Drawer, EMPTY_CELL } from '../components/ui';
 
 // ─── Shared Controls Bar (same pattern as NewRequests) ────────────────────────
 function ControlsBar({
@@ -276,7 +276,7 @@ export default function PreviouslyHandled() {
       key: 'personLocation',
       label: 'Location',
       render: (_, row) => (
-        <span className="text-xs text-[var(--color-text-secondary)]">{row.person.location || '—'}</span>
+        <span className="text-xs text-[var(--color-text-secondary)]">{row.person.location || EMPTY_CELL}</span>
       )
     },
     {
@@ -295,7 +295,7 @@ export default function PreviouslyHandled() {
       key: 'managerEmail',
       label: 'Manager Email',
       render: (_, row) => (
-        <span className="text-xs text-[var(--color-text-secondary)]">{row.submittedBy.email || '—'}</span>
+        <span className="text-xs text-[var(--color-text-secondary)]">{row.submittedBy.email || EMPTY_CELL}</span>
       )
     },
     {
@@ -441,7 +441,7 @@ export default function PreviouslyHandled() {
             <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
               <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Notes</span>
               <p className="text-sm text-[var(--color-text-primary)] leading-normal whitespace-pre-wrap">
-                {selectedRequest.notes?.trim() ? selectedRequest.notes : '—'}
+                {selectedRequest.notes?.trim() ? selectedRequest.notes : EMPTY_CELL}
               </p>
             </div>
 

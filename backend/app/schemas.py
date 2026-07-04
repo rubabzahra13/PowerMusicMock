@@ -1,33 +1,77 @@
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, model_validator, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.input_validation import (
+    normalize_email,
+    normalize_person_name,
+    normalize_text,
+)
 
 
 class SubmittedBy(BaseModel):
-    firstName: Optional[str] = None
-    lastName: Optional[str] = None
-    email: Optional[str] = None
-    club: Optional[str] = None
+    firstName: Optional[str] = Field(default=None, max_length=100)
+    lastName: Optional[str] = Field(default=None, max_length=100)
+    email: Optional[str] = Field(default=None, max_length=254)
+    club: Optional[str] = Field(default=None, max_length=200)
+
+    @field_validator("firstName", "lastName", "club", mode="before")
+    @classmethod
+    def clean_submitter_text(cls, value, info):
+        if value is None:
+            return None
+        return normalize_person_name(value, field_name=info.field_name)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_submitter_email(cls, value):
+        return normalize_email(value)
 
 
 class PersonInfo(BaseModel):
-    firstName: Optional[str] = None
-    lastName: Optional[str] = None
-    email: Optional[str] = None
-    location: Optional[str] = None
+    firstName: Optional[str] = Field(default=None, max_length=100)
+    lastName: Optional[str] = Field(default=None, max_length=100)
+    email: Optional[str] = Field(default=None, max_length=254)
+    location: Optional[str] = Field(default=None, max_length=200)
+
+    @field_validator("firstName", "lastName", "location", mode="before")
+    @classmethod
+    def clean_person_text(cls, value, info):
+        if value is None:
+            return None
+        if info.field_name == "location":
+            return normalize_text(value, max_length=200, allow_empty=True, field_name="location")
+        return normalize_person_name(value, field_name=info.field_name)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_person_email(cls, value):
+        return normalize_email(value)
+
 
 class RequestIn(BaseModel):
     submittedBy: SubmittedBy
     person: PersonInfo
-    action: str
-    notes: Optional[str] = None
+    action: Literal["Add", "Remove"]
+    notes: Optional[str] = Field(default=None, max_length=5000)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def clean_notes(cls, value):
+        return normalize_text(value, max_length=5000, allow_empty=True, field_name="notes")
+
 
 class ManualRequestIn(BaseModel):
     submittedBy: SubmittedBy
-    people: List[PersonInfo]
-    action: str
-    notes: Optional[str] = None
+    people: List[PersonInfo] = Field(min_length=1, max_length=50)
+    action: Literal["Add", "Remove"]
+    notes: Optional[str] = Field(default=None, max_length=5000)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def clean_notes(cls, value):
+        return normalize_text(value, max_length=5000, allow_empty=True, field_name="notes")
 
 
 class RequestOut(BaseModel):
@@ -176,3 +220,50 @@ class DashboardOut(BaseModel):
 class NewRequestsPageOut(BaseModel):
     requests: List[RequestOut]
     persons: List[PersonOut]
+
+
+class DuplicateCheckIn(BaseModel):
+    email: Optional[str] = Field(default=None, max_length=254)
+    firstName: Optional[str] = Field(default=None, max_length=100)
+    lastName: Optional[str] = Field(default=None, max_length=100)
+    location: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_email(cls, value):
+        return normalize_email(value)
+
+    @field_validator("firstName", "lastName", mode="before")
+    @classmethod
+    def clean_names(cls, value, info):
+        return normalize_person_name(value, field_name=info.field_name)
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def clean_location(cls, value):
+        return normalize_text(value, max_length=100, allow_empty=True, field_name="location")
+
+
+class DuplicateCheckOut(BaseModel):
+    duplicate: bool
+    id: Optional[str] = None
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+    email: Optional[str] = None
+    status: Optional[str] = None
+    dateAdded: Optional[datetime] = None
+    location: Optional[str] = None
+
+
+class PersonSearchOut(BaseModel):
+    id: str
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+    email: Optional[str] = None
+    location: Optional[str] = None
+    status: str
+    dateAdded: Optional[datetime] = None
+
+
+class PersonMatchCandidateOut(PersonSearchOut):
+    matchReasons: List[str] = Field(default_factory=list)

@@ -7,14 +7,14 @@ Power Music Ops uses **Supabase Auth** as the single source of truth for authent
 | Role | Access | Auth pages |
 |------|--------|------------|
 | **Admin** (single account) | Full dashboard (`/`, `/new-requests`, `/directory`, etc.) | `/admin/login` only — no signup |
-| **Manager** | Submission form only (`/submit`) | `/submit/login`, `/submit/signup` |
+| **Manager** | Submission form only (`/submit`) | `/submit/signup` |
 
 Sessions are persisted by Supabase in the browser (local storage). Users stay signed in until they log out or the session expires.
 
 ### Route protection
 
 - Dashboard routes are wrapped in `RequireAdmin` — unauthenticated users go to `/admin/login`; managers are redirected to `/submit`.
-- `/submit` is wrapped in `RequireManager` — unauthenticated users go to `/submit/login`.
+- `/submit` is wrapped in `RequireManager` — unauthenticated users go to `/submit/signup`.
 - Admins may also access `/submit` (admin can access everything).
 
 ### Role assignment
@@ -50,15 +50,68 @@ This creates:
 In **Authentication → Providers → Email**:
 
 - Enable **Email** provider
-- For lowest friction during MVP/demo: disable **Confirm email** so managers can sign in immediately after signup
-- For production: enable confirm email and keep the signup flow as-is (users will see a message to confirm before signing in)
+- Enable **Magic Link** (one-time sign-in links)
+- For production: enable **Confirm email** so new accounts must verify before access
 
 In **Authentication → URL configuration**, set:
 
-- **Site URL**: your deployed frontend URL (e.g. `https://your-app.vercel.app`)
-- **Redirect URLs**: add local dev URL (`http://localhost:5173`) and production URL
+- **Site URL**: your deployed frontend URL (e.g. `https://power-music-mock.vercel.app`)
+- **Redirect URLs**: add (or run the script below):
+  - `http://localhost:5173/submit/signup`
+  - `http://localhost:3000/submit/signup`
+  - `http://localhost:5173/auth/callback`
+  - `http://localhost:3000/auth/callback`
+  - `https://power-music-mock.vercel.app/submit/signup`
+  - `https://power-music-mock.vercel.app/auth/callback`
+  - `https://power-music-mock.vercel.app/admin/login`
+  - Local dev origins as needed
+
+Or merge all redirect URLs automatically:
+
+```bash
+SUPABASE_ACCESS_TOKEN=your-token npm run supabase:auth-urls
+```
+
+Token: [Supabase Dashboard → Account → Access tokens](https://supabase.com/dashboard/account/tokens)
 
 No public admin signup is exposed in the app. Managers sign up at `/submit/signup`.
+
+### 3b. Send Email hook (recommended — bypasses 2 emails/hour limit)
+
+Supabase’s built-in email is capped at **2 emails/hour**. For magic-link auth in production, use the **Send Email** hook + **Brevo** (free tier: 300 emails/day).
+
+**One-time setup:**
+
+1. **Create a free [Brevo](https://www.brevo.com) account** and get an API key (SMTP & API → API keys).
+2. **Verify a sending domain** in Brevo (Senders, domains & dedicated IPs → Domains).
+3. **Link your Supabase project** (if not already):
+   ```bash
+   supabase login
+   supabase link --project-ref thnrekngjwtnjkksqomf
+   ```
+4. **Set secrets** (copy `supabase/.env.example` → `supabase/.env`, fill in values):
+   ```bash
+   supabase secrets set --env-file supabase/.env
+   ```
+   Required secrets:
+   - `BREVO_API_KEY` — from Brevo dashboard
+   - `AUTH_EMAIL_FROM` — e.g. `Power Music Ops <noreply@yourdomain.com>` (must match verified sender)
+   - `SEND_EMAIL_HOOK_SECRET` — generated in step 6
+5. **Deploy the Edge Function:**
+   ```bash
+   supabase functions deploy send-email --no-verify-jwt
+   ```
+   Note the function URL, e.g. `https://thnrekngjwtnjkksqomf.supabase.co/functions/v1/send-email`
+6. **Enable the hook** in Supabase Dashboard → **Authentication → Hooks** → **Send Email**:
+   - Type: **HTTPS**
+   - URL: your `send-email` function URL
+   - Click **Generate secret** → copy into `SEND_EMAIL_HOOK_SECRET` → run `supabase secrets set` again if needed
+   - Save the hook
+7. Keep **Email provider enabled** (Authentication → Providers → Email). When the hook is on, Supabase calls your function instead of its built-in SMTP.
+
+Source: `supabase/functions/send-email/index.ts`
+
+**Important:** Use real email addresses when testing. Bounced emails can get your project restricted.
 
 ### 4. Frontend environment variables
 
@@ -111,7 +164,7 @@ The script is idempotent: if an admin already exists, it exits without creating 
 ### Admin (Andrea)
 
 1. Open `/admin/login`
-2. Sign in with the seeded email and password
+2. Enter your admin email — we send a one-time magic link (no password)
 3. Use the dashboard as normal
 4. Sign out from the sidebar
 
@@ -119,10 +172,11 @@ There is no admin signup page. To add or replace the admin, use the seed script 
 
 ### Managers
 
-1. First visit: go to `/submit/signup`, create an account (email + password)
-2. Later visits: go to `/submit/login` (or `/submit`, which redirects to login)
-3. Submit requests at `/submit`
-4. Sign out from the header on the submission page
+1. First visit: go to `/submit/signup`, fill in your details, and click **Create account**
+2. Check your email and click the link — that verifies your account and signs you in
+3. Later visits: go to `/submit/signup`, choose **Sign in with email**, and use a magic link
+4. Submit requests at `/submit`
+5. Sign out from the header on the submission page
 
 ---
 

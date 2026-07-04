@@ -2,10 +2,11 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
-import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell } from '../components/ui';
+import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
+import { csvCell } from '../utils/csvSafe';
 
 const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (oldest first)' },
@@ -328,7 +329,7 @@ export default function UserLedger() {
         user.managerEmail || '',
         user.club,
         user.notes || ''
-      ].map((val) => `"${String(val).replace(/"/g, '""')}"`).join(',')
+      ].map(csvCell).join(',')
     );
     const blob = new Blob([[headers.join(','), ...csvRows].join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -388,7 +389,7 @@ export default function UserLedger() {
       width: '9%',
       render: (val) => (
         <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {val || '—'}
+          {val || EMPTY_CELL}
         </TruncateCell>
       )
     },
@@ -399,7 +400,7 @@ export default function UserLedger() {
       render: (_, row) => (
         <StackedTextCell
           primary={row.addedBy}
-          secondary={row.managerEmail || '—'}
+          secondary={row.managerEmail || EMPTY_CELL}
         />
       )
     },
@@ -421,7 +422,7 @@ export default function UserLedger() {
       cellClassName: 'align-middle max-w-0 overflow-hidden',
       render: (val) => (
         <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {val?.trim() || '—'}
+          {val?.trim() || EMPTY_CELL}
         </TruncateCell>
       )
     },
@@ -567,7 +568,7 @@ export default function UserLedger() {
             <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
               <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Notes</span>
               <p className="text-sm text-[var(--color-text-primary)] leading-normal whitespace-pre-wrap">
-                {selectedUser.notes?.trim() ? selectedUser.notes : '—'}
+                {selectedUser.notes?.trim() ? selectedUser.notes : EMPTY_CELL}
               </p>
             </div>
 

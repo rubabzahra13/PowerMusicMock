@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app import models
+from app.api.auth import require_admin
 from app.api.dependencies import get_db
 from app.pilot2 import config, diffing, gmail, oauth_pages, pipeline, sync
 from app.pilot2 import schemas
@@ -21,12 +22,12 @@ router = APIRouter(prefix="/api/pilot2", tags=["pilot2"])
 
 
 @router.get("/inboxes", response_model=List[schemas.InboxOut])
-def list_inboxes(db: Session = Depends(get_db)):
+def list_inboxes(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     return db.query(models.EmailAccount).order_by(models.EmailAccount.id).all()
 
 
 @router.get("/workspace", response_model=schemas.Pilot2WorkspaceOut)
-def get_workspace(db: Session = Depends(get_db)):
+def get_workspace(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     inboxes = db.query(models.EmailAccount).order_by(models.EmailAccount.id).all()
     # Emails awaiting AI (Imported/Processing) are withheld: the queue must
     # only ever grow. An email appears once, fully classified, instead of
@@ -46,7 +47,7 @@ def get_workspace(db: Session = Depends(get_db)):
 
 
 @router.post("/inboxes/connect")
-def connect_inbox(payload: schemas.InboxConnectIn, db: Session = Depends(get_db)):
+def connect_inbox(payload: schemas.InboxConnectIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     account = (
         db.query(models.EmailAccount)
         .filter(models.EmailAccount.email == payload.email)
@@ -115,7 +116,7 @@ def oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
 
 
 @router.get("/inboxes/{inbox_id}/sync-status", response_model=schemas.InboxSyncStatusOut)
-def inbox_sync_status(inbox_id: str, db: Session = Depends(get_db)):
+def inbox_sync_status(inbox_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     account = db.query(models.EmailAccount).filter(models.EmailAccount.id == inbox_id).first()
     if account is None:
         raise HTTPException(status_code=404, detail="Inbox not found")
@@ -123,7 +124,7 @@ def inbox_sync_status(inbox_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/inboxes/{inbox_id}/disconnect", response_model=schemas.InboxOut)
-def disconnect_inbox(inbox_id: str, db: Session = Depends(get_db)):
+def disconnect_inbox(inbox_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     account = db.query(models.EmailAccount).filter(models.EmailAccount.id == inbox_id).first()
     if account is None:
         raise HTTPException(status_code=404, detail="Inbox not found")
@@ -136,7 +137,7 @@ def disconnect_inbox(inbox_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/inboxes/{inbox_id}", response_model=schemas.InboxOut)
-def update_inbox(inbox_id: str, payload: schemas.InboxUpdateIn, db: Session = Depends(get_db)):
+def update_inbox(inbox_id: str, payload: schemas.InboxUpdateIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     account = db.query(models.EmailAccount).filter(models.EmailAccount.id == inbox_id).first()
     if account is None:
         raise HTTPException(status_code=404, detail="Inbox not found")
@@ -151,7 +152,7 @@ def update_inbox(inbox_id: str, payload: schemas.InboxUpdateIn, db: Session = De
 
 
 @router.delete("/inboxes/{inbox_id}")
-def delete_inbox(inbox_id: str, db: Session = Depends(get_db)):
+def delete_inbox(inbox_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     account = db.query(models.EmailAccount).filter(models.EmailAccount.id == inbox_id).first()
     if account is None:
         raise HTTPException(status_code=404, detail="Inbox not found")
@@ -177,7 +178,7 @@ def delete_inbox(inbox_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/emails", response_model=List[schemas.EmailOut])
-def list_emails(inbox: Optional[str] = None, db: Session = Depends(get_db)):
+def list_emails(inbox: Optional[str] = None, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     query = db.query(models.Email).filter(models.Email.draft_status != "Ignored")
     if inbox:
         query = query.filter(models.Email.account_email == inbox)
@@ -185,7 +186,7 @@ def list_emails(inbox: Optional[str] = None, db: Session = Depends(get_db)):
 
 
 @router.get("/emails/{email_id}", response_model=schemas.EmailOut)
-def get_email(email_id: str, db: Session = Depends(get_db)):
+def get_email(email_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     email = db.query(models.Email).filter(models.Email.id == email_id).first()
     if email is None:
         raise HTTPException(status_code=404, detail="Email not found")
@@ -193,7 +194,7 @@ def get_email(email_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/emails/ingest", response_model=schemas.EmailOut)
-def ingest_email(payload: schemas.EmailIngestIn, db: Session = Depends(get_db)):
+def ingest_email(payload: schemas.EmailIngestIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     """Feed one inbound email through the pipeline. Used for dev/testing in
     mock mode; in live mode the Gmail poller calls the same pipeline."""
     account = (
@@ -236,7 +237,7 @@ def _apply_email_patch(email: models.Email, payload: schemas.EmailPatchIn) -> No
 
 
 @router.patch("/emails/{email_id}", response_model=schemas.EmailOut)
-def patch_email(email_id: str, payload: schemas.EmailPatchIn, db: Session = Depends(get_db)):
+def patch_email(email_id: str, payload: schemas.EmailPatchIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     email = db.query(models.Email).filter(models.Email.id == email_id).first()
     if email is None:
         raise HTTPException(status_code=404, detail="Email not found")
@@ -254,7 +255,7 @@ def patch_email(email_id: str, payload: schemas.EmailPatchIn, db: Session = Depe
 
 
 @router.post("/emails/bulk-patch", response_model=List[schemas.EmailOut])
-def bulk_patch_emails(payload: schemas.EmailBulkPatchIn, db: Session = Depends(get_db)):
+def bulk_patch_emails(payload: schemas.EmailBulkPatchIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     if payload.deleted is not None:
         pipeline.note_bin_state_change(payload.ids)
     emails = db.query(models.Email).filter(models.Email.id.in_(payload.ids)).all()
@@ -271,7 +272,7 @@ def bulk_patch_emails(payload: schemas.EmailBulkPatchIn, db: Session = Depends(g
 
 
 @router.delete("/emails/{email_id}")
-def delete_email_forever(email_id: str, db: Session = Depends(get_db)):
+def delete_email_forever(email_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     """Hard delete one email here AND in Gmail. Only allowed from the bin."""
     email = db.query(models.Email).filter(models.Email.id == email_id).first()
     if email is None:
@@ -286,7 +287,7 @@ def delete_email_forever(email_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/emails/bin/empty")
-def empty_bin(db: Session = Depends(get_db)):
+def empty_bin(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     """Hard delete everything currently in the bin, here and in Gmail."""
     binned = db.query(models.Email).filter(models.Email.deleted.is_(True)).all()
     count = len(binned)
@@ -300,7 +301,7 @@ def empty_bin(db: Session = Depends(get_db)):
 
 
 @router.put("/emails/{email_id}/draft", response_model=schemas.EmailOut)
-def update_draft(email_id: str, payload: schemas.DraftUpdateIn, db: Session = Depends(get_db)):
+def update_draft(email_id: str, payload: schemas.DraftUpdateIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     email = db.query(models.Email).filter(models.Email.id == email_id).first()
     if email is None:
         raise HTTPException(status_code=404, detail="Email not found")
@@ -315,7 +316,7 @@ def update_draft(email_id: str, payload: schemas.DraftUpdateIn, db: Session = De
 
 
 @router.post("/emails/{email_id}/send", response_model=schemas.EmailOut)
-def send_email(email_id: str, payload: schemas.SendIn, db: Session = Depends(get_db)):
+def send_email(email_id: str, payload: schemas.SendIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     email = db.query(models.Email).filter(models.Email.id == email_id).first()
     if email is None:
         raise HTTPException(status_code=404, detail="Email not found")
@@ -366,7 +367,7 @@ def send_email(email_id: str, payload: schemas.SendIn, db: Session = Depends(get
 
 
 @router.get("/templates", response_model=List[schemas.TemplateOut])
-def list_templates(inbox: Optional[str] = None, db: Session = Depends(get_db)):
+def list_templates(inbox: Optional[str] = None, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     query = db.query(models.EmailTemplate)
     if inbox:
         query = query.filter(models.EmailTemplate.account_email == inbox)
@@ -374,7 +375,7 @@ def list_templates(inbox: Optional[str] = None, db: Session = Depends(get_db)):
 
 
 @router.post("/templates", response_model=schemas.TemplateOut)
-def create_template(payload: schemas.TemplateIn, db: Session = Depends(get_db)):
+def create_template(payload: schemas.TemplateIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     account = (
         db.query(models.EmailAccount)
         .filter(models.EmailAccount.email == payload.inbox)
@@ -404,7 +405,7 @@ def create_template(payload: schemas.TemplateIn, db: Session = Depends(get_db)):
 
 
 @router.put("/templates/{template_id}", response_model=schemas.TemplateOut)
-def update_template(template_id: str, payload: schemas.TemplateUpdateIn, db: Session = Depends(get_db)):
+def update_template(template_id: str, payload: schemas.TemplateUpdateIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     template = (
         db.query(models.EmailTemplate)
         .filter(models.EmailTemplate.id == template_id)
@@ -426,7 +427,7 @@ def update_template(template_id: str, payload: schemas.TemplateUpdateIn, db: Ses
 
 
 @router.delete("/templates/{template_id}", response_model=schemas.TemplateOut)
-def delete_template(template_id: str, db: Session = Depends(get_db)):
+def delete_template(template_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     """Soft-delete: move template to Deleted (Archived)."""
     template = (
         db.query(models.EmailTemplate)
@@ -446,7 +447,7 @@ def delete_template(template_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/templates/{template_id}/restore", response_model=schemas.TemplateOut)
-def restore_template(template_id: str, db: Session = Depends(get_db)):
+def restore_template(template_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     template = (
         db.query(models.EmailTemplate)
         .filter(models.EmailTemplate.id == template_id)
@@ -464,7 +465,7 @@ def restore_template(template_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/templates/{template_id}/forever")
-def delete_template_forever(template_id: str, db: Session = Depends(get_db)):
+def delete_template_forever(template_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     template = (
         db.query(models.EmailTemplate)
         .filter(models.EmailTemplate.id == template_id)
@@ -483,12 +484,12 @@ def delete_template_forever(template_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/guidance", response_model=List[schemas.GuidanceNoteOut])
-def list_guidance(db: Session = Depends(get_db)):
+def list_guidance(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     return db.query(models.GuidanceNote).order_by(models.GuidanceNote.intent).all()
 
 
 @router.get("/suggestions", response_model=List[schemas.TemplateSuggestionOut])
-def list_suggestions(status: str = "pending", db: Session = Depends(get_db)):
+def list_suggestions(status: str = "pending", db: Session = Depends(get_db), _admin=Depends(require_admin)):
     return (
         db.query(models.TemplateSuggestion)
         .filter(models.TemplateSuggestion.status == status)
@@ -498,7 +499,7 @@ def list_suggestions(status: str = "pending", db: Session = Depends(get_db)):
 
 
 @router.post("/suggestions/{suggestion_id}/approve", response_model=schemas.TemplateOut)
-def approve_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
+def approve_suggestion(suggestion_id: int, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     suggestion = (
         db.query(models.TemplateSuggestion)
         .filter(models.TemplateSuggestion.id == suggestion_id)
@@ -552,7 +553,7 @@ def approve_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/suggestions/{suggestion_id}/reject", response_model=schemas.TemplateSuggestionOut)
-def reject_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
+def reject_suggestion(suggestion_id: int, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     suggestion = (
         db.query(models.TemplateSuggestion)
         .filter(models.TemplateSuggestion.id == suggestion_id)
@@ -569,17 +570,24 @@ def reject_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
 
 def require_cron_secret(request: Request, secret: Optional[str] = None) -> None:
     """Guard the job-trigger endpoints. Open when PILOT2_CRON_SECRET is unset
-    (local dev); otherwise the caller must present the shared secret via
-    X-Cron-Secret, Authorization: Bearer, or a ?secret= query parameter."""
+    (local dev only); in production the secret is mandatory."""
+    import os
+
     expected = config.CRON_SECRET
+    is_production = bool(os.getenv("VERCEL")) or os.getenv("ENVIRONMENT", "").lower() == "production"
+    if is_production and not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="Cron endpoints require PILOT2_CRON_SECRET in production",
+        )
     if not expected:
         return
-    provided = (
-        request.headers.get("x-cron-secret")
-        or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-        or secret
-        or ""
-    )
+    header_secret = request.headers.get("x-cron-secret")
+    bearer = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if is_production:
+        provided = header_secret or bearer or ""
+    else:
+        provided = header_secret or bearer or secret or ""
     if not hmac.compare_digest(provided, expected):
         raise HTTPException(status_code=401, detail="Invalid or missing cron secret.")
 
@@ -611,7 +619,7 @@ def trigger_distillation(request: Request, secret: Optional[str] = None, db: Ses
 
 
 @router.get("/activity", response_model=List[schemas.ProcessingLogOut])
-def list_activity(limit: int = 25, db: Session = Depends(get_db)):
+def list_activity(limit: int = 25, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     return (
         db.query(models.ProcessingLog)
         .order_by(models.ProcessingLog.timestamp.desc())

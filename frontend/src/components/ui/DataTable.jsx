@@ -1,3 +1,5 @@
+export const EMPTY_CELL = '-';
+
 export function TruncateCell({ children, className = '' }) {
   const text = children == null ? '' : String(children);
   if (!text) return null;

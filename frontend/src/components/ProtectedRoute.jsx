@@ -1,47 +1,77 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { isAdminEmail } from '../utils/adminAccess';
+import { ManagerAuthLoading } from '../components/auth/ManagerAuthShell';
 
 export function AdminRoute() {
-  const { user, role, loading } = useAuth();
+  const { user, role } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--color-surface-bg)] text-[var(--color-text-secondary)]">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-[var(--color-brand-accent)] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-sm font-medium">Checking authentication...</p>
-        </div>
-      </div>
-    );
+  if (!user) {
+    return <Navigate to="/admin/login" replace />;
   }
 
-  if (!user || role !== 'admin') {
-    return <Navigate to="/admin/login" replace />;
+  if (role === 'admin') {
+    return <Outlet />;
+  }
+
+  if (role === 'manager') {
+    return <Navigate to="/submit" replace />;
+  }
+
+  return <Navigate to="/admin/login" replace />;
+}
+
+/** Manager-only pages — admins and guests cannot access the submit form. */
+export function ManagerRoute() {
+  const { user, role, session, authReady } = useAuth();
+
+  if (!authReady) {
+    return <ManagerAuthLoading />;
+  }
+
+  if (!user) {
+    return <Navigate to="/submit/signup" replace state={{ from: '/submit' }} />;
+  }
+
+  if (!session?.access_token) {
+    return <ManagerAuthLoading />;
+  }
+
+  if (role === 'admin' || isAdminEmail(user.email)) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Outlet />;
+}
+
+/** Login / signup — signed-in managers go to the form; admins go to the dashboard. */
+export function ManagerGuestRoute() {
+  const { user, role, authReady } = useAuth();
+
+  if (!authReady) {
+    return <ManagerAuthLoading />;
+  }
+
+  if (user && (role === 'admin' || isAdminEmail(user.email))) {
+    return <Navigate to="/" replace />;
+  }
+
+  if (user && role === 'manager') {
+    return <Navigate to="/submit" replace />;
   }
 
   return <Outlet />;
 }
 
 export function ProtectedRoute({ allowedRoles }) {
-  const { user, role, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--color-surface-bg)] text-[var(--color-text-secondary)]">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-[var(--color-brand-accent)] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-sm font-medium">Checking authentication...</p>
-        </div>
-      </div>
-    );
-  }
+  const { user, role } = useAuth();
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/submit/signup" replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(role)) {
-    return <Navigate to={role === 'admin' ? '/' : '/submit'} replace />;
+  if (allowedRoles && role && !allowedRoles.includes(role)) {
+    return <Navigate to={role === 'admin' ? '/' : '/submit/signup'} replace />;
   }
 
   return <Outlet />;
