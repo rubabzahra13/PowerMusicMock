@@ -50,6 +50,7 @@ export default function DataTable({
   centerHeaders = false,
   loading = false,
   skeletonRows = 6,
+  getRowClassName,
 }) {
   const isRowClickable = typeof onRowClick === 'function';
 
@@ -82,13 +83,15 @@ export default function DataTable({
           {loading ? (
             <TableBodySkeleton columns={columns} rows={skeletonRows} />
           ) : rows && rows.length > 0 ? (
-            rows.map((row, rowIndex) => (
+            rows.map((row, rowIndex) => {
+              const extraRowClass = getRowClassName ? getRowClassName(row) : '';
+              return (
               <tr
                 key={row.id || rowIndex}
                 onClick={() => isRowClickable && onRowClick(row)}
                 className={`transition-colors duration-150 border-b border-[var(--color-border-default)] last:border-b-0 hover:bg-[#f9fafb] ${
                   isRowClickable ? 'cursor-pointer' : ''
-                }`}
+                } ${extraRowClass}`}
               >
                 {columns.map((column, colIndex) => {
                   const rawValue = row[column.key];
@@ -123,7 +126,8 @@ export default function DataTable({
                   );
                 })}
               </tr>
-            ))
+            );
+            })
           ) : (
             <tr>
               <td

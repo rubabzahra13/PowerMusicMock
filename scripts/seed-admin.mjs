@@ -27,7 +27,9 @@ if (isProduction() && process.env.VERCEL === '1') {
   process.exit(1);
 }
 
-const { email: adminEmail, password: adminPassword } = resolveAdminCredentials();
+const { email: adminEmail, password: adminPassword } = resolveAdminCredentials({
+  allowDevDefaultPassword: true,
+});
 let finalPassword = adminPassword;
 
 if (!finalPassword) {
@@ -50,7 +52,7 @@ function generatePassword() {
 
 async function findExistingAdminProfile() {
   const { data, error } = await supabase
-    .from('profiles')
+    .from('powermusic_users')
     .select('id, email, full_name')
     .eq('role', 'admin')
     .maybeSingle();
@@ -82,7 +84,7 @@ async function main() {
   const userId = created.user.id;
 
   const { error: profileError } = await supabase
-    .from('profiles')
+    .from('powermusic_users')
     .upsert({
       id: userId,
       email: adminEmail,

@@ -1,6 +1,6 @@
 import { MailOpen, Loader2 } from 'lucide-react';
 import { formatCooldown } from '../../utils/otpCooldown';
-import ManagerAuthShell from './ManagerAuthShell';
+import ManagerAuthShell, { buttonClass } from './ManagerAuthShell';
 
 export default function ManagerAuthEmailNotice({
   title,
@@ -39,7 +39,7 @@ export default function ManagerAuthEmailNotice({
               type="button"
               onClick={onResend}
               disabled={resendLoading || resendCooldownMs > 0}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--color-border-default)] px-4 py-2 text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-panel)] disabled:cursor-not-allowed disabled:opacity-50"
+              className={buttonClass}
             >
               {resendLoading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
               {resendLoading

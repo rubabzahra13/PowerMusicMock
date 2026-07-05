@@ -74,6 +74,18 @@ class ManualRequestIn(BaseModel):
         return normalize_text(value, max_length=5000, allow_empty=True, field_name="notes")
 
 
+class ManagerBatchRequestIn(BaseModel):
+    submittedBy: SubmittedBy
+    people: List[PersonInfo] = Field(min_length=1, max_length=20)
+    action: Literal["Add", "Remove"]
+    notes: Optional[str] = Field(default=None, max_length=5000)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def clean_notes(cls, value):
+        return normalize_text(value, max_length=5000, allow_empty=True, field_name="notes")
+
+
 class RequestOut(BaseModel):
     id: str
     displayId: int
@@ -86,6 +98,9 @@ class RequestOut(BaseModel):
     tags: List[str] = []
     createdBy: Optional[str] = None
     status: str
+    handledBy: Optional[str] = None
+    managerId: Optional[str] = None
+    handledByAdminId: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -98,11 +113,11 @@ class RequestOut(BaseModel):
                 "displayId": data.get("displayId", 0),
                 "receivedAt": data.get("received_at"),
                 "handledAt": data.get("handled_at"),
-                "submittedBy": {
-                    "firstName": data.get("submitted_by_first_name"),
-                    "lastName": data.get("submitted_by_last_name"),
-                    "email": data.get("submitted_by_email"),
-                    "club": data.get("submitted_by_club"),
+                "submittedBy": data.get("submittedBy") or {
+                    "firstName": "",
+                    "lastName": "",
+                    "email": "",
+                    "club": "",
                 },
                 "person": {
                     "firstName": data.get("person_first_name"),
@@ -119,14 +134,14 @@ class RequestOut(BaseModel):
 
         return {
             "id": getattr(data, "id", None),
-            "displayId": getattr(data, "displayId", 0),
+            "displayId": getattr(data, "displayId", None) or 0,
             "receivedAt": getattr(data, "received_at", None),
             "handledAt": getattr(data, "handled_at", None),
             "submittedBy": {
-                "firstName": getattr(data, "submitted_by_first_name", None),
-                "lastName": getattr(data, "submitted_by_last_name", None),
-                "email": getattr(data, "submitted_by_email", None),
-                "club": getattr(data, "submitted_by_club", None),
+                "firstName": "",
+                "lastName": "",
+                "email": "",
+                "club": "",
             },
             "person": {
                 "firstName": getattr(data, "person_first_name", None),
@@ -137,7 +152,7 @@ class RequestOut(BaseModel):
             "action": getattr(data, "action", None),
             "notes": getattr(data, "notes", None),
             "tags": getattr(data, "tags", None) or [],
-            "createdBy": getattr(data, "created_by", None),
+            "createdBy": None,
             "status": getattr(data, "status", None),
         }
 
@@ -152,17 +167,27 @@ class PersonOut(BaseModel):
     status: str
     dateAdded: Optional[datetime] = None
     addedBy: Optional[str] = None
+    managerName: Optional[str] = None
+    handledBy: Optional[str] = None
     managerEmail: Optional[str] = None
     club: Optional[str] = None
     sourceRequestId: Optional[str] = None
-    notes: Optional[str] = None
+    sourceRequestNumber: Optional[int] = None
+    requestReceivedAt: Optional[datetime] = None
+    managerNotes: Optional[str] = None
+    adminNotes: Optional[str] = None
+    notes: Optional[str] = None  # alias for managerNotes (legacy)
 
     @model_validator(mode="before")
     @classmethod
     def transform_person(cls, data: Any) -> Any:
         if isinstance(data, dict):
             if "firstName" in data:
-                return data
+                mgr = data.get("managerNotes") or data.get("notes")
+                adm = data.get("adminNotes")
+                return {**data, "managerNotes": mgr, "adminNotes": adm, "notes": mgr}
+            mgr_notes = data.get("notes")
+            adm_notes = data.get("admin_notes")
             return {
                 "id": data.get("id"),
                 "displayId": data.get("displayId", 0),
@@ -172,39 +197,49 @@ class PersonOut(BaseModel):
                 "location": data.get("location"),
                 "status": data.get("status"),
                 "dateAdded": data.get("date_added"),
-                "addedBy": data.get("added_by"),
+                "addedBy": data.get("handled_by") or data.get("added_by"),
+                "managerName": data.get("manager_name") or data.get("added_by"),
+                "handledBy": data.get("handled_by"),
                 "managerEmail": data.get("manager_email"),
                 "club": data.get("club"),
                 "sourceRequestId": data.get("source_request_id"),
-                "notes": data.get("notes"),
+                "sourceRequestNumber": data.get("sourceRequestNumber"),
+                "requestReceivedAt": data.get("request_received_at") or data.get("requestReceivedAt"),
+                "managerNotes": mgr_notes,
+                "adminNotes": adm_notes,
+                "notes": mgr_notes,
             }
 
+        mgr_notes = getattr(data, "notes", None)
+        adm_notes = getattr(data, "admin_notes", None)
         return {
             "id": getattr(data, "id", None),
-            "displayId": getattr(data, "displayId", 0),
+            "displayId": getattr(data, "displayId", None) or 0,
             "firstName": getattr(data, "first_name", None),
             "lastName": getattr(data, "last_name", None),
             "email": getattr(data, "email", None),
             "location": getattr(data, "location", None),
             "status": getattr(data, "status", None),
             "dateAdded": getattr(data, "date_added", None),
-            "addedBy": getattr(data, "added_by", None),
+            "addedBy": getattr(data, "handled_by", None) or getattr(data, "added_by", None),
+            "managerName": getattr(data, "manager_name", None) or getattr(data, "added_by", None),
+            "handledBy": getattr(data, "handled_by", None),
             "managerEmail": getattr(data, "manager_email", None),
             "club": getattr(data, "club", None),
             "sourceRequestId": getattr(data, "source_request_id", None),
-            "notes": getattr(data, "notes", None),
+            "sourceRequestNumber": getattr(data, "sourceRequestNumber", None),
+            "requestReceivedAt": getattr(data, "request_received_at", None),
+            "managerNotes": mgr_notes,
+            "adminNotes": adm_notes,
+            "notes": mgr_notes,
         }
 
 class ActivityOut(BaseModel):
-    id: int
+    id: str
     timestamp: datetime
     type: str
     description: Optional[str] = None
-    linkedRequestId: Optional[str] = Field(alias="linked_request_id", default=None)
-    
-    class Config:
-        populate_by_name = True
-        from_attributes = True
+    linkedRequestId: Optional[str] = None
 
 class KpiOut(BaseModel):
     pendingRequests: int
@@ -220,6 +255,15 @@ class DashboardOut(BaseModel):
 class NewRequestsPageOut(BaseModel):
     requests: List[RequestOut]
     persons: List[PersonOut]
+
+
+class MarkHandledIn(BaseModel):
+    adminNote: Optional[str] = Field(default=None, max_length=5000)
+
+    @field_validator("adminNote", mode="before")
+    @classmethod
+    def clean_admin_note(cls, value):
+        return normalize_text(value, max_length=5000, allow_empty=True, field_name="adminNote")
 
 
 class DuplicateCheckIn(BaseModel):

@@ -7,12 +7,22 @@ import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
-import { loadWithCache, patchCache, getNewRequestsPage } from '../utils/pilot2Api';
+import { loadWithCache, patchCache, writeCache, refreshCache, getNewRequestsPage } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
+import {
+  markDirectoryPersonHighlight,
+  markRequestUnseen,
+  isRequestUnseen,
+  clearRequestHighlight,
+  ADMIN_NEW_ROW_HIGHLIGHT_CLASS,
+} from '../utils/adminUiHighlights';
+import { useAuth } from '../context/AuthContext';
+import { formatRequestDisplayId } from '../utils/requestDisplayId';
+import { TAG_ALREADY_EXISTS, requestTagVariant } from '../utils/requestTags';
 
 const SORT_PRESETS = [
-  { value: 'displayId-asc', label: 'ID (newest first)' },
-  { value: 'displayId-desc', label: 'ID (oldest first)' },
+  { value: 'displayId-desc', label: 'ID (newest first)' },
+  { value: 'displayId-asc', label: 'ID (oldest first)' },
   { value: 'receivedAt-desc', label: 'Received (newest first)' },
   { value: 'receivedAt-asc', label: 'Received (oldest first)' },
   { value: 'personName-asc', label: 'Person name (A–Z)' },
@@ -25,7 +35,7 @@ const SORT_PRESETS = [
   { value: 'club-desc', label: 'Manager club (Z–A)' }
 ];
 
-const DEFAULT_SORT = 'displayId-asc';
+const DEFAULT_SORT = 'displayId-desc';
 
 function parseSortPreset(preset) {
   const match = preset.match(/^(.+)-(asc|desc)$/);
@@ -198,8 +208,6 @@ const TimestampCell = ({ val }) => {
   );
 };
 
-const formatDisplayId = (displayId) => `R-${String(displayId).padStart(2, '0')}`;
-
 const matchesDateFilter = (iso, filterDate) => {
   if (filterDate === 'All') return true;
   try {
@@ -236,6 +244,8 @@ const emptyManagerForm = () => ({
 // ─── Page Component ───────────────────────────────────────────────────────────
 export default function Requests() {
   const { showToast } = useToast();
+  const { profile } = useAuth();
+  const adminDisplayName = profile?.full_name?.trim() || 'Power Music Admin';
 
   // ── Action tab (Add / Remove) ──
   const [actionTab, setActionTab] = useState('All');
@@ -244,9 +254,33 @@ export default function Requests() {
   const [newRequests, setNewRequests] = useState([]);
   const [liveDirectory, setLiveDirectory] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
+  const knownRequestIdsRef = useRef(null);
+  const [, setHighlightVersion] = useState(0);
+
+  const bumpHighlights = () => setHighlightVersion((v) => v + 1);
+
+  const handleOpenRequest = (row) => {
+    clearRequestHighlight(row.id);
+    bumpHighlights();
+    setSelectedNewRequest(row);
+  };
 
   useEffect(() => {
-    const applyPage = (data) => {
+    const applyPage = (data, isStale) => {
+      if (!isStale && Array.isArray(data.requests)) {
+        const ids = data.requests.map((r) => r.id);
+        if (knownRequestIdsRef.current) {
+          let added = false;
+          data.requests.forEach((req) => {
+            if (!knownRequestIdsRef.current.has(req.id) && !isManualEntry(req.submittedBy)) {
+              markRequestUnseen(req.id);
+              added = true;
+            }
+          });
+          if (added) bumpHighlights();
+        }
+        knownRequestIdsRef.current = new Set(ids);
+      }
       setNewRequests(data.requests);
       setLiveDirectory(data.persons);
       setTableLoading(false);
@@ -466,23 +500,86 @@ export default function Requests() {
     }
   };
 
-  const completeRequest = async (req) => {
+  const completeRequest = async (req, adminNote = '') => {
+    const personName = `${req.person.firstName} ${req.person.lastName}`.trim();
+    const outcome = req.action === 'Add' ? 'Added' : 'Removed';
+    const handledAt = new Date().toISOString();
+
+    setConfirmActionRequest(null);
+    setSelectedNewRequest(null);
+    clearRequestHighlight(req.id);
+    bumpHighlights();
+
+    const nextRequests = newRequests.filter((r) => r.id !== req.id);
+    const emailKey = req.person.email.toLowerCase();
+    const existingPerson = liveDirectory.find((p) => p.email.toLowerCase() === emailKey);
+    const nextDirectory = existingPerson
+      ? liveDirectory.map((p) =>
+          p.email.toLowerCase() === emailKey
+            ? {
+                ...p,
+                status: outcome,
+                dateAdded: handledAt,
+                handledBy: adminDisplayName,
+                adminNotes: adminNote || '',
+              }
+            : p,
+        )
+      : [
+          {
+            id: `temp-${req.id}`,
+            displayId: req.displayId,
+            sourceRequestNumber: req.displayId,
+            firstName: req.person.firstName,
+            lastName: req.person.lastName,
+            email: req.person.email,
+            location: req.person.location,
+            status: outcome,
+            dateAdded: handledAt,
+            requestReceivedAt: req.receivedAt,
+            addedBy: req.createdBy || getManagerDisplayName(req.submittedBy),
+            managerName: req.createdBy || getManagerDisplayName(req.submittedBy),
+            handledBy: adminDisplayName,
+            managerEmail: req.submittedBy?.email || '',
+            club: req.submittedBy?.club || '',
+            managerNotes: req.notes || '',
+            adminNotes: adminNote || '',
+            notes: req.notes || '',
+          },
+          ...liveDirectory,
+        ];
+
+    setNewRequests(nextRequests);
+    setLiveDirectory(nextDirectory);
+    patchCache('requests_page', { requests: nextRequests, persons: nextDirectory });
+    writeCache('directory_persons', nextDirectory);
+    markDirectoryPersonHighlight(req.person.email);
+    sessionStorage.setItem('pm_directory_pending_tab', outcome === 'Added' ? 'Added' : 'Removed');
+
+    showToast(
+      `${personName} marked as ${outcome}. They are now in the Directory.`,
+      'success',
+    );
+
     try {
-      await fetchJson(`/api/admin/requests/${req.id}/mark-handled`, { method: 'POST' });
-      setNewRequests((prev) => {
-        const next = prev.filter((r) => r.id !== req.id);
-        patchCache('requests_page', { requests: next });
-        return next;
+      await fetchJson(`/api/admin/requests/${req.id}/mark-handled`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminNote: adminNote || null }),
       });
-      showToast(
-        `${req.person.firstName} ${req.person.lastName} marked as ${req.action === 'Add' ? 'Added' : 'Removed'}.`,
-        'success'
-      );
-      setSelectedNewRequest((current) => (current?.id === req.id ? null : current));
-      setConfirmActionRequest(null);
+      refreshCache('directory_persons', () => fetchJson('/api/persons'), (data) => {
+        setLiveDirectory(Array.isArray(data) ? data : []);
+      }).catch(() => {});
     } catch (err) {
       console.error(err);
-      showToast('Failed to complete request.', 'error');
+      showToast(err.message || 'Failed to save — refreshing list.', 'error');
+      loadWithCache('requests_page', getNewRequestsPage, (data, isStale) => {
+        if (!isStale && Array.isArray(data.requests)) {
+          knownRequestIdsRef.current = new Set(data.requests.map((r) => r.id));
+        }
+        setNewRequests(data.requests);
+        setLiveDirectory(data.persons);
+      }).catch(() => {});
     }
   };
 
@@ -497,7 +594,7 @@ export default function Requests() {
       cellClassName: 'text-center align-middle whitespace-nowrap px-2',
       render: (val) => (
         <span className="text-xs font-bold text-[var(--color-text-muted)] whitespace-nowrap tabular-nums">
-          {formatDisplayId(val)}
+          {formatRequestDisplayId(val)}
         </span>
       )
     },
@@ -521,12 +618,27 @@ export default function Requests() {
       key: 'person',
       label: 'Person',
       width: '19%',
-      render: (_, row) => (
-        <StackedTextCell
-          primary={`${row.person.firstName} ${row.person.lastName}`.trim()}
-          secondary={row.person.email}
-        />
-      )
+      render: (_, row) => {
+        const isNew = isRequestUnseen(row.id);
+        const name = `${row.person.firstName} ${row.person.lastName}`.trim();
+        return (
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]">
+                {name}
+              </TruncateCell>
+              {isNew ? (
+                <span className="shrink-0 rounded-full bg-[var(--color-brand-primary)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                  New
+                </span>
+              ) : null}
+            </div>
+            <TruncateCell className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+              {row.person.email}
+            </TruncateCell>
+          </div>
+        );
+      },
     },
     {
       key: 'personLocation',
@@ -572,7 +684,7 @@ export default function Requests() {
       render: (val) => (
         <div className="flex items-center justify-start min-w-0 -ml-1">
           {(val || []).map((t) => (
-            <Tag key={t} variant={t === 'Already Exists' ? 'already-exists' : 'neutral'} label={t} compact={t === 'Already Exists'} />
+            <Tag key={t} variant={requestTagVariant(t)} label={t} compact={t === TAG_ALREADY_EXISTS} />
           ))}
         </div>
       )
@@ -590,7 +702,7 @@ export default function Requests() {
         >
           <button
             type="button"
-            onClick={() => setSelectedNewRequest(row)}
+            onClick={() => handleOpenRequest(row)}
             aria-label="View request details"
             className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer shrink-0"
           >
@@ -707,7 +819,8 @@ export default function Requests() {
         <DataTable
           columns={newColumns}
           rows={displayedRows}
-          onRowClick={(row) => setSelectedNewRequest(row)}
+          onRowClick={handleOpenRequest}
+          getRowClassName={(row) => (isRequestUnseen(row.id) ? ADMIN_NEW_ROW_HIGHLIGHT_CLASS : '')}
           emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
           compact
           centerHeaders
@@ -868,6 +981,7 @@ export default function Requests() {
       <Modal
         isOpen={confirmActionRequest !== null}
         onClose={() => setConfirmActionRequest(null)}
+        belowDrawer={selectedNewRequest !== null}
         confirm
         title="Confirm action"
         footer={
@@ -879,8 +993,12 @@ export default function Requests() {
               Cancel
             </button>
             <button
-              onClick={() => confirmActionRequest && completeRequest(confirmActionRequest)}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)] shadow-sm cursor-pointer"
+              onClick={() => {
+                if (confirmActionRequest) {
+                  completeRequest(confirmActionRequest.request, confirmActionRequest.adminNote);
+                }
+              }}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
             >
               Confirm
             </button>
@@ -889,11 +1007,16 @@ export default function Requests() {
       >
         {confirmActionRequest && (
           <p>
-            Confirm you have {confirmActionRequest.action === 'Add' ? 'added' : 'removed'}{' '}
+            Confirm you have {confirmActionRequest.request.action === 'Add' ? 'added' : 'removed'}{' '}
             <strong>
-              {confirmActionRequest.person.firstName} {confirmActionRequest.person.lastName}
+              {confirmActionRequest.request.person.firstName} {confirmActionRequest.request.person.lastName}
             </strong>{' '}
             in Power Music before continuing. This cannot be undone.
+            {confirmActionRequest.adminNote ? (
+              <span className="mt-2 block text-xs text-[var(--color-text-muted)]">
+                Admin note: {confirmActionRequest.adminNote}
+              </span>
+            ) : null}
           </p>
         )}
       </Modal>
@@ -903,8 +1026,8 @@ export default function Requests() {
         request={selectedNewRequest}
         isOpen={selectedNewRequest !== null}
         onClose={() => setSelectedNewRequest(null)}
-        ledger={liveDirectory}
-        onConfirmAction={(req) => setConfirmActionRequest(req)}
+        directory={liveDirectory}
+        onConfirmAction={(req, adminNote) => setConfirmActionRequest({ request: req, adminNote: adminNote || '' })}
       />
 
     </div>

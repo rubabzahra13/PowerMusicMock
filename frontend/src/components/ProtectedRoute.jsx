@@ -10,6 +10,10 @@ export function AdminRoute() {
     return <Navigate to="/admin/login" replace />;
   }
 
+  if (!role) {
+    return <ManagerAuthLoading />;
+  }
+
   if (role === 'admin') {
     return <Outlet />;
   }

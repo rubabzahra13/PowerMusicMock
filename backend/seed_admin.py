@@ -75,7 +75,7 @@ def main():
                 text(
                     """
                     SELECT p.id, u.email
-                    FROM public.profiles p
+                    FROM public.powermusic_users p
                     JOIN auth.users u ON u.id = p.id
                     WHERE p.role = 'admin'
                     LIMIT 1
@@ -176,7 +176,7 @@ def main():
             conn.execute(
                 text(
                     """
-                    INSERT INTO public.profiles (id, email, full_name, role)
+                    INSERT INTO public.powermusic_users (id, email, full_name, role)
                     VALUES (CAST(:user_id AS uuid), :email, :full_name, 'admin')
                     ON CONFLICT (id) DO UPDATE
                     SET role = 'admin',

@@ -71,7 +71,7 @@ const LIBRARY_TABS = [
   { id: 'deleted', label: 'Deleted', status: 'Archived' },
 ];
 
-const DEFAULT_NEW_BODY = 'Hi {{first_name}},\n\n\n\nKind regards,\nPower Music Team';
+const DEFAULT_NEW_BODY = 'Hi {{first_name}},\n\n\n';
 const TEMPLATE_PAGE_SIZE = 12;
 
 function templateCreatedAt(template) {

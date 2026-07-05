@@ -4,6 +4,8 @@ import os
 
 from dotenv import load_dotenv
 
+from app.pilot2.signature import build_signature
+
 load_dotenv()
 
 # AI
@@ -53,7 +55,7 @@ GMAIL_API_PAUSE_SECONDS = float(os.getenv("PILOT2_GMAIL_API_PAUSE", "0.08"))
 AI_BATCH_SIZE = int(os.getenv("PILOT2_AI_BATCH_SIZE", "5"))
 AI_JOB_INTERVAL_SECONDS = int(os.getenv("PILOT2_AI_JOB_INTERVAL_SECONDS", "15"))
 
-SIGNATURE = os.getenv("PILOT2_SIGNATURE", "Kind regards,\nPower Music Team")
+SIGNATURE = os.getenv("PILOT2_SIGNATURE", build_signature("Power Music"))
 
 INTENTS = ["Enquiry", "Cancellation", "Renewal", "Partnership", "Finance", "Events"]
 SUPPORTED_LANGUAGES = ["en", "fr", "de", "es", "ja"]

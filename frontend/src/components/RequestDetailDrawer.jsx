@@ -1,220 +1,234 @@
-import { useState, useEffect, useMemo } from 'react';
-import { format, parseISO } from 'date-fns';
-import { Check } from 'lucide-react';
-import { Drawer } from './ui';
+import { useState, useMemo, useEffect } from 'react';
+import { AlertTriangle, Check, MessageSquarePlus, User, UserRound } from 'lucide-react';
+import { Drawer, Tag } from './ui';
 import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
+import { formatRequestDisplayId, formatAdminDateTime, formatAdminDate } from '../utils/requestDisplayId';
 
-const panelClass =
-  'bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-lg p-3 flex flex-col gap-1.5 min-h-0';
+function DetailSection({ icon: Icon, title, id, children }) {
+  return (
+    <section
+      aria-labelledby={id}
+      className="rounded-lg border border-[var(--color-border-default)] bg-white shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
+    >
+      <div className="flex items-center gap-2 border-b border-[var(--color-border-default)] px-3 py-2">
+        {Icon ? (
+          <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+        ) : null}
+        <h3
+          id={id}
+          className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
+        >
+          {title}
+        </h3>
+      </div>
+      <dl className="divide-y divide-[var(--color-border-default)]/70 px-3">{children}</dl>
+    </section>
+  );
+}
 
-export default function RequestDetailDrawer({ request, isOpen, onClose, onConfirmAction, directory = [] }) {
-  const [log, setLog] = useState([]);
+function DetailRow({ label, value, mono = false }) {
+  if (!value) return null;
+
+  return (
+    <div className="grid grid-cols-[88px_1fr] gap-2 py-2 text-xs leading-snug">
+      <dt className="text-[var(--color-text-muted)]">{label}</dt>
+      <dd
+        className={`min-w-0 font-medium text-[var(--color-text-primary)] break-words ${
+          mono ? 'font-mono text-[11px]' : ''
+        }`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+export default function RequestDetailDrawer({
+  request,
+  isOpen,
+  onClose,
+  onConfirmAction,
+  directory = [],
+}) {
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [noteText, setNoteText] = useState('');
 
   useEffect(() => {
-    if (!request) {
-      setLog([]);
-      setShowNoteInput(false);
-      setNoteText('');
-      return;
-    }
-
-    const timeStr = format(parseISO(request.receivedAt), 'HH:mm');
-    const managerName = getManagerDisplayName(request.submittedBy);
-    const initialEntries = [
-      {
-        id: 'sub',
-        time: timeStr,
-        text: `Request submitted by ${managerName}`
-      }
-    ];
-
-    if (request.tags?.includes('Already Exists')) {
-      initialEntries.push({
-        id: 'ae',
-        time: timeStr,
-        text: 'Already Exists tag applied'
-      });
-    }
-
-    setLog(initialEntries);
     setShowNoteInput(false);
     setNoteText('');
-  }, [request]);
+  }, [request?.id]);
 
-  const formatDateTime = (isoString) => {
-    if (!isoString) return '';
-    try {
-      return format(parseISO(isoString), 'dd MMM yyyy, HH:mm');
-    } catch {
-      return isoString;
-    }
-  };
+  const formatDateTime = formatAdminDateTime;
 
-  const formatDate = (dateString) => {
-    if (!dateString) return '';
-    try {
-      return format(parseISO(dateString), 'dd MMM yyyy');
-    } catch {
-      return dateString;
-    }
-  };
+  const formatDate = formatAdminDate;
 
   const matchedDirectoryRecord = useMemo(() => {
     if (!request || !directory || !request.tags?.includes('Already Exists')) return null;
     return directory.find(
-      (record) => record.email.toLowerCase() === request.person.email.toLowerCase()
+      (record) => record.email.toLowerCase() === request.person.email.toLowerCase(),
     );
   }, [request, directory]);
 
   if (!request) return null;
 
   const managerName = getManagerDisplayName(request.submittedBy);
+  const isAdd = request.action === 'Add';
+  const personActionLabel = isAdd ? 'Add' : 'Remove';
+  const notesText = request.notes?.trim();
 
   const handleNoteKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const text = noteText.trim();
       if (text !== '') {
-        const timeStr = format(new Date(), 'HH:mm');
-        setLog((prev) => [
-          ...prev,
-          {
-            id: `note-${Date.now()}`,
-            time: timeStr,
-            text: `Admin: ${text}`
-          }
-        ]);
-        setNoteText('');
         setShowNoteInput(false);
       }
     }
   };
 
   const handleConfirmAction = () => {
-    onConfirmAction(request);
+    onConfirmAction(request, noteText.trim());
   };
 
+  const footer = (
+    <div className="space-y-2.5">
+      {showNoteInput ? (
+        <div className="space-y-2">
+          <label htmlFor="request-detail-note" className="sr-only">
+            Admin note
+          </label>
+          <textarea
+            id="request-detail-note"
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            onKeyDown={handleNoteKeyPress}
+            placeholder="Optional note saved when you mark as added/removed"
+            rows={2}
+            className="w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-white px-3 py-2 text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/15"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowNoteInput(false);
+                setNoteText('');
+              }}
+              className="rounded-md px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/20"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setShowNoteInput(true)}
+          className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/20"
+        >
+          <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden="true" />
+          Add admin note
+        </button>
+      )}
+
+      <button
+        type="button"
+        onClick={handleConfirmAction}
+        className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/40 focus-visible:ring-offset-2"
+      >
+        <Check className="h-4 w-4" aria-hidden="true" />
+        {isAdd ? 'Mark as added' : 'Mark as removed'}
+      </button>
+    </div>
+  );
+
   return (
-    <Drawer isOpen={isOpen} onClose={onClose} title="Request detail" fill>
-      <div className="flex flex-col flex-1 min-h-0 gap-3 text-left select-none">
-        <div className="shrink-0 text-xs text-[var(--color-text-secondary)] font-medium flex flex-wrap gap-x-4 gap-y-1 border-b border-[var(--color-border-default)] pb-2.5">
-          <span>Received: {formatDateTime(request.receivedAt)}</span>
-          <span>Created by: {request.createdBy}</span>
-        </div>
-
-        <div className="shrink-0 grid grid-cols-2 gap-3 items-stretch">
-          <div className={panelClass}>
-            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-              Manager Details
-            </span>
-            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{managerName}</div>
-            <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium mt-auto">
-              <div>Email: {request.submittedBy.email}</div>
-              <div>Club: {isManualEntry(request.submittedBy) ? 'Manual entry' : request.submittedBy.club}</div>
-            </div>
+    <Drawer isOpen={isOpen} onClose={onClose} title="Request detail" fill footer={footer}>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+        <div className="shrink-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Tag
+              variant={isAdd ? 'add-action' : 'remove-action'}
+              label={`${personActionLabel} person`}
+              compact
+            />
+            {request.tags?.includes('Already Exists') ? (
+              <Tag variant="already-exists" label="Already exists" compact />
+            ) : null}
           </div>
 
-          <div className={panelClass}>
-            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-              Person to {request.action === 'Add' ? 'Add' : 'Remove'}
-            </span>
-            <div className="text-sm font-semibold text-[var(--color-text-primary)]">
+          <div className="space-y-0.5">
+            <p className="text-sm font-semibold text-[var(--color-text-primary)]">
               {request.person.firstName} {request.person.lastName}
-            </div>
-            <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium mt-auto">
-              <div>Email: {request.person.email}</div>
-              <div>Location: {request.person.location}</div>
-            </div>
+            </p>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              <span className="font-semibold text-[var(--color-text-primary)]">
+                {formatRequestDisplayId(request.displayId)}
+              </span>
+              <span aria-hidden="true"> · </span>
+              <time dateTime={request.receivedAt}>Received {formatDateTime(request.receivedAt)}</time>
+              <span aria-hidden="true"> · </span>
+              <span>Submitted by {request.createdBy || managerName}</span>
+            </p>
           </div>
         </div>
 
-        <div className={`flex-1 min-h-[72px] ${panelClass}`}>
-          <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-            Notes
-          </span>
-          <p className="text-sm text-[var(--color-text-primary)] leading-snug whitespace-pre-wrap flex-1">
-            {request.notes?.trim() ? request.notes : 'No notes provided.'}
-          </p>
-        </div>
+        <div className="grid min-h-0 flex-1 grid-rows-[auto_auto_auto] gap-3 overflow-hidden">
+          <DetailSection icon={UserRound} title="Manager" id="request-manager-details">
+            <DetailRow label="Name" value={managerName} />
+            <DetailRow label="Email" value={request.submittedBy.email} mono />
+            <DetailRow
+              label="Club"
+              value={isManualEntry(request.submittedBy) ? 'Manual entry' : request.submittedBy.club}
+            />
+          </DetailSection>
 
-        {request.tags?.includes('Already Exists') && matchedDirectoryRecord && (
-          <div className="shrink-0 bg-[#fef3c7] border border-amber-300 border-l-4 border-l-[var(--color-already-exists-border)] rounded-lg p-3 space-y-1.5">
-            <span className="block text-xs font-bold text-[#92400e]">Already exists in directory</span>
-            <div className="text-xs text-amber-900 font-medium leading-snug">
-              {matchedDirectoryRecord.firstName} {matchedDirectoryRecord.lastName} · {matchedDirectoryRecord.email}
-            </div>
-            <div className="text-[11px] text-amber-800">
-              Added: {formatDate(matchedDirectoryRecord.dateAdded)} · {matchedDirectoryRecord.location}
-            </div>
-          </div>
-        )}
+          <DetailSection icon={User} title={`Person to ${personActionLabel.toLowerCase()}`} id="request-person-details">
+            <DetailRow label="Name" value={`${request.person.firstName} ${request.person.lastName}`.trim()} />
+            <DetailRow label="Email" value={request.person.email} mono />
+            <DetailRow label="Location" value={request.person.location} />
+          </DetailSection>
 
-        <div className="shrink-0 rounded-lg border border-[var(--color-border-default)] p-3 space-y-2.5">
-          <div>
-            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-              Action Required
-            </span>
-            <span className="block text-sm font-semibold text-[var(--color-text-primary)] mt-0.5">
-              {request.action === 'Add' ? 'Add Person' : 'Remove Person'}
-            </span>
-          </div>
-          <button
-            onClick={handleConfirmAction}
-            className={`w-full h-10 flex items-center justify-center gap-1.5 text-white font-bold text-sm rounded-lg transition-colors shadow-sm select-none cursor-pointer focus:outline-none ${
-              request.action === 'Add'
-                ? 'bg-[#16a34a] hover:bg-[#15803d]'
-                : 'bg-[#dc2626] hover:bg-[#b91c1c]'
-            }`}
+          <section
+            aria-labelledby="request-notes-heading"
+            className="shrink-0 rounded-lg border border-[var(--color-border-default)] bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
           >
-            <Check className="w-4 h-4" />
-            <span>{request.action === 'Add' ? 'Mark as Added' : 'Mark as Removed'}</span>
-          </button>
-        </div>
+            <h3
+              id="request-notes-heading"
+              className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
+            >
+              Notes from manager
+            </h3>
+            <p
+              className={`mt-1.5 text-xs leading-relaxed text-[var(--color-text-primary)] ${
+                notesText ? 'line-clamp-3' : 'text-[var(--color-text-muted)]'
+              }`}
+            >
+              {notesText || 'No notes from manager.'}
+            </p>
+          </section>
 
-        <div className="flex-1 min-h-[100px] flex flex-col gap-2 pt-1 border-t border-[var(--color-border-default)] overflow-hidden">
-          <span className="shrink-0 block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-            Activity Log
-          </span>
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain divide-y divide-[var(--color-border-default)] font-medium">
-            {log.map((entry) => (
-              <div key={entry.id} className="py-1.5 flex items-start gap-2.5 text-xs leading-snug">
-                <span className="text-[var(--color-text-secondary)] shrink-0 font-semibold">{entry.time}</span>
-                <span className="text-[var(--color-text-primary)]">{entry.text}</span>
+          {request.tags?.includes('Already Exists') && matchedDirectoryRecord ? (
+            <div
+              role="alert"
+              className="flex shrink-0 gap-2.5 rounded-lg border border-amber-200 bg-[var(--color-tag-already-exists-bg)] px-3 py-2.5"
+            >
+              <AlertTriangle
+                className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-tag-already-exists-text)]"
+                aria-hidden="true"
+              />
+              <div className="min-w-0 text-xs leading-snug text-[var(--color-tag-already-exists-text)]">
+                <p className="font-semibold">Already in directory</p>
+                <p className="mt-0.5">
+                  {matchedDirectoryRecord.firstName} {matchedDirectoryRecord.lastName} ·{' '}
+                  {matchedDirectoryRecord.email}
+                </p>
+                <p className="mt-0.5 opacity-90">
+                  Added {formatDate(matchedDirectoryRecord.dateAdded)} · {matchedDirectoryRecord.location}
+                </p>
               </div>
-            ))}
-          </div>
-
-          <div className="shrink-0 pt-1">
-            {showNoteInput ? (
-              <div className="space-y-2">
-                <textarea
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  onKeyDown={handleNoteKeyPress}
-                  placeholder="Type note and press Enter to save..."
-                  className="w-full h-14 px-2.5 py-1.5 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] transition-colors resize-none"
-                  autoFocus
-                />
-                <div className="flex gap-2 justify-end">
-                  <button
-                    onClick={() => { setShowNoteInput(false); setNoteText(''); }}
-                    className="px-2.5 py-1 border border-[var(--color-border-default)] text-[11px] font-semibold text-[var(--color-text-secondary)] rounded-lg hover:bg-gray-50 focus:outline-none"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowNoteInput(true)}
-                className="text-xs font-semibold text-[var(--color-brand-accent)] hover:text-[var(--color-brand-accent-hover)] hover:underline focus:outline-none"
-              >
-                + Add Note
-              </button>
-            )}
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </Drawer>

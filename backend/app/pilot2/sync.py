@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import SessionLocal
+from app.automated_person_intake import intake_puregym_roster_message, is_puregym_roster_notification
 from app.pilot2 import config, gmail, gmail_labels, pipeline
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,15 @@ def _is_no_reply_sender(from_email: str) -> bool:
     return gmail.is_no_reply_address(from_email)
 
 
+def _is_puregym_roster_message(message: gmail.InboundMessage) -> bool:
+    return is_puregym_roster_notification(
+        message.from_email,
+        message.subject,
+        message.body,
+        from_name=message.from_name,
+    )
+
+
 def _should_skip_import(
     account: models.EmailAccount,
     message: gmail.InboundMessage,
@@ -46,6 +56,8 @@ def _should_skip_import(
         return True
     if message.from_email.lower() == account.email.lower():
         return True
+    if _is_puregym_roster_message(message):
+        return False
     if _is_no_reply_sender(message.from_email):
         return True
     if message.is_automated:
@@ -56,6 +68,8 @@ def _should_skip_import(
 
 
 def _eligible_for_ai(account: models.EmailAccount, message: gmail.InboundMessage) -> bool:
+    if _is_puregym_roster_message(message):
+        return False
     if _should_skip_import(account, message):
         return False
     labels = set(message.label_ids or [])
@@ -86,6 +100,18 @@ def import_message(
         gmail_labels.apply_label_flags(existing, flags)
         return existing
 
+    if intake_puregym_roster_message(
+        db,
+        from_email=message.from_email,
+        from_name=message.from_name,
+        subject=message.subject,
+        body=message.body,
+        received_at=message.received_at,
+        gmail_message_id=message.gmail_message_id,
+    ):
+        db.commit()
+        return None
+
     if _should_skip_import(account, message):
         return None
 
@@ -112,6 +138,7 @@ def import_message(
     gmail_labels.apply_label_flags(email, flags)
     db.add(email)
     db.flush()
+
     return email
 
 

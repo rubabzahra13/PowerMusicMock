@@ -14,12 +14,28 @@ tweak_level values:
 """
 
 import json
+import re
 from dataclasses import dataclass
 from typing import List, Optional
 
 from app.pilot2 import config
 from app.pilot2.ai.classifier import Classification
 from app.pilot2.ai.client import generate_json, llm_available
+from app.pilot2.signature import build_signature
+
+_LEGACY_SIG_RE = re.compile(r"\n*Kind regards,?\s*\n\s*Power Music Team\s*$", re.IGNORECASE)
+_GRATITUDE_LINE_RE = re.compile(r"^\s*(thanks|thank you)\b", re.IGNORECASE)
+
+
+def _polish_draft_body(body: str, signature: str) -> str:
+    """Drop body thank-yous and legacy sign-offs; ensure the inbox signature closes the draft."""
+    text = body.replace("\r\n", "\n").strip()
+    text = _LEGACY_SIG_RE.sub("", text).strip()
+    lines = [line for line in text.split("\n") if not _GRATITUDE_LINE_RE.match(line)]
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    if signature not in text:
+        text = f"{text}\n\n{signature}" if text else signature
+    return text
 
 
 @dataclass
@@ -45,7 +61,9 @@ Rules, in priority order:
 5. Reply in language "{language}". Open with a greeting to {first_name} and
    end with exactly this signature:
 {signature}
-6. Fill placeholders like {{{{first_name}}}} with real values; never leave
+6. Do not use "thank you", "thanks", or similar gratitude in the body — the
+   signature already begins with "Thank you."
+7. Fill placeholders like {{{{first_name}}}} with real values; never leave
    double-brace placeholders in the output.
 
 Return ONLY a JSON object:
@@ -54,20 +72,21 @@ Return ONLY a JSON object:
 """
 
 
-def _fill(template_body: str, first_name: str) -> str:
-    return (
+def _fill(template_body: str, first_name: str, signature: str) -> str:
+    filled = (
         template_body.replace("{{first_name}}", first_name)
         .replace("{{club_name}}", "your club")
         .replace("{{membership_type}}", "membership")
     )
+    return _polish_draft_body(filled, signature)
 
 
-def _fallback_acknowledgement(first_name: str) -> str:
+def _fallback_acknowledgement(first_name: str, signature: str) -> str:
     return (
         f"Hi {first_name},\n\n"
-        "Thank you for your message. A member of our team will review your enquiry "
+        "We've received your message. A member of our team will review your enquiry "
         "and respond shortly.\n\n"
-        f"{config.SIGNATURE}"
+        f"{signature}"
     )
 
 
@@ -78,11 +97,14 @@ def compose(
     templates: list,
     translations_by_template: dict,
     guidance_rules: List[str],
+    *,
+    signature: str | None = None,
 ) -> Draft:
     first_name = classification.sender_first_name
+    closing = signature or build_signature(None)
 
     if not templates:
-        return Draft(body=_fallback_acknowledgement(first_name), tweak_level="fallback")
+        return Draft(body=_fallback_acknowledgement(first_name, closing), tweak_level="fallback")
 
     # Prefer a reviewed translation of each template in the sender's language.
     template_payload = []
@@ -97,12 +119,15 @@ def compose(
         )
 
     if not llm_available():
-        return Draft(body=_fill(template_payload[0]["body"], first_name), tweak_level="verbatim")
+        return Draft(
+            body=_fill(template_payload[0]["body"], first_name, closing),
+            tweak_level="verbatim",
+        )
 
     system = _SYSTEM.format(
         language=classification.language,
         first_name=first_name,
-        signature=config.SIGNATURE,
+        signature=closing,
     )
     prompt = (
         f"GUIDANCE NOTES for intent '{classification.intent}':\n"
@@ -113,9 +138,15 @@ def compose(
     result = generate_json(config.COMPOSER_MODEL, system, prompt)
 
     if result is None or not str(result.get("body") or "").strip():
-        return Draft(body=_fill(template_payload[0]["body"], first_name), tweak_level="verbatim")
+        return Draft(
+            body=_fill(template_payload[0]["body"], first_name, closing),
+            tweak_level="verbatim",
+        )
 
     tweak_level = result.get("tweak_level")
     if tweak_level not in ("verbatim", "personalized", "merged"):
         tweak_level = "merged" if len(templates) > 1 else "personalized"
-    return Draft(body=str(result["body"]).strip(), tweak_level=tweak_level)
+    return Draft(
+        body=_polish_draft_body(str(result["body"]).strip(), closing),
+        tweak_level=tweak_level,
+    )

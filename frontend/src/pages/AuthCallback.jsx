@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getSupabase } from '../supabaseClient';
 import { AlertCircle, Loader2 } from 'lucide-react';
@@ -296,5 +296,20 @@ export default function AuthCallback() {
     );
   }
 
-  return null;
+  if (user && role === 'manager') {
+    return <Navigate to="/submit" replace />;
+  }
+
+  if (user && role === 'admin') {
+    return <Navigate to="/" replace />;
+  }
+
+  return (
+    <ManagerAuthShell footnote="">
+      <div className="text-center py-4">
+        <Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--color-brand-primary)]" aria-hidden="true" />
+        <h2 className="mt-4 text-base font-semibold text-[var(--color-text-primary)]">Finishing sign-in…</h2>
+      </div>
+    </ManagerAuthShell>
+  );
 }

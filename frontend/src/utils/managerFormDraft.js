@@ -48,3 +48,27 @@ export const EMPTY_PERSON_FORM = {
   email: '',
   location: '',
 };
+
+export const MAX_MANAGER_PERSON_ROWS = 20;
+
+export function isPersonFormComplete(personForm) {
+  return (
+    personForm.firstName.trim() !== '' &&
+    personForm.lastName.trim() !== '' &&
+    personForm.email.trim() !== '' &&
+    personForm.location.trim() !== ''
+  );
+}
+
+export function normalizePersonFormsFromDraft(draft) {
+  if (!draft) return [{ ...EMPTY_PERSON_FORM }];
+  if (Array.isArray(draft.personForms) && draft.personForms.length > 0) {
+    return draft.personForms
+      .slice(0, MAX_MANAGER_PERSON_ROWS)
+      .map((person) => ({ ...EMPTY_PERSON_FORM, ...person }));
+  }
+  if (draft.personForm) {
+    return [{ ...EMPTY_PERSON_FORM, ...draft.personForm }];
+  }
+  return [{ ...EMPTY_PERSON_FORM }];
+}

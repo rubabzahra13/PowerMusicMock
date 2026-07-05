@@ -29,7 +29,7 @@ const files = [
 ];
 
 const backfillSql = `
-INSERT INTO public.profiles (id, email, full_name, role)
+INSERT INTO public.powermusic_users (id, email, full_name, role)
 SELECT
   u.id,
   u.email,
@@ -44,7 +44,7 @@ SELECT
   ),
   'manager'
 FROM auth.users u
-LEFT JOIN public.profiles p ON p.id = u.id
+LEFT JOIN public.powermusic_users p ON p.id = u.id
 WHERE p.id IS NULL
 ON CONFLICT (id) DO NOTHING;
 `;
@@ -68,8 +68,8 @@ async function main() {
     const backfill = await client.query(backfillSql);
     console.log(`Backfill inserted rows: ${backfill.rowCount ?? 0}`);
 
-    const { rows } = await client.query('SELECT count(*)::int AS n FROM public.profiles');
-    console.log(`profiles table row count: ${rows[0].n}`);
+    const { rows } = await client.query('SELECT count(*)::int AS n FROM public.powermusic_users');
+    console.log(`powermusic_users table row count: ${rows[0].n}`);
     console.log('Done.');
   } finally {
     await client.end();

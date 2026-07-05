@@ -8,7 +8,7 @@ async function fetchProfile(userId) {
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const { data, error } = await supabase
-      .from('profiles')
+      .from('powermusic_users')
       .select('id, email, full_name, role')
       .eq('id', userId)
       .single();

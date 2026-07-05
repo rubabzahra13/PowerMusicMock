@@ -335,6 +335,8 @@ export default function Signup() {
       setOtpCooldown(forgotEmail);
       setCooldownMs(getOtpCooldownRemaining(forgotEmail));
       setResetEmail(result.email);
+      setResendError('');
+      setResendNotice('');
       setResetSent(true);
     } catch (err) {
       console.error(err);
@@ -356,7 +358,7 @@ export default function Signup() {
         title="Check your email"
         onBack={() => switchMode('signin')}
         onResend={handleResendSignupEmail}
-        resendLabel="Resend confirmation email"
+        resendLabel="Resend confirmation link"
         resendLoading={resendLoading}
         resendCooldownMs={cooldownMs}
         resendError={resendError}
@@ -369,33 +371,75 @@ export default function Signup() {
     );
   }
 
-  if (resetSent) {
-    return (
-      <ManagerAuthEmailNotice
-        title="Check your email"
-        onBack={() => {
-          const email = resetEmail;
-          setResetSent(false);
-          setResetEmail('');
-          setSignInEmail(email);
-          switchMode('signin');
-        }}
-        onResend={handleResendResetEmail}
-        resendLabel="Resend reset link"
-        resendLoading={resendLoading}
-        resendCooldownMs={cooldownMs}
-        resendError={resendError}
-        resendNotice={resendNotice}
-      >
-        We sent a password reset link to{' '}
-        <span className="font-medium text-[var(--color-text-primary)]">{resetEmail}</span>.
-        Open the link to choose a new password, then sign in. Check spam if it does not arrive within a few minutes.
-      </ManagerAuthEmailNotice>
-    );
-  }
-
   if (mode === 'forgot') {
     const showCreateAccountHint = isManagerAccountNotFoundMessage(errorMsg);
+
+    if (resetSent) {
+      return (
+        <ManagerAuthShell>
+          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Check your email</h2>
+          <p className="mt-1 mb-6 text-sm text-[var(--color-text-secondary)]">
+            We sent a password reset link to{' '}
+            <span className="font-medium text-[var(--color-text-primary)]">{resetEmail}</span>. Open it to
+            choose a new password, then sign in. Check spam if it does not arrive within a few minutes.
+          </p>
+
+          {resendNotice && (
+            <div
+              className="mb-4 flex items-start gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-sm text-emerald-900"
+              role="status"
+            >
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+              <span>{resendNotice}</span>
+            </div>
+          )}
+
+          {resendError && (
+            <div role="alert" className={errorClass}>
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
+              <span>{resendError}</span>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleResendResetEmail}
+            disabled={resendLoading || cooldownMs > 0}
+            className={buttonClass}
+          >
+            {resendLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                <span>Sending link…</span>
+              </>
+            ) : cooldownMs > 0 ? (
+              `Resend in ${formatCooldown(cooldownMs)}`
+            ) : (
+              'Resend link'
+            )}
+          </button>
+
+          <p className="mt-6 text-center text-sm text-[var(--color-text-secondary)]">
+            Remember your password?{' '}
+            <button
+              type="button"
+              onClick={() => {
+                const email = resetEmail;
+                setResetSent(false);
+                setResetEmail('');
+                setResendError('');
+                setResendNotice('');
+                setSignInEmail(email);
+                switchMode('signin');
+              }}
+              className="font-medium text-[var(--color-brand-accent)] hover:underline"
+            >
+              Back to sign in
+            </button>
+          </p>
+        </ManagerAuthShell>
+      );
+    }
 
     return (
       <ManagerAuthShell>

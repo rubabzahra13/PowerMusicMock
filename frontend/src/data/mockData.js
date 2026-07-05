@@ -633,7 +633,7 @@ export const templates = [
     id: "tmpl-001", name: "Membership Enquiry", category: "Membership",
     status: "Active", timesUsed: 34, lastUpdated: "2026-06-10T11:42:00",
     subject: "Re: Your membership enquiry",
-    body: "Hi {{first_name}},\n\nThank you for getting in touch about joining {{club_name}}.\n\nWe'd be delighted to help with your membership enquiry. Our current membership options are available on our website, and I'd be happy to walk you through the options that best suit your needs.\n\nPlease let me know if you have any questions.\n\nKind regards,\nPower Music Team"
+    body: "Hi {{first_name}},\n\nI'd be happy to help with your enquiry about joining {{club_name}}.\n\nWe'd be delighted to help with your membership enquiry. Our current membership options are available on our website, and I'd be happy to walk you through the options that best suit your needs.\n\nPlease let me know if you have any questions.\n\nKind regards,\nPower Music Team"
   },
   {
     id: "tmpl-002", name: "Membership Enquiry (Legacy)", category: "Membership",
@@ -657,7 +657,7 @@ export const templates = [
     id: "tmpl-005", name: "Payment Confirmation", category: "Payments",
     status: "Active", timesUsed: 9, lastUpdated: "2026-04-20T16:30:00",
     subject: "Payment received — {{club_name}}",
-    body: "Hi {{first_name}},\n\nWe're confirming receipt of your payment for {{membership_type}} at {{club_name}}.\n\nYour account is now up to date. Thank you!\n\nKind regards,\nPower Music Team"
+    body: "Hi {{first_name}},\n\nWe're confirming receipt of your payment for {{membership_type}} at {{club_name}}.\n\nYour account is now up to date.\n\nKind regards,\nPower Music Team"
   },
   {
     id: "tmpl-006", name: "Payment Failed Notice", category: "Payments",
@@ -675,7 +675,7 @@ export const templates = [
     id: "tmpl-008", name: "General Enquiry Response", category: "General Enquiries",
     status: "Active", timesUsed: 6, lastUpdated: "2026-05-10T11:15:00",
     subject: "Re: Your enquiry",
-    body: "Hi {{first_name}},\n\nThank you for contacting {{club_name}}. We've received your message and will get back to you within 2 business days.\n\nKind regards,\nPower Music Team"
+    body: "Hi {{first_name}},\n\nWe've received your message and will get back to you within 2 business days.\n\nKind regards,\nPower Music Team"
   },
   {
     id: "tmpl-009", name: "Welcome Email", category: "Membership",
@@ -687,18 +687,18 @@ export const templates = [
     id: "tmpl-010", name: "Out of Office Auto-Reply", category: "Other",
     status: "Active", timesUsed: 0, lastUpdated: "2026-06-15T09:00:00",
     subject: "Out of Office — {{club_name}}",
-    body: "Thank you for contacting {{club_name}}.\n\nWe are currently out of office and will respond upon our return.\n\nFor urgent matters, please call our main line.\n\nKind regards,\nPower Music Team"
+    body: "Hi {{first_name}},\n\nWe are currently out of office and will respond upon our return.\n\nFor urgent matters, please call our main line.\n\nKind regards,\nPower Music Team"
   },
   {
     id: "tmpl-011", name: "Invoice Query Response (Draft)", category: "Payments",
     status: "Draft", timesUsed: 0, lastUpdated: "2026-06-22T15:30:00",
     subject: "Re: Invoice query",
-    body: "Hi {{first_name}},\n\n[DRAFT — pending approval]\n\nThank you for your invoice query regarding your {{membership_type}} account at {{club_name}}.\n\nPlease find the requested information below.\n\nKind regards,\nPower Music Team"
+    body: "Hi {{first_name}},\n\nRegarding your invoice query for your {{membership_type}} account at {{club_name}}.\n\nPlease find the requested information below.\n\nKind regards,\nPower Music Team"
   },
   {
     id: "tmpl-012", name: "Event Follow-Up", category: "Events",
     status: "Active", timesUsed: 3, lastUpdated: "2026-06-20T10:00:00",
     subject: "Thank you for attending — {{club_name}}",
-    body: "Hi {{first_name}},\n\nThank you for joining us at the recent {{club_name}} event. We hope you enjoyed it!\n\nWe'd love to hear your feedback.\n\nKind regards,\nPower Music Team"
+    body: "Hi {{first_name}},\n\nWe hope you enjoyed the recent {{club_name}} event.\n\nWe'd love to hear your feedback.\n\nKind regards,\nPower Music Team"
   }
 ];

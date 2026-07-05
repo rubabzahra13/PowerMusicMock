@@ -15,6 +15,17 @@ import { requestManagerPasswordReset, resendManagerSignupConfirmation } from '..
 
 const AuthContext = createContext(null);
 
+const AUTH_TIMEOUT_MS = 15000;
+
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]);
+}
+
 async function fetchUserProfile(userId) {
   const supabase = getSupabase();
   if (!supabase) throw new Error('Supabase is not configured.');
@@ -25,7 +36,7 @@ async function fetchUserProfile(userId) {
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const { data, error } = await supabase
-      .from('profiles')
+      .from('powermusic_users')
       .select('id, email, full_name, role')
       .eq('id', userId)
       .single();
@@ -36,6 +47,12 @@ async function fetchUserProfile(userId) {
 
     if (error?.code === 'PGRST116' && !triedEnsure) {
       triedEnsure = true;
+      const { data: authData } = await supabase.auth.getUser();
+      if (isAdminEmail(authData.user?.email)) {
+        throw new Error(
+          'Admin profile is missing. Run backend/seed_admin.py against this database, then try again.',
+        );
+      }
       const { data: ensured, error: ensureError } = await supabase.rpc('ensure_manager_profile');
       if (!ensureError && ensured) return ensured;
       if (ensureError) lastError = ensureError;
@@ -111,9 +128,7 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(initialAuth.profile);
   const [appConfig] = useState({ enforceDomainCheck: true });
   const [initializing, setInitializing] = useState(false);
-  const [authReady, setAuthReady] = useState(
-    () => !isSupabaseConfigured() || Boolean(initialAuth.user),
-  );
+  const [authReady, setAuthReady] = useState(true);
   const initialSessionHandled = useRef(false);
   const authEpoch = useRef(0);
   const authTransitionRef = useRef(false);
@@ -201,12 +216,29 @@ export function AuthProvider({ children }) {
     }
 
     const bootEpoch = authEpoch.current;
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!active || isStaleAuthEpoch(bootEpoch)) return;
-      initialSessionHandled.current = true;
-      await hydrateSession(data.session, bootEpoch);
+    const finishBoot = () => {
       if (active) setAuthReady(true);
-    });
+    };
+
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        if (!active || isStaleAuthEpoch(bootEpoch)) return;
+        initialSessionHandled.current = true;
+        try {
+          await hydrateSession(data.session, bootEpoch);
+        } catch (err) {
+          console.error('Auth bootstrap failed:', err);
+        } finally {
+          finishBoot();
+        }
+      })
+      .catch((err) => {
+        console.error('Auth getSession failed:', err);
+        finishBoot();
+      });
+
+    const bootTimeout = window.setTimeout(finishBoot, 8000);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
       if (!active) return;
@@ -233,12 +265,16 @@ export function AuthProvider({ children }) {
       }
 
       if (event === 'TOKEN_REFRESHED') {
+        if (authTransitionRef.current) return;
         if (isStaleAuthEpoch(eventEpoch)) return;
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
         await refreshProfile(currentSession, { allowCachedFallback: true });
         return;
       }
+
+      // login() owns session + profile updates — avoid parallel refresh/sign-out races
+      if (authTransitionRef.current) return;
 
       if (isStaleAuthEpoch(eventEpoch)) return;
 
@@ -263,6 +299,7 @@ export function AuthProvider({ children }) {
 
     return () => {
       active = false;
+      window.clearTimeout(bootTimeout);
       subscription.unsubscribe();
     };
   }, []);
@@ -277,15 +314,23 @@ export function AuthProvider({ children }) {
 
     authTransitionRef.current = true;
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { data, error } = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email,
+          password,
+        }),
+        AUTH_TIMEOUT_MS,
+        'Sign-in timed out. Check your internet connection and try again.',
+      );
       if (error) {
         throw new Error(getLoginFriendlyError(error));
       }
 
-      const profileData = await fetchUserProfile(data.user.id);
+      const profileData = await withTimeout(
+        fetchUserProfile(data.user.id),
+        AUTH_TIMEOUT_MS,
+        'Could not load your account profile. Try again in a moment.',
+      );
 
       if (profileData.role !== expectedRole) {
         await supabase.auth.signOut();

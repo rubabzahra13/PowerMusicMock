@@ -1,8 +1,10 @@
 import { useState, useEffect, useId } from 'react';
-import { useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { Toast, useToast } from '../components/ui';
+import { AUTH_PAGE_CANVAS, useAuthPageCanvas } from '../components/auth/useAuthPageCanvas';
+import PasswordInput from '../components/auth/PasswordInput';
 
 const inputClass =
   'w-full h-11 px-3.5 bg-white text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:outline-none focus-visible:border-[var(--color-brand-primary)] focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/20 disabled:opacity-60 disabled:cursor-not-allowed';
@@ -20,6 +22,7 @@ function consumeSignedOutFlash() {
 
 export default function AdminLogin() {
   const { login, user, role, logout } = useAuth();
+  useAuthPageCanvas();
   const { clearToasts } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -39,8 +42,10 @@ export default function AdminLogin() {
     clearToasts();
   }, [clearToasts]);
 
+  const redirectingAdmin = Boolean(user && role === 'admin');
+
   useEffect(() => {
-    if (user && role === 'admin') {
+    if (redirectingAdmin) {
       navigate(from, { replace: true });
       return;
     }
@@ -50,10 +55,18 @@ export default function AdminLogin() {
         setErrorMsg('This sign-in page is for administrators only.');
       });
     }
-  }, [user, role, navigate, logout, from]);
+  }, [user, role, navigate, logout, from, redirectingAdmin]);
 
-  if (user && role === 'admin') {
-    return <Navigate to={from} replace />;
+  if (redirectingAdmin) {
+    return (
+      <div
+        className="fixed inset-0 z-0 flex items-center justify-center"
+        style={{ backgroundColor: AUTH_PAGE_CANVAS }}
+      >
+        <Loader2 className="h-8 w-8 animate-spin text-white/90" aria-hidden="true" />
+        <span className="sr-only">Opening dashboard…</span>
+      </div>
+    );
   }
 
   const handleSubmit = async (e) => {
@@ -82,7 +95,11 @@ export default function AdminLogin() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-10 sm:px-6 antialiased font-sans relative overflow-hidden bg-[#0f1729]">
+    <div
+      className="fixed inset-0 z-0 overflow-y-auto overscroll-y-none"
+      style={{ backgroundColor: AUTH_PAGE_CANVAS }}
+    >
+      <div className="relative flex min-h-full flex-col items-center justify-center px-4 py-10 sm:px-6 antialiased font-sans overflow-hidden">
       <Toast />
 
       <div className="pointer-events-none absolute inset-0" aria-hidden="true">
@@ -163,15 +180,13 @@ export default function AdminLogin() {
                 <label htmlFor={passwordId} className="mb-1.5 block text-sm font-medium text-[var(--color-text-primary)]">
                   Password
                 </label>
-                <input
+                <PasswordInput
                   id={passwordId}
                   name="password"
-                  type="password"
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={loading}
-                  className={inputClass}
                   required
                 />
               </div>
@@ -196,6 +211,7 @@ export default function AdminLogin() {
 
         <p className="mt-6 text-center text-xs text-white/45">Authorized personnel only.</p>
       </main>
+      </div>
     </div>
   );
 }

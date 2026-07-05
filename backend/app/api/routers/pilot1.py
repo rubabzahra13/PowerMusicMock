@@ -7,11 +7,23 @@ from sqlalchemy import func, or_
 
 from app import models
 from app import schemas
-from app.api.auth import require_admin, require_manager, auth_is_required
+from app.api.auth import AuthenticatedUser, require_admin, require_manager, auth_is_required
 from app.api.rate_limit import rate_limit
 from app.input_validation import normalize_search_query
 from app.api.dependencies import get_db
-from app.display import assign_display_ids
+from app.request_display import (
+    allocate_request_ids,
+    hydrate_request_display,
+    request_id_numeric_desc,
+)
+from app.user_display import hydrate_request_users
+from app.manager_request_serialize import (
+    directory_rows_to_api_dicts,
+    request_to_api_dict,
+    requests_to_api_dicts,
+)
+from app.manager_request_activity import list_partner_activity
+from app.manager_request_intake import create_manager_request, manager_id_for_email
 
 router = APIRouter()
 
@@ -33,32 +45,39 @@ _REASON_RANK = {
 _ACTIVE_PERSON_STATUS = "Added"
 
 
-def _active_people_query(db: Session):
-    return db.query(models.Person).filter(models.Person.status == _ACTIVE_PERSON_STATUS)
+def _handled_directory_query(db: Session):
+    return db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.outcome.isnot(None),
+    )
 
 
-def _person_search_row(person: models.Person) -> dict:
+def _active_directory_query(db: Session):
+    return _handled_directory_query(db).filter(models.ManagerRequest.outcome == _ACTIVE_PERSON_STATUS)
+
+
+def _person_search_row(row: models.ManagerRequest) -> dict:
     return {
-        "id": person.id,
-        "firstName": person.first_name,
-        "lastName": person.last_name,
-        "email": person.email,
-        "location": person.location,
-        "status": person.status,
-        "dateAdded": person.date_added,
+        "id": row.id,
+        "firstName": row.person_first_name,
+        "lastName": row.person_last_name,
+        "email": row.person_email,
+        "location": row.person_location,
+        "status": row.outcome,
+        "dateAdded": row.handled_at,
     }
 
 
-def _duplicate_response(person: models.Person) -> dict:
+def _duplicate_response(row: models.ManagerRequest) -> dict:
     return {
         "duplicate": True,
-        "id": person.id,
-        "firstName": person.first_name,
-        "lastName": person.last_name,
-        "email": person.email,
-        "status": person.status,
-        "dateAdded": person.date_added,
-        "location": person.location,
+        "id": row.id,
+        "firstName": row.person_first_name,
+        "lastName": row.person_last_name,
+        "email": row.person_email,
+        "status": row.outcome,
+        "dateAdded": row.handled_at,
+        "location": row.person_location,
     }
 
 
@@ -82,19 +101,24 @@ def _find_duplicate_person(
     first_name: str,
     last_name: str,
     location: str,
-) -> models.Person | None:
+) -> models.ManagerRequest | None:
     if email:
-        match = db.query(models.Person).filter(func.lower(models.Person.email) == email).first()
+        match = (
+            _handled_directory_query(db)
+            .filter(func.lower(models.ManagerRequest.person_email) == email)
+            .order_by(models.ManagerRequest.handled_at.desc())
+            .first()
+        )
         if match:
             return match
 
     if first_name and last_name:
-        name_q = db.query(models.Person).filter(
-            func.lower(models.Person.first_name) == first_name,
-            func.lower(models.Person.last_name) == last_name,
+        name_q = _handled_directory_query(db).filter(
+            func.lower(models.ManagerRequest.person_first_name) == first_name,
+            func.lower(models.ManagerRequest.person_last_name) == last_name,
         )
         if location:
-            match = name_q.filter(func.lower(models.Person.location) == location).first()
+            match = name_q.filter(func.lower(models.ManagerRequest.person_location) == location).first()
             if match:
                 return match
         match = name_q.first()
@@ -103,10 +127,10 @@ def _find_duplicate_person(
 
     if location and not first_name and not last_name and email:
         match = (
-            db.query(models.Person)
+            _handled_directory_query(db)
             .filter(
-                func.lower(models.Person.email) == email,
-                func.lower(models.Person.location) == location,
+                func.lower(models.ManagerRequest.person_email) == email,
+                func.lower(models.ManagerRequest.person_location) == location,
             )
             .first()
         )
@@ -123,33 +147,33 @@ def _find_related_people(
     first_name: str,
     last_name: str,
     location: str,
-) -> list[tuple[models.Person, set[str]]]:
+) -> list[tuple[models.ManagerRequest, set[str]]]:
     """Return all directory rows that share any form field (or field + location)."""
-    results: dict[str, tuple[models.Person, set[str]]] = {}
+    results: dict[str, tuple[models.ManagerRequest, set[str]]] = {}
 
-    def add(person: models.Person | None, reason: str) -> None:
-        if person is None or person.status != _ACTIVE_PERSON_STATUS:
+    def add(row: models.ManagerRequest | None, reason: str) -> None:
+        if row is None or row.outcome != _ACTIVE_PERSON_STATUS:
             return
-        if person.id not in results:
-            results[person.id] = (person, set())
-        results[person.id][1].add(reason)
+        if row.id not in results:
+            results[row.id] = (row, set())
+        results[row.id][1].add(reason)
 
-    def add_all(people: list[models.Person], reason: str) -> None:
-        for person in people:
-            add(person, reason)
+    def add_all(rows: list[models.ManagerRequest], reason: str) -> None:
+        for row in rows:
+            add(row, reason)
 
     if email:
         add_all(
-            _active_people_query(db).filter(func.lower(models.Person.email) == email).all(),
+            _active_directory_query(db).filter(func.lower(models.ManagerRequest.person_email) == email).all(),
             "Email",
         )
 
     if first_name and last_name:
         add_all(
-            _active_people_query(db)
+            _active_directory_query(db)
             .filter(
-                func.lower(models.Person.first_name) == first_name,
-                func.lower(models.Person.last_name) == last_name,
+                func.lower(models.ManagerRequest.person_first_name) == first_name,
+                func.lower(models.ManagerRequest.person_last_name) == last_name,
             )
             .all(),
             "Name",
@@ -157,10 +181,10 @@ def _find_related_people(
 
     if first_name and location:
         add_all(
-            _active_people_query(db)
+            _active_directory_query(db)
             .filter(
-                func.lower(models.Person.first_name) == first_name,
-                func.lower(models.Person.location) == location,
+                func.lower(models.ManagerRequest.person_first_name) == first_name,
+                func.lower(models.ManagerRequest.person_location) == location,
             )
             .all(),
             "First name + location",
@@ -168,10 +192,10 @@ def _find_related_people(
 
     if last_name and location:
         add_all(
-            _active_people_query(db)
+            _active_directory_query(db)
             .filter(
-                func.lower(models.Person.last_name) == last_name,
-                func.lower(models.Person.location) == location,
+                func.lower(models.ManagerRequest.person_last_name) == last_name,
+                func.lower(models.ManagerRequest.person_location) == location,
             )
             .all(),
             "Last name + location",
@@ -179,10 +203,10 @@ def _find_related_people(
 
     if email and location:
         add_all(
-            _active_people_query(db)
+            _active_directory_query(db)
             .filter(
-                func.lower(models.Person.email) == email,
-                func.lower(models.Person.location) == location,
+                func.lower(models.ManagerRequest.person_email) == email,
+                func.lower(models.ManagerRequest.person_location) == location,
             )
             .all(),
             "Email + location",
@@ -190,11 +214,11 @@ def _find_related_people(
 
     if first_name and last_name and location:
         add_all(
-            _active_people_query(db)
+            _active_directory_query(db)
             .filter(
-                func.lower(models.Person.first_name) == first_name,
-                func.lower(models.Person.last_name) == last_name,
-                func.lower(models.Person.location) == location,
+                func.lower(models.ManagerRequest.person_first_name) == first_name,
+                func.lower(models.ManagerRequest.person_last_name) == last_name,
+                func.lower(models.ManagerRequest.person_location) == location,
             )
             .all(),
             "Name + location",
@@ -202,10 +226,10 @@ def _find_related_people(
 
     reason_rank = _REASON_RANK
 
-    def sort_key(item: tuple[models.Person, set[str]]) -> tuple:
-        person, reasons = item
+    def sort_key(item: tuple[models.ManagerRequest, set[str]]) -> tuple:
+        row, reasons = item
         best_reason = max((reason_rank.get(r, 0) for r in reasons), default=0)
-        added = person.date_added
+        added = row.handled_at
         if added is None:
             added = datetime.min.replace(tzinfo=timezone.utc)
         return (-len(reasons), -best_reason, added)
@@ -247,19 +271,19 @@ def _form_has_match_criteria(email: str, first_name: str, last_name: str, locati
     return False
 
 
-def _search_people(db: Session, query: str, *, limit: int) -> list[models.Person]:
+def _search_people(db: Session, query: str, *, limit: int) -> list[models.ManagerRequest]:
     pattern = f"%{query}%"
     return (
-        _active_people_query(db)
+        _active_directory_query(db)
         .filter(
             or_(
-                func.lower(models.Person.first_name).like(pattern),
-                func.lower(models.Person.last_name).like(pattern),
-                func.lower(models.Person.email).like(pattern),
-                func.lower(func.coalesce(models.Person.location, "")).like(pattern),
+                func.lower(models.ManagerRequest.person_first_name).like(pattern),
+                func.lower(models.ManagerRequest.person_last_name).like(pattern),
+                func.lower(models.ManagerRequest.person_email).like(pattern),
+                func.lower(func.coalesce(models.ManagerRequest.person_location, "")).like(pattern),
             )
         )
-        .order_by(models.Person.date_added.desc())
+        .order_by(models.ManagerRequest.handled_at.desc())
         .limit(limit)
         .all()
     )
@@ -267,66 +291,92 @@ def _search_people(db: Session, query: str, *, limit: int) -> list[models.Person
 @router.get("/api/requests", response_model=List[schemas.RequestOut])
 def get_requests(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     db_requests = (
-        db.query(models.Request)
-        .order_by(models.Request.received_at.desc())
+        db.query(models.ManagerRequest)
+        .order_by(request_id_numeric_desc())
         .all()
     )
-    assign_display_ids(
-        db_requests,
-        status_attr="status",
-        date_attr="received_at",
-    )
-    return db_requests
+    hydrate_request_display(db_requests)
+    return requests_to_api_dicts(db, db_requests)
 
 @router.get("/api/persons", response_model=List[schemas.PersonOut])
 def get_people(db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    people = (
-        db.query(models.Person)
-        .order_by(models.Person.date_added.desc())
+    rows = (
+        _handled_directory_query(db)
+        .order_by(models.ManagerRequest.handled_at.desc())
         .all()
     )
-    assign_display_ids(
-        people,
-        status_attr="status",
-        date_attr="date_added",
-    )
-    return people
+    return directory_rows_to_api_dicts(db, rows)
 
 @router.get("/api/kpis", response_model=schemas.KpiOut)
 def get_kpis(db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    pending = db.query(models.Request).filter(models.Request.status == "new").count()
-    users = db.query(models.Person).count()
+    pending = db.query(models.ManagerRequest).filter(models.ManagerRequest.status == "new").count()
+    users = _handled_directory_query(db).count()
     return {"pendingRequests": pending, "usersInLedger": users}
 
 
 @router.get("/api/dashboard", response_model=schemas.DashboardOut)
 def get_dashboard(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     pending = (
-        db.query(models.Request)
-        .filter(models.Request.status == "new")
-        .order_by(models.Request.received_at.desc())
+        db.query(models.ManagerRequest)
+        .filter(models.ManagerRequest.status == "new")
+        .order_by(request_id_numeric_desc())
         .all()
     )
-    assign_display_ids(pending, status_attr="status", date_attr="received_at")
-    activity = (
-        db.query(models.Activity)
-        .order_by(models.Activity.timestamp.desc())
-        .limit(10)
-        .all()
-    )
-    users = db.query(models.Person).count()
+    hydrate_request_display(pending)
+    users = _handled_directory_query(db).count()
     return {
         "kpis": {
             "pendingRequests": len(pending),
             "usersInLedger": users,
         },
-        "pendingRequests": pending,
-        "activity": activity,
+        "pendingRequests": requests_to_api_dicts(db, pending),
+        "activity": list_partner_activity(db, limit=10),
     }
 
 @router.get("/api/activity", response_model=List[schemas.ActivityOut])
 def get_activity(db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    return db.query(models.Activity).order_by(models.Activity.timestamp.desc()).limit(10).all()
+    return list_partner_activity(db, limit=10)
+
+
+def _assert_manager_submitter(submitted_by: schemas.SubmittedBy, manager) -> None:
+    sub_email = (submitted_by.email or "").strip()
+    if auth_is_required() and sub_email.lower() != manager.email.lower():
+        raise HTTPException(
+            status_code=403,
+            detail="Submitter email must match your signed-in account.",
+        )
+
+
+def _manager_id_for_submitter(
+    db: Session,
+    submitted_by: schemas.SubmittedBy,
+    *,
+    manager_user_id: Optional[str] = None,
+) -> Optional[str]:
+    if manager_user_id and manager_user_id != "dev-bypass":
+        return manager_user_id
+    return manager_id_for_email(db, submitted_by.email or "")
+
+
+def _create_manager_request_row(
+    db: Session,
+    *,
+    submitted_by: schemas.SubmittedBy,
+    person: schemas.PersonInfo,
+    action: str,
+    notes: Optional[str],
+    new_id: Optional[str] = None,
+    manager_user_id: Optional[str] = None,
+) -> models.ManagerRequest:
+    return create_manager_request(
+        db,
+        person=person,
+        action=action,
+        manager_notes=notes,
+        manager_user_id=manager_user_id,
+        new_id=new_id,
+    )
+
 
 @router.post("/api/requests", response_model=schemas.RequestOut)
 def create_request(
@@ -334,280 +384,143 @@ def create_request(
     db: Session = Depends(get_db),
     manager=Depends(_limit_submit),
 ):
-    # Submitter must match the signed-in manager (prevents impersonation).
-    sub_email = (req_in.submittedBy.email or "").strip()
-    if auth_is_required() and sub_email.lower() != manager.email.lower():
-        raise HTTPException(
-            status_code=403,
-            detail="Submitter email must match your signed-in account.",
-        )
+    _assert_manager_submitter(req_in.submittedBy, manager)
 
-    # 2. Duplicate check
-    tags = []
-    p_email = (req_in.person.email or "").strip().lower()
-    p_first = (req_in.person.firstName or "").strip().lower()
-    p_last = (req_in.person.lastName or "").strip().lower()
-    
-    duplicate = False
-    if p_email:
-        dup_email = db.query(models.Person).filter(func.lower(models.Person.email) == p_email).first()
-        if dup_email:
-            duplicate = True
-    
-    if not duplicate and p_first and p_last:
-        dup_name = db.query(models.Person).filter(
-            func.lower(models.Person.first_name) == p_first,
-            func.lower(models.Person.last_name) == p_last
-        ).first()
-        if dup_name:
-            duplicate = True
-            
-    if duplicate:
-        tags.append("Already Exists")
-        
-    # Generate ID "req-XXX"
-    all_ids = db.query(models.Request.id).all()
-    max_num = 0
-    for (rid,) in all_ids:
-        if rid and rid.startswith("req-"):
-            try:
-                num = int(rid.split("-")[1])
-                if num > max_num:
-                    max_num = num
-            except ValueError:
-                pass
-    new_id = f"req-{max_num + 1:03d}"
-    
-    created_by_name = f"{req_in.submittedBy.firstName or ''} {req_in.submittedBy.lastName or ''}".strip()
-    
-    new_request = models.Request(
-        id=new_id,
-        received_at=datetime.now(timezone.utc),
-        submitted_by_first_name=req_in.submittedBy.firstName,
-        submitted_by_last_name=req_in.submittedBy.lastName,
-        submitted_by_email=req_in.submittedBy.email,
-        submitted_by_club=req_in.submittedBy.club,
-        person_first_name=req_in.person.firstName,
-        person_last_name=req_in.person.lastName,
-        person_email=req_in.person.email,
-        person_location=req_in.person.location,
+    new_request = _create_manager_request_row(
+        db,
+        submitted_by=req_in.submittedBy,
+        person=req_in.person,
         action=req_in.action,
         notes=req_in.notes,
-        tags=tags,
-        created_by=created_by_name,
-        status="new"
+        manager_user_id=manager.id,
     )
-    db.add(new_request)
-    
-    # Activity logging
-    act_submitted = models.Activity(
-        timestamp=new_request.received_at,
-        type="request_submitted",
-        description=f"Request submitted by {created_by_name}",
-        linked_request_id=new_id
-    )
-    db.add(act_submitted)
-    if "Already Exists" in tags:
-        act_tag = models.Activity(
-            timestamp=new_request.received_at,
-            type="tag_applied",
-            description="Duplicate detection: 'Already Exists' tag applied.",
-            linked_request_id=new_id
-        )
-        db.add(act_tag)
-
     db.commit()
     db.refresh(new_request)
-    
-    new_request.displayId = 1
-    return new_request
+    hydrate_request_display([new_request])
+    hydrate_request_users(db, [new_request])
+    return request_to_api_dict(new_request)
+
+
+@router.post("/api/requests/batch", response_model=List[schemas.RequestOut])
+def create_requests_batch(
+    req_in: schemas.ManagerBatchRequestIn,
+    db: Session = Depends(get_db),
+    manager=Depends(_limit_submit),
+):
+    _assert_manager_submitter(req_in.submittedBy, manager)
+
+    request_ids = allocate_request_ids(db, len(req_in.people))
+    new_requests = [
+        _create_manager_request_row(
+            db,
+            submitted_by=req_in.submittedBy,
+            person=person,
+            action=req_in.action,
+            notes=req_in.notes,
+            new_id=request_id,
+            manager_user_id=manager.id,
+        )
+        for request_id, person in zip(request_ids, req_in.people)
+    ]
+    db.commit()
+
+    for req in new_requests:
+        db.refresh(req)
+    hydrate_request_display(new_requests)
+    return requests_to_api_dicts(db, new_requests)
 
 @router.get("/api/admin/requests", response_model=List[schemas.RequestOut])
 def get_admin_requests(status: Optional[str] = None, db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    query = db.query(models.Request)
+    query = db.query(models.ManagerRequest)
     if status:
-        query = query.filter(models.Request.status == status)
+        query = query.filter(models.ManagerRequest.status == status)
     
     if status == "handled":
-        db_requests = query.order_by(models.Request.handled_at.desc()).all()
-        assign_display_ids(db_requests, status_attr="status", date_attr="handled_at")
+        db_requests = query.order_by(models.ManagerRequest.handled_at.desc()).all()
     else:
-        db_requests = query.order_by(models.Request.received_at.desc()).all()
-        assign_display_ids(db_requests, status_attr="status", date_attr="received_at")
-        
-    return db_requests
+        db_requests = query.order_by(request_id_numeric_desc()).all()
+
+    hydrate_request_display(db_requests)
+    return requests_to_api_dicts(db, db_requests)
 
 @router.get("/api/admin/requests/page", response_model=schemas.NewRequestsPageOut)
 def get_new_requests_page(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     db_requests = (
-        db.query(models.Request)
-        .filter(models.Request.status == "new")
-        .order_by(models.Request.received_at.desc())
+        db.query(models.ManagerRequest)
+        .filter(models.ManagerRequest.status == "new")
+        .order_by(request_id_numeric_desc())
         .all()
     )
-    assign_display_ids(db_requests, status_attr="status", date_attr="received_at")
-    people = (
-        db.query(models.Person)
-        .order_by(models.Person.date_added.desc())
+    hydrate_request_display(db_requests)
+    directory = (
+        _handled_directory_query(db)
+        .order_by(models.ManagerRequest.handled_at.desc())
         .all()
     )
-    assign_display_ids(people, status_attr="status", date_attr="date_added")
-    return {"requests": db_requests, "persons": people}
+    return {
+        "requests": requests_to_api_dicts(db, db_requests),
+        "persons": directory_rows_to_api_dicts(db, directory),
+    }
 
 @router.post("/api/admin/requests/{request_id}/mark-handled", response_model=schemas.RequestOut)
-def mark_request_handled(request_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    req = db.query(models.Request).filter(models.Request.id == request_id).first()
+def mark_request_handled(
+    request_id: str,
+    payload: schemas.MarkHandledIn = schemas.MarkHandledIn(),
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(require_admin),
+):
+    req = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
         
     if req.status == "handled":
-        return req
+        hydrate_request_users(db, [req])
+        return request_to_api_dict(req)
         
     outcome = "Added" if req.action == "Add" else "Removed"
     
     req.status = "handled"
     req.handled_at = datetime.now(timezone.utc)
-    
-    current_tags = list(req.tags) if req.tags else []
-    if outcome not in current_tags:
-        current_tags.append(outcome)
-    req.tags = current_tags
-    
-    person_email = (req.person_email or "").strip().lower()
-    
-    person = None
-    if person_email:
-        person = db.query(models.Person).filter(func.lower(models.Person.email) == person_email).first()
-        
-    if outcome == "Added":
-        if person:
-            person.status = "Added"
-            person.date_added = req.handled_at
-            person.source_request_id = req.id
-            person.first_name = req.person_first_name
-            person.last_name = req.person_last_name
-            person.location = req.person_location
-        else:
-            all_people_ids = db.query(models.Person.id).all()
-            max_p_num = 0
-            for (pid,) in all_people_ids:
-                if pid and pid.startswith("ul-"):
-                    try:
-                        max_p_num = max(max_p_num, int(pid.split("-")[1]))
-                    except ValueError:
-                        pass
-            new_pid = f"ul-{max_p_num + 1:03d}"
-            person = models.Person(
-                id=new_pid,
-                first_name=req.person_first_name,
-                last_name=req.person_last_name,
-                email=req.person_email,
-                location=req.person_location,
-                status="Added",
-                date_added=req.handled_at,
-                added_by=req.created_by,
-                manager_email=req.submitted_by_email,
-                club=req.submitted_by_club,
-                source_request_id=req.id,
-                notes=""
-            )
-            db.add(person)
-    else: # outcome == "Removed"
-        if person:
-            person.status = "Removed"
-            person.date_added = req.handled_at
-        else:
-            all_people_ids = db.query(models.Person.id).all()
-            max_p_num = 0
-            for (pid,) in all_people_ids:
-                if pid and pid.startswith("ul-"):
-                    try:
-                        max_p_num = max(max_p_num, int(pid.split("-")[1]))
-                    except ValueError:
-                        pass
-            new_pid = f"ul-{max_p_num + 1:03d}"
-            person = models.Person(
-                id=new_pid,
-                first_name=req.person_first_name,
-                last_name=req.person_last_name,
-                email=req.person_email,
-                location=req.person_location,
-                status="Removed",
-                date_added=req.handled_at,
-                added_by=req.created_by,
-                manager_email=req.submitted_by_email,
-                club=req.submitted_by_club,
-                source_request_id=req.id,
-                notes="Legacy removal"
-            )
-            db.add(person)
-            
-    # Activity logging
-    act_type = "marked_added" if outcome == "Added" else "marked_removed"
-    act_handled = models.Activity(
-        timestamp=req.handled_at,
-        type=act_type,
-        description=f"Request marked as {outcome}.",
-        linked_request_id=req.id
-    )
-    db.add(act_handled)
+    req.outcome = outcome
+    if admin.id != "dev-bypass":
+        req.handled_by_admin_id = admin.id
+    if payload.adminNote:
+        req.admin_notes = payload.adminNote
 
     db.commit()
     db.refresh(req)
-    req.displayId = 0
-    return req
+    hydrate_request_display([req])
+    hydrate_request_users(db, [req])
+    return request_to_api_dict(req)
 
 @router.post("/api/admin/requests/manual", response_model=List[schemas.RequestOut])
 def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    all_ids = db.query(models.Request.id).all()
-    max_num = 0
-    for (rid,) in all_ids:
-        if rid and rid.startswith("req-"):
-            try:
-                max_num = max(max_num, int(rid.split("-")[1]))
-            except ValueError:
-                pass
-                
-    new_requests = []
-    created_by_name = "Andrea (Admin)"
-    
-    for i, person_in in enumerate(req_in.people):
-        new_id = f"req-{max_num + 1 + i:03d}"
-        new_req = models.Request(
-            id=new_id,
-            received_at=datetime.now(timezone.utc),
-            submitted_by_first_name=req_in.submittedBy.firstName,
-            submitted_by_last_name=req_in.submittedBy.lastName,
-            submitted_by_email=req_in.submittedBy.email,
-            submitted_by_club="Manual entry",
-            person_first_name=person_in.firstName,
-            person_last_name=person_in.lastName,
-            person_email=person_in.email,
-            person_location=person_in.location,
+    manual_submitter = schemas.SubmittedBy(
+        firstName=req_in.submittedBy.firstName,
+        lastName=req_in.submittedBy.lastName,
+        email=req_in.submittedBy.email,
+        club="Manual entry",
+    )
+    request_ids = allocate_request_ids(db, len(req_in.people))
+
+    new_requests = [
+        _create_manager_request_row(
+            db,
+            submitted_by=manual_submitter,
+            person=person_in,
             action=req_in.action,
             notes=req_in.notes,
-            tags=[],
-            created_by=created_by_name,
-            status="new"
+            new_id=new_id,
         )
-        db.add(new_req)
-        new_requests.append(new_req)
-        
-        act_submitted = models.Activity(
-            timestamp=new_req.received_at,
-            type="request_submitted",
-            description=f"Manual request submitted by {created_by_name}",
-            linked_request_id=new_id
-        )
-        db.add(act_submitted)
+        for new_id, person_in in zip(request_ids, req_in.people)
+    ]
 
     db.commit()
-    
+
     for req in new_requests:
         db.refresh(req)
-        req.displayId = 0
-        
-    return new_requests
+    hydrate_request_display(new_requests)
+    return requests_to_api_dicts(db, new_requests)
 
 
 @router.post("/api/persons/check-duplicate", response_model=schemas.DuplicateCheckOut)
@@ -673,13 +586,13 @@ def manager_person_directory(
     _manager=Depends(_limit_directory),
 ):
     """Active directory snapshot for instant client-side search on the manager form."""
-    people = (
-        _active_people_query(db)
-        .order_by(models.Person.date_added.desc())
+    rows = (
+        _active_directory_query(db)
+        .order_by(models.ManagerRequest.handled_at.desc())
         .limit(1000)
         .all()
     )
-    return [_person_search_row(person) for person in people]
+    return [_person_search_row(row) for row in rows]
 
 
 @router.get("/api/manager/persons/search", response_model=List[schemas.PersonSearchOut])

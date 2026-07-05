@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.pilot2 import gmail
 from app.pilot2.ai import classifier, composer
+from app.pilot2.signature import build_signature
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,51 @@ def process_incoming(
                 return run_ai_for_email(db, existing)
             return existing
 
+    from app.automated_person_intake import intake_puregym_roster_message
+
+    if intake_puregym_roster_message(
+        db,
+        from_email=from_email,
+        from_name=from_name,
+        subject=subject,
+        body=body,
+        received_at=received_at or datetime.now(timezone.utc),
+        gmail_message_id=gmail_message_id,
+    ):
+        email = models.Email(
+            id=next_id(db, models.Email, "email"),
+            account_email=account_email,
+            gmail_message_id=gmail_message_id,
+            gmail_thread_id=gmail_thread_id,
+            from_name=from_name,
+            from_email=from_email,
+            subject=subject,
+            body=body,
+            received_at=received_at or datetime.now(timezone.utc),
+            draft_status="Ignored",
+            archived=True,
+            read=True,
+        )
+        if label_ids is not None:
+            from app.pilot2 import gmail_labels
+
+            flags = gmail_labels.derive_label_flags(
+                label_ids,
+                account_email=account_email,
+                from_email=from_email,
+            )
+            gmail_labels.apply_label_flags(email, flags)
+        db.add(email)
+        log(
+            db,
+            "automated_intake",
+            f"PureGym roster email → manager request from {from_email}.",
+            email.id,
+        )
+        db.commit()
+        db.refresh(email)
+        return email
+
     email = models.Email(
         id=next_id(db, models.Email, "email"),
         account_email=account_email,
@@ -89,6 +135,7 @@ def process_incoming(
         gmail_labels.apply_label_flags(email, flags)
     db.add(email)
     db.flush()
+
     return run_ai_for_email(db, email)
 
 
@@ -170,8 +217,21 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
     )
     guidance_rules = list(note.rules) if note else []
 
+    account = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.email == email.account_email)
+        .first()
+    )
+    signature = build_signature(account.title if account else email.account_email)
+
     draft = composer.compose(
-        email.body, email.subject, classification, matched, translations_by_template, guidance_rules
+        email.body,
+        email.subject,
+        classification,
+        matched,
+        translations_by_template,
+        guidance_rules,
+        signature=signature,
     )
 
     email.template_ids = [t.id for t in matched]

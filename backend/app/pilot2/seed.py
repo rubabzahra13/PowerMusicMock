@@ -22,13 +22,13 @@ INBOXES = [
     ("rubabzahra248@gmail.com", "Test Inbox (Dev)"),
 ]
 
-SIGNOFF = "Kind regards,\nPower Music Team"
+SIGNOFF = ""  # Reply signature is appended by the composer per inbox title.
 
 TEMPLATES = [
     {
         "name": "Membership Enquiry", "category": "Membership", "intent": "Enquiry",
         "subject": "Re: Your membership enquiry",
-        "body": "Hi {{first_name}},\n\nThank you for getting in touch about joining {{club_name}}.\n\n"
+        "body": "Hi {{first_name}},\n\nI'd be happy to help with your enquiry about joining {{club_name}}.\n\n"
                 "We'd be delighted to help with your membership enquiry. Our current membership options "
                 "are available on our website, and I'd be happy to walk you through the options that best "
                 f"suit your needs.\n\nPlease let me know if you have any questions.\n\n{SIGNOFF}",
@@ -56,7 +56,7 @@ TEMPLATES = [
     {
         "name": "Invoice Query Response", "category": "Payments", "intent": "Finance",
         "subject": "Re: Invoice query",
-        "body": "Hi {{first_name}},\n\nThank you for your invoice query regarding your {{membership_type}} "
+        "body": "Hi {{first_name}},\n\nRegarding your invoice query for your {{membership_type}} "
                 f"account at {{club_name}}.\n\nPlease find the requested information below.\n\n{SIGNOFF}",
     },
     {
@@ -68,14 +68,14 @@ TEMPLATES = [
     {
         "name": "Partnership Enquiry Response", "category": "Partnerships", "intent": "Partnership",
         "subject": "Re: Partnership opportunity",
-        "body": "Hi {{first_name}},\n\nThank you for your interest in partnering with Power Music.\n\n"
+        "body": "Hi {{first_name}},\n\nWe appreciate your interest in partnering with Power Music.\n\n"
                 "We review every partnership enquiry carefully and a member of our team will be in touch "
                 f"to arrange a conversation.\n\n{SIGNOFF}",
     },
     {
         "name": "General Enquiry Response", "category": "General Enquiries", "intent": "Enquiry",
         "subject": "Re: Your enquiry",
-        "body": "Hi {{first_name}},\n\nThank you for contacting Power Music. We've received your message and "
+        "body": "Hi {{first_name}},\n\nWe've received your message and "
                 f"will get back to you within 2 business days.\n\n{SIGNOFF}",
     },
 ]

@@ -9,9 +9,10 @@ import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { patchEmail, sendEmail, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache, refreshCache, patchCache, getPilot2Workspace } from '../utils/pilot2Api';
 import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton, DraftCreatingPanel } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
+import DraftBodyDisplay from '../components/email/DraftBodyDisplay';
+import { buildEmailSignature, normalizeDraftSignature, resolveInboxTitle } from '../utils/emailSignature';
 
 const PAGE_SIZE = 20;
-const SIGNATURE = 'Kind regards,\nPower Music Team';
 
 function normalizeEmail(email) {
   return {
@@ -126,9 +127,13 @@ function getFirstName(from) {
   return from.split(' ')[0];
 }
 
-function buildDraft(email) {
-  if (email.draftBody?.trim()) return email.draftBody;
-  return `Hi ${getFirstName(email.from)},\n\nThank you for your message. A member of our team will review your enquiry and respond shortly.\n\n${SIGNATURE}`;
+function buildDraft(email, inboxes) {
+  const inboxTitle = resolveInboxTitle(inboxes, email.inbox);
+  const signature = buildEmailSignature(inboxTitle);
+  if (email.draftBody?.trim()) {
+    return normalizeDraftSignature(email.draftBody, inboxTitle);
+  }
+  return `Hi ${getFirstName(email.from)},\n\nWe've received your message. A member of our team will review your enquiry and respond shortly.\n\n${signature}`;
 }
 
 // Only Imported/Processing mean the AI is still working. Statuses like
@@ -682,8 +687,8 @@ export default function EmailQueue() {
 
   const getDraftForEmail = useCallback((email) => {
     if (draftEdits[email.id] != null) return draftEdits[email.id];
-    return buildDraft(email);
-  }, [draftEdits]);
+    return buildDraft(email, inboxes);
+  }, [draftEdits, inboxes]);
 
   const handleSelect = (email) => {
     const isNewSelection = selectedId !== email.id;
@@ -700,13 +705,13 @@ export default function EmailQueue() {
         .catch(() => clearPendingPatches([email.id], ['read']));
     }
     if (draftEdits[email.id] == null && !isDraftPending(email)) {
-      setDraftEdits((prev) => ({ ...prev, [email.id]: buildDraft(email) }));
+      setDraftEdits((prev) => ({ ...prev, [email.id]: buildDraft(email, inboxes) }));
     }
   };
 
   const handleCancelDraft = () => {
     if (!selectedEmail) return;
-    setDraftEdits((prev) => ({ ...prev, [selectedEmail.id]: buildDraft(selectedEmail) }));
+    setDraftEdits((prev) => ({ ...prev, [selectedEmail.id]: buildDraft(selectedEmail, inboxes) }));
     setIsEditingDraft(false);
   };
 
@@ -1730,8 +1735,11 @@ export default function EmailQueue() {
                       {selectedDraftPending ? (
                         <DraftCreatingPanel subject={selectedEmail.subject} />
                       ) : selectedEmail.draftStatus === 'Sent' || !isEditingDraft ? (
-                        <div className="rounded-lg bg-white px-4 py-3.5 text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-wrap min-h-[120px] border border-[var(--color-border-default)]/60">
-                          {getDraftForEmail(selectedEmail)}
+                        <div className="rounded-lg bg-white px-4 py-3.5 text-sm text-[var(--color-text-primary)] min-h-[120px] border border-[var(--color-border-default)]/60">
+                          <DraftBodyDisplay
+                            body={getDraftForEmail(selectedEmail)}
+                            inboxTitle={resolveInboxTitle(inboxes, selectedEmail.inbox)}
+                          />
                         </div>
                       ) : (
                         <textarea

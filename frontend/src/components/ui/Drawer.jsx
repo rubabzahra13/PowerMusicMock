@@ -1,42 +1,96 @@
+import { useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
-export default function Drawer({ isOpen, onClose, title, children, fill = false }) {
-  return (
+export default function Drawer({
+  isOpen,
+  onClose,
+  title,
+  children,
+  footer,
+  fill = false,
+  widthClass = 'max-w-[420px]',
+}) {
+  const titleId = useId();
+  const closeRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const focusTimer = window.setTimeout(() => closeRef.current?.focus(), 0);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      window.clearTimeout(focusTimer);
+    };
+  }, [isOpen, onClose]);
+
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <>
-      {isOpen && (
-        <div
-          onClick={onClose}
-          className="fixed inset-0 bg-black/30 z-40 transition-opacity duration-300 cursor-pointer animate-fade-in"
-        />
-      )}
+      <div
+        aria-hidden={!isOpen}
+        onClick={onClose}
+        className={`fixed inset-0 z-[98] bg-[var(--color-text-primary)]/20 backdrop-blur-[1px] transition-opacity duration-300 ${
+          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+      />
 
       <div
-        className={`fixed inset-y-0 right-0 h-dvh w-full max-w-[480px] bg-white shadow-[var(--shadow-drawer)] z-50 flex flex-col transform transition-transform duration-300 ease-in-out ${
-          isOpen ? 'translate-x-0' : 'translate-x-full'
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-hidden={!isOpen}
+        inert={isOpen ? undefined : ''}
+        className={`fixed top-0 right-0 bottom-0 z-[101] flex w-full ${widthClass} flex-col border-l border-[var(--color-border-default)] bg-white shadow-[var(--shadow-drawer)] transition-transform duration-300 ease-out ${
+          isOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'
         }`}
       >
-        <div className="h-14 border-b border-[var(--color-border-default)] px-6 flex items-center justify-between shrink-0 select-none bg-white">
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-default)] bg-white px-4">
           <h2
-            className="font-semibold text-[var(--color-text-primary)]"
-            style={{ fontSize: 'var(--font-size-md)' }}
+            id={titleId}
+            className="truncate text-sm font-semibold tracking-tight text-[var(--color-text-primary)]"
           >
             {title}
           </h2>
           <button
+            ref={closeRef}
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-md text-[var(--color-text-secondary)] hover:bg-gray-100 hover:text-[var(--color-text-primary)] transition-colors focus:outline-none"
-            aria-label="Close drawer"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/25 focus-visible:ring-offset-1"
+            aria-label="Close panel"
           >
-            <X className="w-4 h-4" />
+            <X className="h-4 w-4" aria-hidden="true" />
           </button>
+        </header>
+
+        <div
+          className={`flex min-h-0 flex-1 flex-col bg-[var(--color-surface-bg)] ${
+            fill ? 'overflow-hidden' : 'overflow-y-auto overscroll-contain'
+          }`}
+        >
+          <div className={`flex flex-1 flex-col px-4 py-4 ${fill ? 'min-h-0 overflow-hidden' : ''}`}>
+            {children}
+          </div>
         </div>
 
-        <div className={`flex-1 min-h-0 flex flex-col p-5 bg-white ${
-          fill ? 'overflow-hidden' : 'overflow-y-auto overscroll-contain'
-        }`}>
-          {children}
-        </div>
+        {footer ? (
+          <footer className="shrink-0 border-t border-[var(--color-border-default)] bg-white px-4 py-3">
+            {footer}
+          </footer>
+        ) : null}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

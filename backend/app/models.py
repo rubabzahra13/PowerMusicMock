@@ -1,31 +1,38 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, String, Text, Integer
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, String, Text, Integer
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
 from app.database import Base
 
 
-class Profile(Base):
-    """Supabase auth profile (role source of truth for API authorization)."""
+class PowermusicUser(Base):
+    """App user linked to Supabase auth (role source of truth for API authorization)."""
 
-    __tablename__ = "profiles"
+    __tablename__ = "powermusic_users"
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     email = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    club = Column(String, nullable=True)
     role = Column(String, nullable=False)
 
 
-class Request(Base):
-    __tablename__ = "requests"
+# Backward-compatible alias
+Profile = PowermusicUser
+
+
+class ManagerRequest(Base):
+    """Single table for manager submissions (new) and handled directory entries."""
+
+    __tablename__ = "manager_requests"
 
     id = Column(String, primary_key=True)
     received_at = Column(DateTime(timezone=True), nullable=False)
     handled_at = Column(DateTime(timezone=True), nullable=True)
 
-    submitted_by_first_name = Column(String, nullable=False)
-    submitted_by_last_name = Column(String, nullable=False)
-    submitted_by_email = Column(String, nullable=False)
-    submitted_by_club = Column(String, nullable=False)
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("powermusic_users.id"), nullable=True)
+    handled_by_admin_id = Column(UUID(as_uuid=True), ForeignKey("powermusic_users.id"), nullable=True)
 
     person_first_name = Column(String, nullable=False)
     person_last_name = Column(String, nullable=False)
@@ -33,38 +40,17 @@ class Request(Base):
     person_location = Column(String, nullable=False)
 
     action = Column(String, nullable=False)
-    notes = Column(Text, nullable=True)
+    manager_notes = Column(Text, nullable=True)
+    admin_notes = Column(Text, nullable=True)
     tags = Column(ARRAY(String), nullable=False, server_default="{}")
-    created_by = Column(String, nullable=False)
     status = Column(String, nullable=False)
+    outcome = Column(String, nullable=True)
+    source_email_id = Column(String, ForeignKey("emails.id"), nullable=True, unique=True)
+    source_gmail_message_id = Column(String, nullable=True, unique=True)
 
 
-class Person(Base):
-    __tablename__ = "people"
-
-    id = Column(String, primary_key=True)
-    first_name = Column(String, nullable=False)
-    last_name = Column(String, nullable=False)
-    email = Column(String, nullable=False)
-    location = Column(String, nullable=False)
-
-    status = Column(String, nullable=False)
-    date_added = Column(DateTime(timezone=True), nullable=False)
-    added_by = Column(String, nullable=False)
-    manager_email = Column(String, nullable=False)
-    club = Column(String, nullable=False)
-
-    source_request_id = Column(String, nullable=True)
-    notes = Column(Text, nullable=True)
-
-class Activity(Base):
-    __tablename__ = "activities"
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    timestamp = Column(DateTime(timezone=True))
-    type = Column(String)
-    description = Column(String)
-    linked_request_id = Column(String, nullable=True)
+# Backward-compatible alias used across the codebase during refactor.
+Request = ManagerRequest
 
 
 # ─────────────────────────────────────────────────────────────
@@ -75,7 +61,7 @@ class Activity(Base):
 class EmailAccount(Base):
     """A connected Gmail inbox (one per business vertical)."""
 
-    __tablename__ = "email_accounts"
+    __tablename__ = "connected_emails"
 
     id = Column(String, primary_key=True)
     email = Column(String, nullable=False, unique=True)

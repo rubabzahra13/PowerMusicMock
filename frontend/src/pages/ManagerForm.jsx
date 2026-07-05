@@ -5,7 +5,9 @@ import {
   CheckCircle2,
   Loader2,
   LogOut,
+  Plus,
   Search,
+  Trash2,
   UserMinus,
   UserPlus,
 } from 'lucide-react';
@@ -17,8 +19,10 @@ import {
   readManagerFormDraft,
   writeManagerFormDraft,
   clearManagerFormDraft,
-  EMPTY_MANAGER_FORM,
   EMPTY_PERSON_FORM,
+  isPersonFormComplete,
+  MAX_MANAGER_PERSON_ROWS,
+  normalizePersonFormsFromDraft,
 } from '../utils/managerFormDraft';
 import {
   filterDirectorySearch,
@@ -35,10 +39,12 @@ const cardClass =
 const inputClass =
   'w-full h-9 rounded-lg border border-[var(--color-border-default)] bg-white px-3 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-[border-color,box-shadow] focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/15 disabled:cursor-not-allowed disabled:bg-[var(--color-surface-panel)]';
 
+const readonlyInputClass = `${inputClass} cursor-default bg-[var(--color-surface-panel)] read-only:cursor-default focus:ring-0`;
+
 const labelClass = 'mb-1.5 block text-xs font-medium text-[var(--color-text-primary)]';
 
 const sectionTitleClass =
-  'text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]';
+  'text-[11px] font-semibold tracking-wide text-[var(--color-text-secondary)]';
 
 function Field({ id, label, required, hint, children }) {
   const hintId = hint ? `${id}-hint` : undefined;
@@ -101,24 +107,38 @@ export default function ManagerForm() {
   const [directoryError, setDirectoryError] = useState(null);
 
   const [submitted, setSubmitted] = useState(false);
+  const [submittedCount, setSubmittedCount] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [action, setAction] = useState('Add');
   const [notes, setNotes] = useState('');
   const [searchInput, setSearchInput] = useState('');
 
-  const [managerForm, setManagerForm] = useState(EMPTY_MANAGER_FORM);
-  const [personForm, setPersonForm] = useState(EMPTY_PERSON_FORM);
+  const [personForms, setPersonForms] = useState([{ ...EMPTY_PERSON_FORM }]);
+
+  const managerDetails = useMemo(() => {
+    const nameParts = (profile?.full_name || '').trim().split(/\s+/).filter(Boolean);
+    const club = user?.user_metadata?.club;
+    return {
+      firstName: nameParts[0] || '',
+      lastName: nameParts.slice(1).join(' ') || '',
+      email: profile?.email || user?.email || '',
+      club: typeof club === 'string' ? club.trim() : '',
+    };
+  }, [profile, user]);
+
+  const personFieldIds = (index) => ({
+    first: `${formId}-person-${index}-first`,
+    last: `${formId}-person-${index}-last`,
+    email: `${formId}-person-${index}-email`,
+    location: `${formId}-person-${index}-location`,
+  });
 
   const ids = {
     managerFirst: `${formId}-manager-first`,
     managerLast: `${formId}-manager-last`,
     managerEmail: `${formId}-manager-email`,
     managerClub: `${formId}-manager-club`,
-    personFirst: `${formId}-person-first`,
-    personLast: `${formId}-person-last`,
-    personEmail: `${formId}-person-email`,
-    personLocation: `${formId}-person-location`,
     notes: `${formId}-notes`,
     search: `${formId}-search`,
   };
@@ -133,44 +153,18 @@ export default function ManagerForm() {
     }
 
     draftRestoredRef.current = true;
-    if (draft.managerForm) setManagerForm({ ...EMPTY_MANAGER_FORM, ...draft.managerForm });
-    if (draft.personForm) setPersonForm({ ...EMPTY_PERSON_FORM, ...draft.personForm });
+    setPersonForms(normalizePersonFormsFromDraft(draft));
     if (draft.action) setAction(draft.action);
     if (typeof draft.notes === 'string') setNotes(draft.notes);
     if (typeof draft.searchInput === 'string') setSearchInput(draft.searchInput);
   }, [user?.id, submitted]);
 
   useEffect(() => {
-    if (!profile || !user?.id || draftRestoredRef.current) return;
-
-    const nameParts = (profile.full_name || '').trim().split(/\s+/).filter(Boolean);
-    const club = user?.user_metadata?.club;
-
-    setManagerForm((prev) => {
-      const hasEdits =
-        prev.firstName.trim() ||
-        prev.lastName.trim() ||
-        prev.email.trim() ||
-        prev.club.trim();
-      if (hasEdits) return prev;
-
-      return {
-        ...prev,
-        email: profile.email || prev.email,
-        firstName: nameParts[0] || prev.firstName,
-        lastName: nameParts.slice(1).join(' ') || prev.lastName,
-        club: (typeof club === 'string' && club.trim()) || prev.club,
-      };
-    });
-  }, [profile, user]);
-
-  useEffect(() => {
     if (!user?.id || submitted) return undefined;
 
     const persistDraft = () => {
       const hasContent =
-        Object.values(managerForm).some((v) => String(v).trim()) ||
-        Object.values(personForm).some((v) => String(v).trim()) ||
+        personForms.some((person) => Object.values(person).some((v) => String(v).trim())) ||
         notes.trim() ||
         searchInput.trim();
 
@@ -180,8 +174,7 @@ export default function ManagerForm() {
       }
 
       writeManagerFormDraft(user.id, {
-        managerForm,
-        personForm,
+        personForms,
         action,
         notes,
         searchInput,
@@ -200,7 +193,7 @@ export default function ManagerForm() {
       window.clearTimeout(timer);
       window.removeEventListener('visibilitychange', handleHidden);
     };
-  }, [user?.id, managerForm, personForm, action, notes, searchInput, submitted]);
+  }, [user?.id, personForms, action, notes, searchInput, submitted]);
 
   useEffect(() => {
     if (!user?.id || !session?.access_token) return undefined;
@@ -245,25 +238,37 @@ export default function ManagerForm() {
     };
   }, [user?.id, session?.access_token]);
 
-  const handleManagerChange = (field, val) => {
-    setManagerForm((prev) => ({ ...prev, [field]: val }));
+  const handlePersonChange = (index, field, val) => {
+    setPersonForms((prev) =>
+      prev.map((person, rowIndex) =>
+        rowIndex === index ? { ...person, [field]: val } : person,
+      ),
+    );
   };
 
-  const handlePersonChange = (field, val) => {
-    setPersonForm((prev) => ({ ...prev, [field]: val }));
+  const handleAddPersonRow = () => {
+    setPersonForms((prev) => {
+      if (prev.length >= MAX_MANAGER_PERSON_ROWS) return prev;
+      return [...prev, { ...EMPTY_PERSON_FORM }];
+    });
+  };
+
+  const handleRemovePersonRow = (index) => {
+    setPersonForms((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((_, rowIndex) => rowIndex !== index);
+    });
   };
 
   const isFormValid = useMemo(
     () =>
-      managerForm.firstName.trim() !== '' &&
-      managerForm.lastName.trim() !== '' &&
-      managerForm.email.trim() !== '' &&
-      managerForm.club.trim() !== '' &&
-      personForm.firstName.trim() !== '' &&
-      personForm.lastName.trim() !== '' &&
-      personForm.email.trim() !== '' &&
-      personForm.location.trim() !== '',
-    [managerForm, personForm],
+      managerDetails.firstName.trim() !== '' &&
+      managerDetails.lastName.trim() !== '' &&
+      managerDetails.email.trim() !== '' &&
+      managerDetails.club.trim() !== '' &&
+      personForms.length > 0 &&
+      personForms.every(isPersonFormComplete),
+    [managerDetails, personForms],
   );
 
   const handleSubmit = async (e) => {
@@ -272,19 +277,36 @@ export default function ManagerForm() {
 
     setSubmitting(true);
     try {
-      await fetchJson('/api/requests', {
+      const endpoint =
+        personForms.length === 1 ? '/api/requests' : '/api/requests/batch';
+      const body =
+        personForms.length === 1
+          ? {
+              submittedBy: managerDetails,
+              person: personForms[0],
+              action,
+              notes,
+            }
+          : {
+              submittedBy: managerDetails,
+              people: personForms,
+              action,
+              notes,
+            };
+
+      await fetchJson(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          submittedBy: managerForm,
-          person: personForm,
-          action,
-          notes,
-        }),
+        body: JSON.stringify(body),
       });
 
-      showToast('Request submitted.', 'success');
+      const count = personForms.length;
+      showToast(
+        count === 1 ? 'Request submitted.' : `${count} requests submitted.`,
+        'success',
+      );
       if (user?.id) clearManagerFormDraft(user.id);
+      setSubmittedCount(count);
       setSubmitted(true);
     } catch (err) {
       console.error(err);
@@ -298,6 +320,15 @@ export default function ManagerForm() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleStartAnotherRequest = () => {
+    setSubmitted(false);
+    setSubmittedCount(1);
+    setPersonForms([{ ...EMPTY_PERSON_FORM }]);
+    setNotes('');
+    setSearchInput('');
+    setAction('Add');
   };
 
   const handleSignOut = async () => {
@@ -325,10 +356,27 @@ export default function ManagerForm() {
     [directoryPeople, searchInput],
   );
 
-  const formMatchResults = useMemo(
-    () => findFormMatchCandidates(directoryPeople, personForm),
-    [directoryPeople, personForm],
-  );
+  const formMatchResults = useMemo(() => {
+    const byId = new Map();
+
+    for (const personForm of personForms) {
+      for (const row of findFormMatchCandidates(directoryPeople, personForm)) {
+        if (!row?.id) continue;
+        const existing = byId.get(row.id);
+        const reasons = new Set([
+          ...(existing?.matchReasons || []),
+          ...(row.matchReasons || []),
+        ]);
+        byId.set(row.id, {
+          ...(existing || {}),
+          ...row,
+          matchReasons: [...reasons],
+        });
+      }
+    }
+
+    return Array.from(byId.values());
+  }, [directoryPeople, personForms]);
 
   const displayResults = useMemo(() => {
     const byId = new Map();
@@ -372,11 +420,22 @@ export default function ManagerForm() {
   }, [searchResults, formMatchResults, hasSearchQuery]);
 
   const showDirectoryResults =
-    hasSearchQuery || formMatchResults.length > 0 || formHasMatchCriteria(personForm);
+    hasSearchQuery ||
+    formMatchResults.length > 0 ||
+    personForms.some(formHasMatchCriteria);
   const showInitialDirectoryLoading = directoryLoading && directoryPeople.length === 0;
+  const multipleUsers = personForms.length > 1;
+  const userSectionTitle =
+    action === 'Add'
+      ? multipleUsers
+        ? 'Users to add'
+        : 'User to add'
+      : multipleUsers
+        ? 'Users to remove'
+        : 'User to remove';
   const actionOptions = [
-    { value: 'Add', label: 'Add', icon: UserPlus },
-    { value: 'Remove', label: 'Remove', icon: UserMinus },
+    { value: 'Add', label: 'Request addition', icon: UserPlus },
+    { value: 'Remove', label: 'Request removal', icon: UserMinus },
   ];
 
   return (
@@ -418,7 +477,7 @@ export default function ManagerForm() {
               type="button"
               onClick={handleSignOut}
               disabled={signingOut}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/25 disabled:opacity-50"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--color-brand-primary)] px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
               {signingOut ? 'Signing out…' : 'Sign out'}
@@ -437,14 +496,20 @@ export default function ManagerForm() {
                 <CheckCircle2 className="h-7 w-7 text-[var(--color-signal-green)]" aria-hidden="true" />
               </div>
               <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
-                Request submitted successfully
+                {submittedCount === 1
+                  ? 'Request submitted successfully'
+                  : `${submittedCount} requests submitted successfully`}
               </h2>
               <p className="mt-1.5 text-sm text-[var(--color-text-secondary)]">
-                A Power Music admin will action this shortly.
+                Power Music admin will action {submittedCount === 1 ? 'this' : 'these'} shortly.
               </p>
-              <p className="mt-6 text-xs text-[var(--color-text-muted)]">
-                You can close this window.
-              </p>
+              <button
+                type="button"
+                onClick={handleStartAnotherRequest}
+                className="mt-8 flex h-11 w-full max-w-xs items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] px-6 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-1"
+              >
+                Submit another request
+              </button>
             </div>
           ) : (
             <form
@@ -456,7 +521,7 @@ export default function ManagerForm() {
                 <div
                   role="radiogroup"
                   aria-labelledby={actionGroupId}
-                  className="inline-flex w-full max-w-xs rounded-lg bg-[var(--color-surface-panel)] p-0.5 ring-1 ring-[var(--color-border-default)]"
+                  className="mx-auto flex w-full max-w-md rounded-lg bg-[var(--color-surface-panel)] p-0.5 ring-1 ring-[var(--color-border-default)]"
                 >
                   <p id={actionGroupId} className="sr-only">
                     Request type
@@ -487,135 +552,199 @@ export default function ManagerForm() {
                 </div>
                 <div>
                   <h1 className="text-base font-semibold text-[var(--color-text-primary)]">
-                    {action === 'Add' ? 'Add a Person' : 'Remove a Person'}
+                    {action === 'Add'
+                      ? multipleUsers
+                        ? 'Add users'
+                        : 'Add a user'
+                      : multipleUsers
+                        ? 'Remove users'
+                        : 'Remove a user'}
                   </h1>
                   <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
                     {action === 'Add'
-                      ? 'Submit a request to add a new person to the system.'
-                      : 'Submit a request to remove an existing person from the system.'}
+                      ? multipleUsers
+                        ? 'Ask Power Music to add several people in one submission.'
+                        : 'Ask Power Music to add someone to the system.'
+                      : multipleUsers
+                        ? 'Ask Power Music to remove several people in one submission.'
+                        : 'Ask Power Music to remove someone from the system.'}
                   </p>
                 </div>
               </div>
 
-              <FormSection title="Your Details (Manager)">
+              <FormSection title="Manager details">
+                <p className="-mt-1 text-[11px] text-[var(--color-text-secondary)]">
+                  Taken from your signed-in account and cannot be changed here.
+                </p>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field id={ids.managerFirst} label="First Name" required>
+                  <Field id={ids.managerFirst} label="Manager first name" required>
                     <input
                       id={ids.managerFirst}
                       type="text"
                       required
+                      readOnly
+                      aria-readonly="true"
                       autoComplete="given-name"
-                      value={managerForm.firstName}
-                      onChange={(e) => handleManagerChange('firstName', e.target.value)}
-                      className={inputClass}
+                      value={managerDetails.firstName}
+                      className={readonlyInputClass}
                     />
                   </Field>
-                  <Field id={ids.managerLast} label="Last Name" required>
+                  <Field id={ids.managerLast} label="Manager last name" required>
                     <input
                       id={ids.managerLast}
                       type="text"
                       required
+                      readOnly
+                      aria-readonly="true"
                       autoComplete="family-name"
-                      value={managerForm.lastName}
-                      onChange={(e) => handleManagerChange('lastName', e.target.value)}
-                      className={inputClass}
+                      value={managerDetails.lastName}
+                      className={readonlyInputClass}
                     />
                   </Field>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field
-                    id={ids.managerEmail}
-                    label="Email"
-                    required
-                    hint={profile?.email ? 'Taken from your signed-in account.' : undefined}
-                  >
+                  <Field id={ids.managerEmail} label="Manager email" required>
                     <input
                       id={ids.managerEmail}
                       type="email"
                       required
+                      readOnly
+                      aria-readonly="true"
                       autoComplete="email"
-                      readOnly={Boolean(profile?.email)}
-                      aria-readonly={Boolean(profile?.email)}
-                      value={managerForm.email}
-                      onChange={(e) => handleManagerChange('email', e.target.value)}
-                      className={inputClass}
+                      value={managerDetails.email}
+                      className={readonlyInputClass}
                     />
                   </Field>
-                  <Field id={ids.managerClub} label="Club Location" required>
+                  <Field id={ids.managerClub} label="Manager club location" required>
                     <input
                       id={ids.managerClub}
                       type="text"
                       required
+                      readOnly
+                      aria-readonly="true"
                       autoComplete="organization"
-                      value={managerForm.club}
-                      onChange={(e) => handleManagerChange('club', e.target.value)}
-                      className={inputClass}
+                      value={managerDetails.club}
+                      className={readonlyInputClass}
                     />
                   </Field>
                 </div>
               </FormSection>
 
-              <FormSection title={action === 'Add' ? 'Person to add' : 'Person to remove'}>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field id={ids.personFirst} label="First Name" required>
-                    <input
-                      id={ids.personFirst}
-                      type="text"
-                      required
-                      value={personForm.firstName}
-                      onChange={(e) => handlePersonChange('firstName', e.target.value)}
-                      className={inputClass}
-                    />
-                  </Field>
-                  <Field id={ids.personLast} label="Last Name" required>
-                    <input
-                      id={ids.personLast}
-                      type="text"
-                      required
-                      value={personForm.lastName}
-                      onChange={(e) => handlePersonChange('lastName', e.target.value)}
-                      className={inputClass}
-                    />
-                  </Field>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field id={ids.personEmail} label="Email" required>
-                    <input
-                      id={ids.personEmail}
-                      type="email"
-                      required
-                      value={personForm.email}
-                      onChange={(e) => handlePersonChange('email', e.target.value)}
-                      className={inputClass}
-                    />
-                  </Field>
-                  <Field id={ids.personLocation} label="Location" required>
-                    <input
-                      id={ids.personLocation}
-                      type="text"
-                      required
-                      value={personForm.location}
-                      onChange={(e) => handlePersonChange('location', e.target.value)}
-                      className={inputClass}
-                    />
-                  </Field>
+              <FormSection title={userSectionTitle}>
+                <div className="space-y-4">
+                  {personForms.map((personForm, index) => {
+                    const rowIds = personFieldIds(index);
+                    const rowMatches = findFormMatchCandidates(directoryPeople, personForm);
+                    const showRowLabel = personForms.length > 1;
+
+                    return (
+                      <div
+                        key={`person-row-${index}`}
+                        className={
+                          showRowLabel
+                            ? 'space-y-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 p-3'
+                            : 'space-y-3'
+                        }
+                      >
+                        {showRowLabel && (
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-semibold text-[var(--color-text-secondary)]">
+                              User {index + 1}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePersonRow(index)}
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-white hover:text-[var(--color-tag-remove-action-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/30"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                              Remove
+                            </button>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field id={rowIds.first} label="User first name" required>
+                            <input
+                              id={rowIds.first}
+                              type="text"
+                              required
+                              value={personForm.firstName}
+                              onChange={(e) =>
+                                handlePersonChange(index, 'firstName', e.target.value)
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                          <Field id={rowIds.last} label="User last name" required>
+                            <input
+                              id={rowIds.last}
+                              type="text"
+                              required
+                              value={personForm.lastName}
+                              onChange={(e) =>
+                                handlePersonChange(index, 'lastName', e.target.value)
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field id={rowIds.email} label="User email" required>
+                            <input
+                              id={rowIds.email}
+                              type="email"
+                              required
+                              value={personForm.email}
+                              onChange={(e) => handlePersonChange(index, 'email', e.target.value)}
+                              className={inputClass}
+                            />
+                          </Field>
+                          <Field id={rowIds.location} label="User location" required>
+                            <input
+                              id={rowIds.location}
+                              type="text"
+                              required
+                              value={personForm.location}
+                              onChange={(e) =>
+                                handlePersonChange(index, 'location', e.target.value)
+                              }
+                              className={inputClass}
+                            />
+                          </Field>
+                        </div>
+
+                        {rowMatches.length > 0 && (
+                          <div
+                            role="alert"
+                            className="flex gap-2.5 rounded-lg border border-amber-200 bg-[var(--color-tag-already-exists-bg)] px-3.5 py-3 text-xs text-[var(--color-tag-already-exists-text)]"
+                          >
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                            <div className="space-y-1">
+                              <p className="font-semibold">
+                                {showRowLabel ? `User ${index + 1}: ` : ''}
+                                {rowMatches.length === 1
+                                  ? 'This person may already be in the system.'
+                                  : `${rowMatches.length} possible matches found in the directory.`}
+                              </p>
+                              <p className="opacity-90">
+                                Please review before submitting. You can still proceed.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
 
-                {formMatchResults.length > 0 && (
-                  <div
-                    role="alert"
-                    className="flex gap-2.5 rounded-lg border border-amber-200 bg-[var(--color-tag-already-exists-bg)] px-3.5 py-3 text-xs text-[var(--color-tag-already-exists-text)]"
+                {personForms.length < MAX_MANAGER_PERSON_ROWS && (
+                  <button
+                    type="button"
+                    onClick={handleAddPersonRow}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-[var(--color-border-default)] px-3 text-xs font-semibold text-[var(--color-brand-primary)] transition-colors hover:border-[var(--color-brand-primary)] hover:bg-[var(--color-brand-primary)]/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/30"
                   >
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <div className="space-y-1">
-                      <p className="font-semibold">
-                        {formMatchResults.length === 1
-                          ? 'This person may already be in the system.'
-                          : `${formMatchResults.length} possible matches found in the directory.`}
-                      </p>
-                      <p className="opacity-90">Please review before submitting. You can still proceed.</p>
-                    </div>
-                  </div>
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                    Add another user
+                  </button>
                 )}
               </FormSection>
 
@@ -624,7 +753,7 @@ export default function ManagerForm() {
                   id={ids.notes}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Any additional information for the admin..."
+                  placeholder="Any additional information for the Power Music admin..."
                   rows={3}
                   className={`${inputClass} h-auto resize-none py-2`}
                 />
@@ -642,8 +771,10 @@ export default function ManagerForm() {
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                       Submitting…
                     </>
+                  ) : personForms.length === 1 ? (
+                    'Submit request'
                   ) : (
-                    'Submit Request'
+                    `Submit ${personForms.length} requests`
                   )}
                 </button>
                 {!isFormValid && (

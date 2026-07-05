@@ -1,16 +1,31 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
 
 import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
+import {
+  registerDirectoryPageVisit,
+  isDirectoryPersonHighlighted,
+  clearDirectoryPersonHighlight,
+  ADMIN_NEW_ROW_HIGHLIGHT_CLASS,
+} from '../utils/adminUiHighlights';
+import { formatRequestDisplayId, formatAdminDateTime, formatAdminDate } from '../utils/requestDisplayId';
 import { csvCell } from '../utils/csvSafe';
 
+const directoryHighlightClass = (row) =>
+  isDirectoryPersonHighlighted(row.email) ? ADMIN_NEW_ROW_HIGHLIGHT_CLASS : '';
+
+const personManagerName = (user) => user.managerName || '';
+const personHandledBy = (user) => user.handledBy || user.addedBy || 'Power Music Admin';
+const personManagerNotes = (user) => user.managerNotes || user.notes || '';
+const personAdminNotes = (user) => user.adminNotes || '';
+
 const SORT_PRESETS = [
-  { value: 'displayId-asc', label: 'ID (oldest first)' },
   { value: 'displayId-desc', label: 'ID (newest first)' },
+  { value: 'displayId-asc', label: 'ID (oldest first)' },
   { value: 'dateAdded-desc', label: 'Timestamp (newest first)' },
   { value: 'dateAdded-asc', label: 'Timestamp (oldest first)' },
   { value: 'personName-asc', label: 'Person name (A–Z)' },
@@ -19,7 +34,7 @@ const SORT_PRESETS = [
   { value: 'managerName-desc', label: 'Manager name (Z–A)' }
 ];
 
-const DEFAULT_SORT = 'displayId-asc';
+const DEFAULT_SORT = 'displayId-desc';
 
 function parseSortPreset(preset) {
   const match = preset.match(/^(.+)-(asc|desc)$/);
@@ -183,26 +198,31 @@ const buildFilterOptions = (values) => [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const formatDisplayId = (displayId) => `R-${String(displayId).padStart(2, '0')}`;
-
 const TimestampCell = ({ val }) => {
-  try {
-    const d = parseISO(val);
-    return (
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">{format(d, 'dd MMM yyyy')}</span>
-        <span className="text-xs text-[var(--color-text-muted)]">{format(d, 'hh:mm a')}</span>
-      </div>
-    );
-  } catch {
-    return <span className="text-xs text-[var(--color-text-secondary)]">{val}</span>;
-  }
+  if (!val) return <span className="text-xs text-[var(--color-text-muted)]">{EMPTY_CELL}</span>;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">
+        {formatAdminDate(val)}
+      </span>
+      <span className="text-xs text-[var(--color-text-muted)]">
+        {formatAdminDateTime(val).split(', ').slice(1).join(', ')}
+      </span>
+    </div>
+  );
 };
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function UserLedger() {
+  const location = useLocation();
   const [liveUserLedger, setLiveUserLedger] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
+  const [highlightVersion, setHighlightVersion] = useState(0);
+
+  useEffect(() => {
+    registerDirectoryPageVisit(location.key);
+    setHighlightVersion((v) => v + 1);
+  }, [location.key]);
 
   useEffect(() => {
     // Cached copy renders instantly; fresh data replaces it.
@@ -226,7 +246,14 @@ export default function UserLedger() {
   }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusTab, setStatusTab] = useState('All');
+  const [statusTab, setStatusTab] = useState(() => {
+    const pending = sessionStorage.getItem('pm_directory_pending_tab');
+    if (pending === 'Added' || pending === 'Removed' || pending === 'All') {
+      sessionStorage.removeItem('pm_directory_pending_tab');
+      return pending;
+    }
+    return 'All';
+  });
   const [filterLocation, setFilterLocation] = useState('All');
   const [filterClub, setFilterClub] = useState('All');
   const [selectedUser, setSelectedUser] = useState(null);
@@ -240,18 +267,6 @@ export default function UserLedger() {
     setFilterClub('All');
     setSortPreset(DEFAULT_SORT);
     setFilterOpen(true);
-  };
-
-  const formatDate = (iso) => {
-    try { return format(parseISO(iso), 'dd MMM yyyy'); }
-    catch { return iso; }
-  };
-
-  const getEarlierDateStr = (iso) => {
-    try {
-      const d = parseISO(iso);
-      return format(new Date(d.getTime() - 24 * 60 * 60 * 1000), 'dd MMM yyyy');
-    } catch { return iso; }
   };
 
   const addedCount = liveUserLedger.filter((u) => u.status === 'Added').length;
@@ -289,17 +304,18 @@ export default function UserLedger() {
         fullName.includes(query) ||
         user.email.toLowerCase().includes(query) ||
         user.location.toLowerCase().includes(query) ||
-        user.addedBy.toLowerCase().includes(query) ||
+        personManagerName(user).toLowerCase().includes(query) ||
         (user.managerEmail && user.managerEmail.toLowerCase().includes(query)) ||
         user.club.toLowerCase().includes(query) ||
-        (user.notes && user.notes.toLowerCase().includes(query));
+        (personManagerNotes(user) && personManagerNotes(user).toLowerCase().includes(query)) ||
+        (personAdminNotes(user) && personAdminNotes(user).toLowerCase().includes(query));
       const matchesLocation = filterLocation === 'All' || user.location === filterLocation;
       const matchesClub = filterClub === 'All' || user.club === filterClub;
       return matchesSearch && matchesLocation && matchesClub;
     });
 
     return [...filtered].sort((a, b) => {
-      if (field === 'managerName') return a.addedBy.localeCompare(b.addedBy) * sortDir;
+      if (field === 'managerName') return personManagerName(a).localeCompare(personManagerName(b)) * sortDir;
       if (field === 'personName') {
         const nA = `${a.firstName} ${a.lastName}`.toLowerCase();
         const nB = `${b.firstName} ${b.lastName}`.toLowerCase();
@@ -315,20 +331,27 @@ export default function UserLedger() {
     filterClub !== 'All'
   ].filter(Boolean).length;
 
+  const handleOpenUser = (row) => {
+    clearDirectoryPersonHighlight(row.email);
+    setHighlightVersion((v) => v + 1);
+    setSelectedUser(row);
+  };
+
   const handleExportCSV = () => {
-    const headers = ['ID', 'Person Name', 'Person Email', 'Location', 'Status', 'Date Added', 'Manager Name', 'Manager Email', 'Club', 'Notes'];
+    const headers = ['ID', 'Person Name', 'Person Email', 'Location', 'Status', 'Date Added', 'Manager Name', 'Manager Email', 'Club', 'Manager notes', 'Admin notes'];
     const csvRows = filteredLedger.map((user) =>
       [
-        formatDisplayId(user.displayId),
+        formatRequestDisplayId(user.displayId),
         `${user.firstName} ${user.lastName}`,
         user.email,
         user.location,
         user.status,
-        formatDate(user.dateAdded),
-        user.addedBy,
+        formatAdminDate(user.dateAdded),
+        personManagerName(user),
         user.managerEmail || '',
         user.club,
-        user.notes || ''
+        personManagerNotes(user),
+        personAdminNotes(user),
       ].map(csvCell).join(',')
     );
     const blob = new Blob([[headers.join(','), ...csvRows].join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -352,7 +375,7 @@ export default function UserLedger() {
       cellClassName: 'text-center align-middle whitespace-nowrap px-2',
       render: (val) => (
         <span className="text-xs font-bold text-[var(--color-text-muted)] whitespace-nowrap tabular-nums">
-          {formatDisplayId(val)}
+          {formatRequestDisplayId(val)}
         </span>
       )
     },
@@ -376,12 +399,27 @@ export default function UserLedger() {
       key: 'person',
       label: 'Person',
       width: '19%',
-      render: (_, row) => (
-        <StackedTextCell
-          primary={`${row.firstName} ${row.lastName}`.trim()}
-          secondary={row.email}
-        />
-      )
+      render: (_, row) => {
+        const isNew = isDirectoryPersonHighlighted(row.email);
+        const name = `${row.firstName} ${row.lastName}`.trim();
+        return (
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]">
+                {name}
+              </TruncateCell>
+              {isNew ? (
+                <span className="shrink-0 rounded-full bg-[var(--color-brand-primary)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                  New
+                </span>
+              ) : null}
+            </div>
+            <TruncateCell className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+              {row.email}
+            </TruncateCell>
+          </div>
+        );
+      },
     },
     {
       key: 'location',
@@ -399,7 +437,7 @@ export default function UserLedger() {
       width: '19%',
       render: (_, row) => (
         <StackedTextCell
-          primary={row.addedBy}
+          primary={personManagerName(row)}
           secondary={row.managerEmail || EMPTY_CELL}
         />
       )
@@ -416,13 +454,24 @@ export default function UserLedger() {
       )
     },
     {
-      key: 'notes',
-      label: 'Notes',
-      width: '12%',
+      key: 'managerNotes',
+      label: 'Manager notes',
+      width: '11%',
       cellClassName: 'align-middle max-w-0 overflow-hidden',
-      render: (val) => (
+      render: (_, row) => (
         <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {val?.trim() || EMPTY_CELL}
+          {personManagerNotes(row).trim() || EMPTY_CELL}
+        </TruncateCell>
+      )
+    },
+    {
+      key: 'adminNotes',
+      label: 'Admin notes',
+      width: '11%',
+      cellClassName: 'align-middle max-w-0 overflow-hidden',
+      render: (_, row) => (
+        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
+          {personAdminNotes(row).trim() || EMPTY_CELL}
         </TruncateCell>
       )
     },
@@ -436,7 +485,7 @@ export default function UserLedger() {
       render: (_, row) => (
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); setSelectedUser(row); }}
+          onClick={(e) => { e.stopPropagation(); handleOpenUser(row); }}
           aria-label="View user details"
           className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer shrink-0"
         >
@@ -524,7 +573,11 @@ export default function UserLedger() {
         <DataTable
           columns={columns}
           rows={filteredLedger}
-          onRowClick={(row) => setSelectedUser(row)}
+          onRowClick={handleOpenUser}
+          getRowClassName={(row) => {
+            void highlightVersion;
+            return directoryHighlightClass(row);
+          }}
           emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
           compact
           centerHeaders
@@ -544,9 +597,25 @@ export default function UserLedger() {
         title={selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName}` : ''}
       >
         {selectedUser && (
-          <div className="space-y-6 text-left select-none">
-            <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Person Details</span>
+          <div className="space-y-5 text-left select-none">
+            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                Status
+              </span>
+              <div className="flex items-center gap-2">
+                <Tag variant={selectedUser.status === 'Added' ? 'added' : 'removed'} label={selectedUser.status} />
+              </div>
+              <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
+                <div>Request ID: {formatRequestDisplayId(selectedUser.displayId)}</div>
+                <div>Handled: {formatAdminDateTime(selectedUser.dateAdded)}</div>
+                <div>Handled by: {personHandledBy(selectedUser)}</div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                {selectedUser.status === 'Added' ? 'Added person' : 'Removed person'}
+              </span>
               <div className="text-sm font-semibold text-[var(--color-text-primary)]">
                 {selectedUser.firstName} {selectedUser.lastName}
               </div>
@@ -556,58 +625,69 @@ export default function UserLedger() {
               </div>
             </div>
 
-            <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Manager Details</span>
-              <div className="text-sm font-semibold text-[var(--color-text-primary)]">{selectedUser.addedBy}</div>
+            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                Manager details
+              </span>
+              <div className="text-sm font-semibold text-[var(--color-text-primary)]">
+                {personManagerName(selectedUser) || EMPTY_CELL}
+              </div>
               <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
                 {selectedUser.managerEmail && <div>Email: {selectedUser.managerEmail}</div>}
                 <div>Club: {selectedUser.club}</div>
               </div>
             </div>
 
-            <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Notes</span>
+            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                Notes by manager
+              </span>
               <p className="text-sm text-[var(--color-text-primary)] leading-normal whitespace-pre-wrap">
-                {selectedUser.notes?.trim() ? selectedUser.notes : EMPTY_CELL}
+                {personManagerNotes(selectedUser).trim() ? personManagerNotes(selectedUser) : EMPTY_CELL}
               </p>
             </div>
 
-            <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Ledger Status</span>
-              <div className="flex items-center gap-2 mb-1">
-                <Tag variant={selectedUser.status === 'Added' ? 'added' : 'removed'} label={selectedUser.status} />
-              </div>
-              <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
-                <div>ID: {formatDisplayId(selectedUser.displayId)}</div>
-                <div>Date: {formatDate(selectedUser.dateAdded)}</div>
-                <div>Added By: {selectedUser.addedBy}</div>
-              </div>
+            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                Notes by admin
+              </span>
+              <p className="text-sm text-[var(--color-text-primary)] leading-normal whitespace-pre-wrap">
+                {personAdminNotes(selectedUser).trim() ? personAdminNotes(selectedUser) : EMPTY_CELL}
+              </p>
             </div>
 
-            <div className="space-y-3 pt-3 border-t border-[var(--color-border-default)]">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Request History</span>
-              <div className="relative pl-6 border-l border-[var(--color-border-default)] space-y-5 py-1">
+            <div className="space-y-3 border-t border-[var(--color-border-default)] pt-3">
+              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                Request history
+              </span>
+              <div className="relative space-y-5 border-l border-[var(--color-border-default)] py-1 pl-6">
                 <div className="relative">
-                  <div className="absolute -left-[29px] top-1 w-3.5 h-3.5 rounded-full border-2 border-white bg-[var(--color-brand-primary)] shadow-sm shrink-0" />
-                  <div className="text-[11px] font-semibold text-[var(--color-text-secondary)]">{formatDate(selectedUser.dateAdded)}</div>
-                  <div className="text-xs font-semibold text-[var(--color-text-primary)] mt-0.5">
-                    Marked as {selectedUser.status} by {selectedUser.addedBy}
+                  <div className="absolute -left-[29px] top-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white bg-[var(--color-brand-primary)] shadow-sm" />
+                  <time className="text-[11px] font-semibold text-[var(--color-text-secondary)]">
+                    {formatAdminDateTime(selectedUser.dateAdded)}
+                  </time>
+                  <div className="mt-0.5 text-xs font-semibold text-[var(--color-text-primary)]">
+                    Marked as {selectedUser.status} by {personHandledBy(selectedUser)}
                   </div>
                 </div>
-                <div className="relative">
-                  <div className="absolute -left-[29px] top-1 w-3.5 h-3.5 rounded-full border-2 border-white bg-gray-300 shadow-sm shrink-0" />
-                  <div className="text-[11px] font-semibold text-[var(--color-text-secondary)]">{getEarlierDateStr(selectedUser.dateAdded)}</div>
-                  <div className="text-xs font-semibold text-[var(--color-text-primary)] mt-0.5">
-                    Request submitted by {selectedUser.addedBy}
+                {selectedUser.requestReceivedAt ? (
+                  <div className="relative">
+                    <div className="absolute -left-[29px] top-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white bg-gray-300 shadow-sm" />
+                    <time className="text-[11px] font-semibold text-[var(--color-text-secondary)]">
+                      {formatAdminDateTime(selectedUser.requestReceivedAt)}
+                    </time>
+                    <div className="mt-0.5 text-xs font-semibold text-[var(--color-text-primary)]">
+                      Request submitted by {personManagerName(selectedUser)}
+                    </div>
                   </div>
-                </div>
+                ) : null}
               </div>
             </div>
 
             {selectedUser.status === 'Added' && (
-              <div className="bg-[var(--color-surface-panel)] border border-[var(--color-border-default)] rounded-md p-4 flex items-start gap-2.5">
-                <Info className="w-4 h-4 text-[var(--color-brand-primary)] shrink-0 mt-0.5" />
-                <span className="text-xs text-[var(--color-text-secondary)] font-semibold leading-normal">
+              <div className="flex items-start gap-2.5 rounded-md border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] p-4">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-brand-primary)]" />
+                <span className="text-xs font-semibold leading-normal text-[var(--color-text-secondary)]">
                   This user will trigger a duplicate warning on new Manager Form submissions.
                 </span>
               </div>

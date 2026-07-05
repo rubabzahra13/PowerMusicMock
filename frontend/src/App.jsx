@@ -86,6 +86,7 @@ export default function App() {
             />
           </Route>
 
+          <Route path="*" element={<Navigate to="/admin/login" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

@@ -79,7 +79,7 @@ export default function FlaggedEmails() {
         .replace(/\{\{inbox_name\}\}/g, inboxShort);
     }
     const firstName = email.from ? email.from.split(' ')[0] : 'there';
-    return `Hi ${firstName},\n\nThank you for your ${email.intent.toLowerCase()} enquiry.\n\nKind regards,\nPower Music Team`;
+    return `Hi ${firstName},\n\nWe've received your ${email.intent.toLowerCase()} enquiry and will respond shortly.\n\nKind regards,\nPower Music Team`;
   };
 
   // Handle drawer review/send actions (clear flag and remove from local list)
@@ -202,7 +202,7 @@ export default function FlaggedEmails() {
     <div className="flagged-emails-container max-w-7xl mx-auto space-y-6 select-none relative">
       {/* Inject custom CSS styles for overriding Drawer width inside this view */}
       <style>{`
-        .flagged-emails-container .max-w-\\[480px\\] {
+        .flagged-emails-container .max-w-\\[420px\\] {
           max-width: 520px !important;
         }
       `}</style>
