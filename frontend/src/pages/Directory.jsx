@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
 
+import { format, parseISO } from 'date-fns';
 import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache } from '../utils/pilot2Api';
@@ -198,16 +199,22 @@ const buildFilterOptions = (values) => [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatTimestamp(iso) {
+  try {
+    const d = parseISO(iso);
+    return { date: format(d, 'dd MMM yyyy'), time: format(d, 'hh:mm a') };
+  } catch {
+    return { date: iso, time: '' };
+  }
+}
+
 const TimestampCell = ({ val }) => {
   if (!val) return <span className="text-xs text-[var(--color-text-muted)]">{EMPTY_CELL}</span>;
+  const { date, time } = formatTimestamp(val);
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">
-        {formatAdminDate(val)}
-      </span>
-      <span className="text-xs text-[var(--color-text-muted)]">
-        {formatAdminDateTime(val).split(', ').slice(1).join(', ')}
-      </span>
+      <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">{date}</span>
+      <span className="text-xs text-[var(--color-text-muted)]">{time}</span>
     </div>
   );
 };
@@ -384,6 +391,7 @@ export default function UserLedger() {
       label: 'Timestamp',
       width: '108px',
       noShrink: true,
+      headerClassName: 'text-center',
       cellClassName: 'align-middle whitespace-nowrap',
       render: (val) => <TimestampCell val={val} />
     },
@@ -392,28 +400,23 @@ export default function UserLedger() {
       label: 'Status',
       width: '72px',
       noShrink: true,
-      cellClassName: 'align-middle whitespace-nowrap',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle whitespace-nowrap text-center',
       render: (val) => <Tag variant={val === 'Added' ? 'added' : 'removed'} label={val} />
     },
     {
       key: 'person',
       label: 'Person',
       width: '19%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (_, row) => {
-        const isNew = isDirectoryPersonHighlighted(row.email);
         const name = `${row.firstName} ${row.lastName}`.trim();
         return (
           <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {name}
-              </TruncateCell>
-              {isNew ? (
-                <span className="shrink-0 rounded-full bg-[var(--color-brand-primary)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
-                  New
-                </span>
-              ) : null}
-            </div>
+            <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]">
+              {name}
+            </TruncateCell>
             <TruncateCell className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
               {row.email}
             </TruncateCell>
@@ -425,6 +428,8 @@ export default function UserLedger() {
       key: 'location',
       label: 'Location',
       width: '9%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (val) => (
         <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
           {val || EMPTY_CELL}
@@ -435,6 +440,8 @@ export default function UserLedger() {
       key: 'manager',
       label: 'Manager',
       width: '19%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (_, row) => (
         <StackedTextCell
           primary={personManagerName(row)}
@@ -446,10 +453,11 @@ export default function UserLedger() {
       key: 'club',
       label: 'Manager Club',
       width: '13%',
-      cellClassName: 'align-middle max-w-0 overflow-hidden',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (val) => (
         <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {val}
+          {val || EMPTY_CELL}
         </TruncateCell>
       )
     },
@@ -477,20 +485,22 @@ export default function UserLedger() {
     },
     {
       key: 'actions',
-      label: '',
-      width: '48px',
+      label: 'Actions',
+      width: '56px',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
       render: (_, row) => (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); handleOpenUser(row); }}
-          aria-label="View user details"
-          className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer shrink-0"
-        >
-          <Eye className="h-4 w-4" />
-        </button>
+        <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => handleOpenUser(row)}
+            aria-label="View user details"
+            className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer shrink-0"
+          >
+            <Eye className="h-4 w-4" />
+          </button>
+        </div>
       )
     }
   ];

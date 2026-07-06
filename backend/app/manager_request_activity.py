@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
-from app.manager_request_tags import TAG_ALREADY_EXISTS, TAG_AUTOMATED_EMAIL
+from app.manager_request_tags import TAG_ALREADY_EXISTS, TAG_AUTO_MAIL
 from app.user_display import hydrate_request_users, resolve_manager_name
 
 
@@ -49,14 +49,14 @@ def events_for_request(req: models.ManagerRequest) -> List[dict]:
             }
         )
 
-    if req.tags and TAG_AUTOMATED_EMAIL in req.tags and req.received_at:
+    if req.tags and TAG_AUTO_MAIL in req.tags and req.received_at:
         person = _person_label(req)
         events.append(
             {
                 "id": f"{req.id}:automated",
                 "timestamp": req.received_at,
                 "type": "automated_email",
-                "description": f"Automated email received: {person}" if person else "Automated email received",
+                "description": f"Auto mail received: {person}" if person else "Auto mail received",
                 "linkedRequestId": req.id,
             }
         )

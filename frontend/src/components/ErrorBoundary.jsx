@@ -40,7 +40,7 @@ export default class ErrorBoundary extends Component {
           </p>
           <button
             type="button"
-            onClick={() => window.location.assign('/admin/login')}
+            onClick={() => window.location.reload()}
             style={{
               padding: '0.6rem 1rem',
               borderRadius: '0.5rem',
@@ -51,7 +51,7 @@ export default class ErrorBoundary extends Component {
               cursor: 'pointer',
             }}
           >
-            Go to sign in
+            Reload page
           </button>
         </div>
       </div>

@@ -1,7 +1,10 @@
 import { useState, useMemo, useEffect } from 'react';
 import { AlertTriangle, Check, MessageSquarePlus, User, UserRound } from 'lucide-react';
 import { Drawer, Tag } from './ui';
-import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
+import RequestComparison from './RequestComparison';
+import { hasComparisonContext } from '../utils/requestComparison';
+import { getManagerDisplayName, isManualEntry, AWAITING_MANAGER_HINT } from '../utils/manualEntry';
+import { TAG_ALREADY_EXISTS, visibleTableRequestTags, requestTagLabel, requestTagVariant, isAwaitingManagerSubmission } from '../utils/requestTags';
 import { formatRequestDisplayId, formatAdminDateTime, formatAdminDate } from '../utils/requestDisplayId';
 
 function DetailSection({ icon: Icon, title, id, children }) {
@@ -63,15 +66,17 @@ export default function RequestDetailDrawer({
   const formatDate = formatAdminDate;
 
   const matchedDirectoryRecord = useMemo(() => {
-    if (!request || !directory || !request.tags?.includes('Already Exists')) return null;
-    return directory.find(
-      (record) => record.email.toLowerCase() === request.person.email.toLowerCase(),
-    );
+    if (!request?.directoryMatch?.directoryId || !directory?.length) return null;
+    return directory.find((record) => record.id === request.directoryMatch.directoryId) || null;
   }, [request, directory]);
 
   if (!request) return null;
 
-  const managerName = getManagerDisplayName(request.submittedBy);
+  const managerName = getManagerDisplayName(request.submittedBy, request.tags);
+  const awaitingManager = isAwaitingManagerSubmission(request.tags);
+  const submittedByLabel = awaitingManager
+    ? 'PureGym automated email'
+    : (request.createdBy || managerName);
   const isAdd = request.action === 'Add';
   const personActionLabel = isAdd ? 'Add' : 'Remove';
   const notesText = request.notes?.trim();
@@ -152,9 +157,14 @@ export default function RequestDetailDrawer({
               label={`${personActionLabel} person`}
               compact
             />
-            {request.tags?.includes('Already Exists') ? (
-              <Tag variant="already-exists" label="Already exists" compact />
-            ) : null}
+            {visibleTableRequestTags(request.tags || []).map((tag) => (
+              <Tag
+                key={tag}
+                variant={requestTagVariant(tag)}
+                label={requestTagLabel(tag)}
+                compact={tag === TAG_ALREADY_EXISTS}
+              />
+            ))}
           </div>
 
           <div className="space-y-0.5">
@@ -168,7 +178,7 @@ export default function RequestDetailDrawer({
               <span aria-hidden="true"> · </span>
               <time dateTime={request.receivedAt}>Received {formatDateTime(request.receivedAt)}</time>
               <span aria-hidden="true"> · </span>
-              <span>Submitted by {request.createdBy || managerName}</span>
+              <span>Submitted by {submittedByLabel}</span>
             </p>
           </div>
         </div>
@@ -176,11 +186,17 @@ export default function RequestDetailDrawer({
         <div className="grid min-h-0 flex-1 grid-rows-[auto_auto_auto] gap-3 overflow-hidden">
           <DetailSection icon={UserRound} title="Manager" id="request-manager-details">
             <DetailRow label="Name" value={managerName} />
-            <DetailRow label="Email" value={request.submittedBy.email} mono />
-            <DetailRow
-              label="Club"
-              value={isManualEntry(request.submittedBy) ? 'Manual entry' : request.submittedBy.club}
-            />
+            {awaitingManager ? (
+              <DetailRow label="Status" value={AWAITING_MANAGER_HINT} />
+            ) : (
+              <>
+                <DetailRow label="Email" value={request.submittedBy.email} mono />
+                <DetailRow
+                  label="Club"
+                  value={isManualEntry(request.submittedBy) ? 'Manual entry' : request.submittedBy.club}
+                />
+              </>
+            )}
           </DetailSection>
 
           <DetailSection icon={User} title={`Person to ${personActionLabel.toLowerCase()}`} id="request-person-details">
@@ -188,6 +204,29 @@ export default function RequestDetailDrawer({
             <DetailRow label="Email" value={request.person.email} mono />
             <DetailRow label="Location" value={request.person.location} />
           </DetailSection>
+
+          {hasComparisonContext(request.intakeMatch, request.directoryMatch) ? (
+            <section
+              aria-labelledby="request-remarks-heading"
+              className="rounded-lg border border-[var(--color-border-default)] bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
+            >
+              <h3
+                id="request-remarks-heading"
+                className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
+              >
+                Comparison
+              </h3>
+              <div className="mt-2">
+                <RequestComparison
+                  intakeMatch={request.intakeMatch}
+                  directoryMatch={request.directoryMatch}
+                  directory={directory}
+                  requestPerson={request.person}
+                  variant="detail"
+                />
+              </div>
+            </section>
+          ) : null}
 
           <section
             aria-labelledby="request-notes-heading"
@@ -208,7 +247,7 @@ export default function RequestDetailDrawer({
             </p>
           </section>
 
-          {request.tags?.includes('Already Exists') && matchedDirectoryRecord ? (
+          {request.directoryMatch && matchedDirectoryRecord ? (
             <div
               role="alert"
               className="flex shrink-0 gap-2.5 rounded-lg border border-amber-200 bg-[var(--color-tag-already-exists-bg)] px-3 py-2.5"
@@ -224,7 +263,8 @@ export default function RequestDetailDrawer({
                   {matchedDirectoryRecord.email}
                 </p>
                 <p className="mt-0.5 opacity-90">
-                  Added {formatDate(matchedDirectoryRecord.dateAdded)} · {matchedDirectoryRecord.location}
+                  {matchedDirectoryRecord.status === 'Removed' ? 'Removed' : 'Added'}{' '}
+                  {formatDate(matchedDirectoryRecord.dateAdded)} · {matchedDirectoryRecord.location}
                 </p>
               </div>
             </div>

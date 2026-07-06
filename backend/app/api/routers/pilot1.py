@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import and_, or_
 
 from app import models
 from app import schemas
@@ -23,7 +23,18 @@ from app.manager_request_serialize import (
     requests_to_api_dicts,
 )
 from app.manager_request_activity import list_partner_activity
-from app.manager_request_intake import create_manager_request, manager_id_for_email
+from app.manager_request_intake import intake_manager_submission, manager_id_for_email
+from app.manager_request_tags import (
+    TAG_ALREADY_EXISTS,
+    TAG_AUTO_MAIL,
+    TAG_UNVERIFIED,
+    TAG_VERIFIED,
+)
+from app.directory_person_match import (
+    active_roster_rows,
+    find_roster_person,
+    roster_match_candidates,
+)
 
 router = APIRouter()
 
@@ -42,18 +53,12 @@ _REASON_RANK = {
     "Last name + location": 1,
 }
 
-_ACTIVE_PERSON_STATUS = "Added"
-
 
 def _handled_directory_query(db: Session):
     return db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
         models.ManagerRequest.outcome.isnot(None),
     )
-
-
-def _active_directory_query(db: Session):
-    return _handled_directory_query(db).filter(models.ManagerRequest.outcome == _ACTIVE_PERSON_STATUS)
 
 
 def _person_search_row(row: models.ManagerRequest) -> dict:
@@ -102,42 +107,13 @@ def _find_duplicate_person(
     last_name: str,
     location: str,
 ) -> models.ManagerRequest | None:
-    if email:
-        match = (
-            _handled_directory_query(db)
-            .filter(func.lower(models.ManagerRequest.person_email) == email)
-            .order_by(models.ManagerRequest.handled_at.desc())
-            .first()
-        )
-        if match:
-            return match
-
-    if first_name and last_name:
-        name_q = _handled_directory_query(db).filter(
-            func.lower(models.ManagerRequest.person_first_name) == first_name,
-            func.lower(models.ManagerRequest.person_last_name) == last_name,
-        )
-        if location:
-            match = name_q.filter(func.lower(models.ManagerRequest.person_location) == location).first()
-            if match:
-                return match
-        match = name_q.first()
-        if match:
-            return match
-
-    if location and not first_name and not last_name and email:
-        match = (
-            _handled_directory_query(db)
-            .filter(
-                func.lower(models.ManagerRequest.person_email) == email,
-                func.lower(models.ManagerRequest.person_location) == location,
-            )
-            .first()
-        )
-        if match:
-            return match
-
-    return None
+    probe = schemas.PersonInfo(
+        firstName=first_name,
+        lastName=last_name,
+        email=email,
+        location=location,
+    )
+    return find_roster_person(db, probe)
 
 
 def _find_related_people(
@@ -148,93 +124,13 @@ def _find_related_people(
     last_name: str,
     location: str,
 ) -> list[tuple[models.ManagerRequest, set[str]]]:
-    """Return all directory rows that share any form field (or field + location)."""
-    results: dict[str, tuple[models.ManagerRequest, set[str]]] = {}
-
-    def add(row: models.ManagerRequest | None, reason: str) -> None:
-        if row is None or row.outcome != _ACTIVE_PERSON_STATUS:
-            return
-        if row.id not in results:
-            results[row.id] = (row, set())
-        results[row.id][1].add(reason)
-
-    def add_all(rows: list[models.ManagerRequest], reason: str) -> None:
-        for row in rows:
-            add(row, reason)
-
-    if email:
-        add_all(
-            _active_directory_query(db).filter(func.lower(models.ManagerRequest.person_email) == email).all(),
-            "Email",
-        )
-
-    if first_name and last_name:
-        add_all(
-            _active_directory_query(db)
-            .filter(
-                func.lower(models.ManagerRequest.person_first_name) == first_name,
-                func.lower(models.ManagerRequest.person_last_name) == last_name,
-            )
-            .all(),
-            "Name",
-        )
-
-    if first_name and location:
-        add_all(
-            _active_directory_query(db)
-            .filter(
-                func.lower(models.ManagerRequest.person_first_name) == first_name,
-                func.lower(models.ManagerRequest.person_location) == location,
-            )
-            .all(),
-            "First name + location",
-        )
-
-    if last_name and location:
-        add_all(
-            _active_directory_query(db)
-            .filter(
-                func.lower(models.ManagerRequest.person_last_name) == last_name,
-                func.lower(models.ManagerRequest.person_location) == location,
-            )
-            .all(),
-            "Last name + location",
-        )
-
-    if email and location:
-        add_all(
-            _active_directory_query(db)
-            .filter(
-                func.lower(models.ManagerRequest.person_email) == email,
-                func.lower(models.ManagerRequest.person_location) == location,
-            )
-            .all(),
-            "Email + location",
-        )
-
-    if first_name and last_name and location:
-        add_all(
-            _active_directory_query(db)
-            .filter(
-                func.lower(models.ManagerRequest.person_first_name) == first_name,
-                func.lower(models.ManagerRequest.person_last_name) == last_name,
-                func.lower(models.ManagerRequest.person_location) == location,
-            )
-            .all(),
-            "Name + location",
-        )
-
-    reason_rank = _REASON_RANK
-
-    def sort_key(item: tuple[models.ManagerRequest, set[str]]) -> tuple:
-        row, reasons = item
-        best_reason = max((reason_rank.get(r, 0) for r in reasons), default=0)
-        added = row.handled_at
-        if added is None:
-            added = datetime.min.replace(tzinfo=timezone.utc)
-        return (-len(reasons), -best_reason, added)
-
-    return sorted(results.values(), key=sort_key)
+    probe = schemas.PersonInfo(
+        firstName=first_name,
+        lastName=last_name,
+        email=email,
+        location=location,
+    )
+    return [(row, {"Match"}) for row in roster_match_candidates(db, probe)]
 
 
 def _related_person_candidates(
@@ -272,21 +168,20 @@ def _form_has_match_criteria(email: str, first_name: str, last_name: str, locati
 
 
 def _search_people(db: Session, query: str, *, limit: int) -> list[models.ManagerRequest]:
-    pattern = f"%{query}%"
-    return (
-        _active_directory_query(db)
-        .filter(
-            or_(
-                func.lower(models.ManagerRequest.person_first_name).like(pattern),
-                func.lower(models.ManagerRequest.person_last_name).like(pattern),
-                func.lower(models.ManagerRequest.person_email).like(pattern),
-                func.lower(func.coalesce(models.ManagerRequest.person_location, "")).like(pattern),
-            )
+    pattern = query.lower()
+    matches: list[models.ManagerRequest] = []
+    for row in active_roster_rows(db):
+        haystacks = (
+            (row.person_first_name or "").lower(),
+            (row.person_last_name or "").lower(),
+            (row.person_email or "").lower(),
+            (row.person_location or "").lower(),
         )
-        .order_by(models.ManagerRequest.handled_at.desc())
-        .limit(limit)
-        .all()
-    )
+        if any(pattern in value for value in haystacks):
+            matches.append(row)
+        if len(matches) >= limit:
+            break
+    return matches
 
 @router.get("/api/requests", response_model=List[schemas.RequestOut])
 def get_requests(db: Session = Depends(get_db), _admin=Depends(require_admin)):
@@ -307,9 +202,25 @@ def get_people(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     )
     return directory_rows_to_api_dicts(db, rows)
 
+def _visible_new_requests_query(db: Session):
+    return (
+        db.query(models.ManagerRequest)
+        .filter(
+            models.ManagerRequest.status == "new",
+            or_(
+                models.ManagerRequest.tags.contains([TAG_VERIFIED]),
+                and_(
+                    models.ManagerRequest.tags.contains([TAG_UNVERIFIED]),
+                    models.ManagerRequest.tags.contains([TAG_AUTO_MAIL]),
+                ),
+            ),
+        )
+    )
+
+
 @router.get("/api/kpis", response_model=schemas.KpiOut)
 def get_kpis(db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    pending = db.query(models.ManagerRequest).filter(models.ManagerRequest.status == "new").count()
+    pending = _visible_new_requests_query(db).count()
     users = _handled_directory_query(db).count()
     return {"pendingRequests": pending, "usersInLedger": users}
 
@@ -317,8 +228,7 @@ def get_kpis(db: Session = Depends(get_db), _admin=Depends(require_admin)):
 @router.get("/api/dashboard", response_model=schemas.DashboardOut)
 def get_dashboard(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     pending = (
-        db.query(models.ManagerRequest)
-        .filter(models.ManagerRequest.status == "new")
+        _visible_new_requests_query(db)
         .order_by(request_id_numeric_desc())
         .all()
     )
@@ -368,12 +278,12 @@ def _create_manager_request_row(
     new_id: Optional[str] = None,
     manager_user_id: Optional[str] = None,
 ) -> models.ManagerRequest:
-    return create_manager_request(
+    return intake_manager_submission(
         db,
         person=person,
         action=action,
         manager_notes=notes,
-        manager_user_id=manager_user_id,
+        manager_id=_manager_id_for_submitter(db, submitted_by, manager_user_id=manager_user_id),
         new_id=new_id,
     )
 
@@ -446,8 +356,7 @@ def get_admin_requests(status: Optional[str] = None, db: Session = Depends(get_d
 @router.get("/api/admin/requests/page", response_model=schemas.NewRequestsPageOut)
 def get_new_requests_page(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     db_requests = (
-        db.query(models.ManagerRequest)
-        .filter(models.ManagerRequest.status == "new")
+        _visible_new_requests_query(db)
         .order_by(request_id_numeric_desc())
         .all()
     )
@@ -499,7 +408,7 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
         firstName=req_in.submittedBy.firstName,
         lastName=req_in.submittedBy.lastName,
         email=req_in.submittedBy.email,
-        club="Manual entry",
+        club=req_in.submittedBy.club,
     )
     request_ids = allocate_request_ids(db, len(req_in.people))
 
@@ -586,12 +495,7 @@ def manager_person_directory(
     _manager=Depends(_limit_directory),
 ):
     """Active directory snapshot for instant client-side search on the manager form."""
-    rows = (
-        _active_directory_query(db)
-        .order_by(models.ManagerRequest.handled_at.desc())
-        .limit(1000)
-        .all()
-    )
+    rows = active_roster_rows(db)[:1000]
     return [_person_search_row(row) for row in rows]
 
 

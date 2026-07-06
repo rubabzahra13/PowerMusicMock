@@ -18,6 +18,7 @@ import PageHeader from '../components/layout/PageHeader';
 import { kpiData, recentActivity } from '../data/mockData';
 import { loadWithCache, getDashboard } from '../utils/pilot2Api';
 import { PanelListSkeleton, ActivitySkeleton } from '../components/ui';
+import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
 
 const CUSTOMER_ACTIVITY_TYPES = new Set(['template_updated']);
 const PARTNER_ACTIVITY_TYPES = new Set([
@@ -325,7 +326,7 @@ export default function Home() {
   };
 
   const duplicateAlerts = (Array.isArray(livePendingRequests) ? livePendingRequests : [])
-    .filter((req) => req.tags?.includes('Already Exists'))
+    .filter((req) => req.tags?.includes(TAG_ALREADY_EXISTS))
     .map((req) => ({
       id: req.id,
       title: 'Potential duplicate entry',

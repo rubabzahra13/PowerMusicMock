@@ -1,10 +1,8 @@
 // Backend base URL.
-// - Local dev: falls back to the FastAPI dev server on localhost:8000.
-// - Production: frontend and backend share one Vercel deployment/domain, so
-//   requests go to the same origin ('' → relative /api/... paths).
+// - Local dev: same-origin /api/* via Vite proxy (see vite.config.js).
 // - VITE_API_URL overrides both if the backend ever lives elsewhere.
 const API_BASE =
-  import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '' : 'http://127.0.0.1:8000');
+  import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '' : '');
 
 const DEFAULT_TIMEOUT_MS = 12000;
 
@@ -83,7 +81,7 @@ export async function fetchJson(path, options = {}) {
     if (isUserAbort(err, userSignal)) throw err;
     if (err?.name === 'AbortError') {
       throw new Error(
-        'Could not reach the API. Start the backend: cd backend && .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000',
+        'The API did not respond in time. Check that the backend is running: cd backend && .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000',
       );
     }
     if (err instanceof TypeError) {

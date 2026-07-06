@@ -10,15 +10,20 @@ export function TruncateCell({ children, className = '' }) {
   );
 }
 
-export function StackedTextCell({ primary, secondary }) {
+export function StackedTextCell({ primary, secondary, tertiary, primaryClassName = '' }) {
   return (
     <div className="min-w-0">
-      <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]">
+      <TruncateCell className={`text-sm font-semibold text-[var(--color-text-primary)] ${primaryClassName}`.trim()}>
         {primary}
       </TruncateCell>
       {secondary ? (
         <TruncateCell className="text-xs text-[var(--color-text-secondary)] mt-0.5">
           {secondary}
+        </TruncateCell>
+      ) : null}
+      {tertiary ? (
+        <TruncateCell className="text-xs text-[var(--color-text-muted)] mt-0.5">
+          {tertiary}
         </TruncateCell>
       ) : null}
     </div>

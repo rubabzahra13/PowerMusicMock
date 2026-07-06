@@ -86,6 +86,28 @@ class ManagerBatchRequestIn(BaseModel):
         return normalize_text(value, max_length=5000, allow_empty=True, field_name="notes")
 
 
+class PersonFieldMatchOut(BaseModel):
+    field: str
+    label: str
+    status: Literal["same", "differs"]
+    leftValue: str = ""
+    rightValue: str = ""
+    leftLabel: str = ""
+    rightLabel: str = ""
+
+
+class RequestMatchOut(BaseModel):
+    kind: str
+    allMatch: bool
+    summary: str
+    fields: List[PersonFieldMatchOut] = []
+
+
+class DirectoryMatchOut(RequestMatchOut):
+    directoryId: Optional[str] = None
+    directoryName: Optional[str] = None
+
+
 class RequestOut(BaseModel):
     id: str
     displayId: int
@@ -101,6 +123,8 @@ class RequestOut(BaseModel):
     handledBy: Optional[str] = None
     managerId: Optional[str] = None
     handledByAdminId: Optional[str] = None
+    intakeMatch: Optional[RequestMatchOut] = None
+    directoryMatch: Optional[DirectoryMatchOut] = None
 
     @model_validator(mode="before")
     @classmethod

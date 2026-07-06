@@ -51,7 +51,7 @@ export default function Drawer({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-hidden={!isOpen}
-        inert={isOpen ? undefined : ''}
+        inert={isOpen ? undefined : true}
         className={`fixed top-0 right-0 bottom-0 z-[101] flex w-full ${widthClass} flex-col border-l border-[var(--color-border-default)] bg-white shadow-[var(--shadow-drawer)] transition-transform duration-300 ease-out ${
           isOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'
         }`}

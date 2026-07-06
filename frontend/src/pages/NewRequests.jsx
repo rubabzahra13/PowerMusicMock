@@ -5,8 +5,9 @@ import {
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL } from '../components/ui';
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
+import RequestComparison from '../components/RequestComparison';
 import PageHeader from '../components/layout/PageHeader';
-import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
+import { getManagerColumnContent, getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 import { loadWithCache, patchCache, writeCache, refreshCache, getNewRequestsPage } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import {
@@ -18,7 +19,7 @@ import {
 } from '../utils/adminUiHighlights';
 import { useAuth } from '../context/AuthContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
-import { TAG_ALREADY_EXISTS, requestTagVariant } from '../utils/requestTags';
+import { TAG_ALREADY_EXISTS, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission } from '../utils/requestTags';
 
 const SORT_PRESETS = [
   { value: 'displayId-desc', label: 'ID (newest first)' },
@@ -358,7 +359,12 @@ export default function Requests() {
     const filtered = rows.filter((req) => {
       const personName = `${req.person.firstName} ${req.person.lastName}`.toLowerCase();
       const isManual = isManualEntry(req.submittedBy);
-      const managerName = isManual ? 'admin' : `${req.submittedBy?.firstName || ''} ${req.submittedBy?.lastName || ''}`.toLowerCase();
+      const awaitingManager = isAwaitingManagerSubmission(req.tags);
+      const managerName = awaitingManager
+        ? 'awaiting partner request'
+        : isManual
+          ? 'admin'
+          : `${req.submittedBy?.firstName || ''} ${req.submittedBy?.lastName || ''}`.toLowerCase();
 
       const matchesSearch =
         query === '' ||
@@ -376,7 +382,7 @@ export default function Requests() {
         filterLocation === 'All' || req.person.location === filterLocation;
       const matchesClub =
         filterClub === 'All' || req.submittedBy?.club === filterClub;
-      const hasAlreadyExists = req.tags?.includes('Already Exists');
+      const hasAlreadyExists = req.tags?.includes(TAG_ALREADY_EXISTS);
       const matchesAlreadyExists =
         filterAlreadyExists === 'All' ||
         (filterAlreadyExists === 'Yes' && hasAlreadyExists) ||
@@ -537,8 +543,8 @@ export default function Requests() {
             status: outcome,
             dateAdded: handledAt,
             requestReceivedAt: req.receivedAt,
-            addedBy: req.createdBy || getManagerDisplayName(req.submittedBy),
-            managerName: req.createdBy || getManagerDisplayName(req.submittedBy),
+            addedBy: req.createdBy || getManagerDisplayName(req.submittedBy, req.tags),
+            managerName: req.createdBy || getManagerDisplayName(req.submittedBy, req.tags),
             handledBy: adminDisplayName,
             managerEmail: req.submittedBy?.email || '',
             club: req.submittedBy?.club || '',
@@ -600,9 +606,10 @@ export default function Requests() {
     },
     {
       key: 'timestamp',
-      label: 'Timestamp',
+      label: 'Received',
       width: '108px',
       noShrink: true,
+      headerClassName: 'text-center',
       cellClassName: 'align-middle whitespace-nowrap',
       render: (_, row) => <TimestampCell val={row.receivedAt} />
     },
@@ -611,66 +618,50 @@ export default function Requests() {
       label: 'Type',
       width: '72px',
       noShrink: true,
-      cellClassName: 'align-middle whitespace-nowrap',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle whitespace-nowrap text-center',
       render: (val) => <Tag variant={val === 'Add' ? 'add-action' : 'remove-action'} label={val} />
     },
     {
       key: 'person',
       label: 'Person',
       width: '19%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (_, row) => {
-        const isNew = isRequestUnseen(row.id);
         const name = `${row.person.firstName} ${row.person.lastName}`.trim();
         return (
           <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {name}
-              </TruncateCell>
-              {isNew ? (
-                <span className="shrink-0 rounded-full bg-[var(--color-brand-primary)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
-                  New
-                </span>
-              ) : null}
-            </div>
+            <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]">
+              {name}
+            </TruncateCell>
             <TruncateCell className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
               {row.person.email}
+            </TruncateCell>
+            <TruncateCell className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              {row.person.location || EMPTY_CELL}
             </TruncateCell>
           </div>
         );
       },
     },
     {
-      key: 'personLocation',
-      label: 'Location',
-      width: '9%',
-      render: (_, row) => (
-        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {row.person.location || EMPTY_CELL}
-        </TruncateCell>
-      )
-    },
-    {
       key: 'manager',
       label: 'Manager',
       width: '19%',
-      render: (_, row) => (
-        <StackedTextCell
-          primary={getManagerDisplayName(row.submittedBy)}
-          secondary={row.submittedBy?.email || EMPTY_CELL}
-        />
-      )
-    },
-    {
-      key: 'managerClub',
-      label: 'Manager Club',
-      width: '13%',
-      cellClassName: 'align-middle max-w-0 overflow-hidden',
-      render: (_, row) => (
-        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {row.submittedBy?.club}
-        </TruncateCell>
-      )
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
+      render: (_, row) => {
+        const manager = getManagerColumnContent(row);
+        return (
+          <StackedTextCell
+            primary={manager.primary || EMPTY_CELL}
+            secondary={manager.secondary || undefined}
+            tertiary={manager.tertiary || undefined}
+            primaryClassName={manager.muted ? 'font-medium text-[var(--color-text-muted)] italic' : ''}
+          />
+        );
+      }
     }
   ];
 
@@ -678,28 +669,43 @@ export default function Requests() {
     ...sharedStartColumns,
     {
       key: 'tags',
-      label: 'Tags',
-      width: '10%',
-      cellClassName: 'align-middle max-w-0 overflow-hidden pl-2 pr-1',
-      render: (val) => (
-        <div className="flex items-center justify-start min-w-0 -ml-1">
-          {(val || []).map((t) => (
-            <Tag key={t} variant={requestTagVariant(t)} label={t} compact={t === TAG_ALREADY_EXISTS} />
+      label: 'Sent via',
+      width: '18%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden pl-2 pr-1 text-center',
+      render: (_, row) => (
+        <div className="flex flex-col items-center justify-center gap-1 min-w-0 px-1">
+          {sentViaTableRequestTags(row.tags || []).map((t) => (
+            <Tag key={t} variant={requestTagVariant(t)} label={requestTagLabel(t)} compact />
           ))}
         </div>
       )
     },
     {
-      key: 'actions',
-      label: 'Mark as',
-      width: '128px',
-      noShrink: true,
-      cellClassName: 'text-right align-middle whitespace-nowrap pl-0 pr-2',
+      key: 'remarks',
+      label: 'Needs review',
+      width: '22%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left px-2 py-1.5',
       render: (_, row) => (
-        <div
-          className="flex items-center justify-end gap-1"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <RequestComparison
+          intakeMatch={row.intakeMatch}
+          directoryMatch={row.directoryMatch}
+          directory={liveDirectory}
+          requestPerson={row.person}
+          variant="table"
+        />
+      )
+    },
+    {
+      key: 'rowActions',
+      label: 'Actions',
+      width: '56px',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
+      render: (_, row) => (
+        <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
             onClick={() => handleOpenRequest(row)}
@@ -708,9 +714,21 @@ export default function Requests() {
           >
             <Eye className="h-4 w-4" />
           </button>
+        </div>
+      )
+    },
+    {
+      key: 'markAs',
+      label: 'Mark as',
+      width: '128px',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
+      render: (_, row) => (
+        <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
-            onClick={() => setConfirmActionRequest(row)}
+            onClick={() => setConfirmActionRequest({ request: row, adminNote: '' })}
             className={`min-w-[4.75rem] w-[4.75rem] text-center px-2 py-1.5 text-xs font-semibold rounded-md border transition-all cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.12)] active:translate-y-px active:shadow-none shrink-0 ${
               row.action === 'Add'
                 ? 'bg-[#16a34a] text-white border-[#15803d] hover:bg-[#15803d]'
@@ -725,7 +743,7 @@ export default function Requests() {
   ];
 
   const displayedRows = useMemo(
-    () => filteredRequests.map((req) => ({ ...req, alreadyExists: req.tags?.includes('Already Exists') })),
+    () => filteredRequests.map((req) => ({ ...req, alreadyExists: req.tags?.includes(TAG_ALREADY_EXISTS) })),
     [filteredRequests]
   );
 

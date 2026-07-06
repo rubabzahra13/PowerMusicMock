@@ -5,53 +5,32 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models, schemas
-from app.manager_request_tags import TAG_ALREADY_EXISTS
+from app.directory_person_match import duplicate_tags_for_person
+from app.manager_request_tags import (
+    MANAGER_SUBMIT_TAGS,
+    TAG_AUTO_MAIL,
+    TAG_PARTNER_REQUEST,
+    TAG_UNVERIFIED,
+    TAG_VERIFIED,
+    has_tag,
+    merge_tags,
+    normalize_tags,
+)
+from app.intake_persons import apply_person_to_row, sync_display_person
+from app.person_match import same_person
 from app.request_display import allocate_request_ids
 
 
-def _handled_directory_query(db: Session):
-    return db.query(models.ManagerRequest).filter(
-        models.ManagerRequest.status == "handled",
-        models.ManagerRequest.outcome.isnot(None),
-    )
-
-
-def duplicate_tags_for_person(db: Session, person: schemas.PersonInfo) -> List[str]:
-    tags: List[str] = []
-    p_email = (person.email or "").strip().lower()
-    p_first = (person.firstName or "").strip().lower()
-    p_last = (person.lastName or "").strip().lower()
-
-    duplicate = False
-    if p_email:
-        duplicate = (
-            _handled_directory_query(db)
-            .filter(func.lower(models.ManagerRequest.person_email) == p_email)
-            .first()
-            is not None
-        )
-
-    if not duplicate and p_first and p_last:
-        duplicate = (
-            _handled_directory_query(db)
-            .filter(
-                func.lower(models.ManagerRequest.person_first_name) == p_first,
-                func.lower(models.ManagerRequest.person_last_name) == p_last,
-            )
-            .first()
-            is not None
-        )
-
-    if duplicate:
-        tags.append(TAG_ALREADY_EXISTS)
-    return tags
+def _new_requests_query(db: Session):
+    return db.query(models.ManagerRequest).filter(models.ManagerRequest.status == "new")
 
 
 def manager_id_for_email(db: Session, email: str) -> Optional[str]:
+    from sqlalchemy import func
+
     normalized = (email or "").strip().lower()
     if not normalized:
         return None
@@ -70,13 +49,178 @@ def build_tags(
     db: Session,
     person: schemas.PersonInfo,
     *,
+    action: str,
     extra_tags: Optional[List[str]] = None,
 ) -> List[str]:
-    tags = list(extra_tags or [])
-    for tag in duplicate_tags_for_person(db, person):
-        if tag not in tags:
-            tags.append(tag)
-    return tags
+    return merge_tags(extra_tags, duplicate_tags_for_person(db, person, action=action))
+
+
+def find_unverified_auto_mail_match(
+    db: Session,
+    person: schemas.PersonInfo,
+    action: str,
+) -> Optional[models.ManagerRequest]:
+    candidates = (
+        _new_requests_query(db)
+        .filter(
+            models.ManagerRequest.action == action,
+            models.ManagerRequest.tags.contains([TAG_UNVERIFIED]),
+            models.ManagerRequest.tags.contains([TAG_AUTO_MAIL]),
+        )
+        .all()
+    )
+    for row in candidates:
+        if same_person(row, person):
+            return row
+    return None
+
+
+def find_verified_new_match(
+    db: Session,
+    person: schemas.PersonInfo,
+    action: str,
+) -> Optional[models.ManagerRequest]:
+    candidates = (
+        _new_requests_query(db)
+        .filter(
+            models.ManagerRequest.action == action,
+            models.ManagerRequest.tags.contains([TAG_VERIFIED]),
+        )
+        .all()
+    )
+    for row in candidates:
+        if same_person(row, person):
+            return row
+    return None
+
+
+def attach_auto_mail_to_request(
+    db: Session,
+    req: models.ManagerRequest,
+    *,
+    person: schemas.PersonInfo,
+    manager_notes: Optional[str] = None,
+) -> models.ManagerRequest:
+    apply_person_to_row(req, person, source="autoMail")
+    if manager_notes:
+        req.manager_notes = manager_notes
+    req.tags = merge_tags(
+        req.tags,
+        [TAG_AUTO_MAIL],
+        duplicate_tags_for_person(db, person, action=req.action),
+    )
+    sync_display_person(req)
+    return req
+
+
+def verify_unverified_request(
+    db: Session,
+    req: models.ManagerRequest,
+    *,
+    person: schemas.PersonInfo,
+    manager_id: Optional[str],
+    manager_notes: Optional[str] = None,
+) -> models.ManagerRequest:
+    req.manager_id = manager_id
+    apply_person_to_row(req, person, source="partner")
+    if manager_notes:
+        existing = (req.manager_notes or "").strip()
+        req.manager_notes = manager_notes if not existing else f"{existing}\n\n{manager_notes}"
+
+    base = [t for t in (req.tags or []) if t not in {TAG_UNVERIFIED}]
+    req.tags = merge_tags(
+        base,
+        MANAGER_SUBMIT_TAGS,
+        duplicate_tags_for_person(db, person, action=req.action),
+    )
+    sync_display_person(req)
+    return req
+
+
+def intake_manager_submission(
+    db: Session,
+    *,
+    person: schemas.PersonInfo,
+    action: str,
+    manager_id: Optional[str] = None,
+    manager_notes: Optional[str] = None,
+    new_id: Optional[str] = None,
+) -> models.ManagerRequest:
+    """Manager portal / admin manual submit — verifies pending auto-mail or creates verified row."""
+    pending = find_unverified_auto_mail_match(db, person, action)
+    if pending:
+        return verify_unverified_request(
+            db,
+            pending,
+            person=person,
+            manager_id=manager_id,
+            manager_notes=manager_notes,
+        )
+
+    return create_manager_request(
+        db,
+        person=person,
+        action=action,
+        manager_notes=manager_notes,
+        manager_id=manager_id,
+        extra_tags=MANAGER_SUBMIT_TAGS,
+        new_id=new_id,
+    )
+
+
+def intake_automated_email_request(
+    db: Session,
+    *,
+    person: schemas.PersonInfo,
+    action: str,
+    manager_notes: Optional[str] = None,
+    received_at: Optional[datetime] = None,
+    source_email_id: Optional[str] = None,
+    source_gmail_message_id: Optional[str] = None,
+) -> models.ManagerRequest:
+    """PureGym auto email — attach to verified row or store as unverified (hidden)."""
+    if source_gmail_message_id:
+        existing = (
+            db.query(models.ManagerRequest)
+            .filter(models.ManagerRequest.source_gmail_message_id == source_gmail_message_id)
+            .first()
+        )
+        if existing:
+            return existing
+
+    verified = find_verified_new_match(db, person, action)
+    if verified:
+        if source_gmail_message_id:
+            verified.source_gmail_message_id = source_gmail_message_id
+        if source_email_id:
+            verified.source_email_id = source_email_id
+        return attach_auto_mail_to_request(
+            db,
+            verified,
+            person=person,
+            manager_notes=manager_notes,
+        )
+
+    pending = find_unverified_auto_mail_match(db, person, action)
+    if pending:
+        return attach_auto_mail_to_request(
+            db,
+            pending,
+            person=person,
+            manager_notes=manager_notes,
+        )
+
+    return create_manager_request(
+        db,
+        person=person,
+        action=action,
+        manager_notes=manager_notes,
+        manager_id=None,
+        extra_tags=[TAG_UNVERIFIED, TAG_AUTO_MAIL],
+        received_at=received_at,
+        source_email_id=source_email_id,
+        source_gmail_message_id=source_gmail_message_id,
+    )
 
 
 def create_manager_request(
@@ -125,10 +269,17 @@ def create_manager_request(
         person_location=person.location or "",
         action=action,
         manager_notes=manager_notes,
-        tags=build_tags(db, person, extra_tags=extra_tags),
+        tags=build_tags(db, person, action=action, extra_tags=extra_tags),
         status="new",
         source_email_id=source_email_id,
         source_gmail_message_id=source_gmail_message_id,
+        intake_persons={},
     )
+    normalized_extra = normalize_tags(extra_tags)
+    if resolved_manager_id or has_tag(normalized_extra, TAG_PARTNER_REQUEST):
+        apply_person_to_row(row, person, source="partner")
+    elif has_tag(normalized_extra, TAG_AUTO_MAIL):
+        apply_person_to_row(row, person, source="autoMail")
+    sync_display_person(row)
     db.add(row)
     return row

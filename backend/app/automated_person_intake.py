@@ -10,8 +10,7 @@ from typing import Literal, Optional
 from sqlalchemy.orm import Session
 
 from app import models, schemas
-from app.manager_request_intake import create_manager_request
-from app.manager_request_tags import TAG_AUTOMATED_EMAIL
+from app.manager_request_intake import intake_automated_email_request
 
 logger = logging.getLogger(__name__)
 
@@ -186,12 +185,11 @@ def intake_puregym_roster_message(
         return False
 
     person, action = parsed
-    create_manager_request(
+    intake_automated_email_request(
         db,
         person=person,
         action=action,
         manager_notes=_manager_notes(subject, body, action),
-        extra_tags=[TAG_AUTOMATED_EMAIL],
         received_at=received_at,
         source_gmail_message_id=gmail_message_id,
     )

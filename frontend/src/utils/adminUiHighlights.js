@@ -5,7 +5,7 @@ const UNSEEN_REQUESTS_KEY = 'pm_admin_unseen_request_ids';
 
 /** LinkedIn-style unseen row highlight (new requests + directory). */
 export const ADMIN_NEW_ROW_HIGHLIGHT_CLASS =
-  'bg-[#e8f3fc] hover:bg-[#dbeafa] shadow-[inset_3px_0_0_0_var(--color-brand-primary)]';
+  'bg-[var(--color-surface-highlight)] hover:bg-[var(--color-surface-highlight-strong)] shadow-[inset_3px_0_0_0_var(--color-brand-primary)]';
 
 function readJson(key, fallback) {
   try {

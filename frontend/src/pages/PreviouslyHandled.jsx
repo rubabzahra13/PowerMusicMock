@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Search, Download, Info, SortAsc, SortDesc, ChevronDown, Filter } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { handledRequests } from '../data/mockData';
-import { TAG_ALREADY_EXISTS, TAG_AUTOMATED_EMAIL, requestTagVariant } from '../utils/requestTags';
+import { TAG_ALREADY_EXISTS, TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_UNVERIFIED, TAG_VERIFIED, requestTagVariant, sortRequestTags } from '../utils/requestTags';
 import { DataTable, Tag, Drawer, EMPTY_CELL } from '../components/ui';
 
 // ─── Shared Controls Bar (same pattern as NewRequests) ────────────────────────
@@ -311,7 +311,7 @@ export default function PreviouslyHandled() {
       label: 'Status / Tags',
       render: (tagsList) => (
         <div className="flex flex-wrap gap-1.5">
-          {tagsList.map((t) => (
+          {sortRequestTags(tagsList).map((t) => (
             <Tag key={t} variant={requestTagVariant(t)} label={t} />
           ))}
         </div>
@@ -358,7 +358,10 @@ export default function PreviouslyHandled() {
             options: [
               { value: 'All', label: 'All Tags' },
               { value: TAG_ALREADY_EXISTS, label: TAG_ALREADY_EXISTS },
-              { value: TAG_AUTOMATED_EMAIL, label: TAG_AUTOMATED_EMAIL },
+              { value: TAG_VERIFIED, label: TAG_VERIFIED },
+              { value: TAG_UNVERIFIED, label: TAG_UNVERIFIED },
+              { value: TAG_PARTNER_REQUEST, label: TAG_PARTNER_REQUEST },
+              { value: TAG_AUTO_MAIL, label: TAG_AUTO_MAIL },
             ]
           }
         ]}
@@ -402,7 +405,7 @@ export default function PreviouslyHandled() {
                 <div>Handled: {formatDateTime(selectedRequest.handledAt)}</div>
               </div>
               <div className="flex flex-wrap gap-1.5 shrink-0 max-w-[200px] justify-end">
-                {selectedRequest.tags.map((t) => (
+                {sortRequestTags(selectedRequest.tags).map((t) => (
                   <Tag key={t} variant={requestTagVariant(t)} label={t} />
                 ))}
               </div>

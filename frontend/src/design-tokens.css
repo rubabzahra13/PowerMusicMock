@@ -36,6 +36,18 @@
   --color-tag-add-action-text: #166534;
   --color-tag-remove-action-bg: #fee2e2;
   --color-tag-remove-action-text: #991b1b;
+  --color-tag-auto-mail-bg: #c8daf2;
+  --color-tag-auto-mail-text: #1e3a5f;
+  --color-tag-auto-mail-border: #9bb8d4;
+  --color-tag-review-exists-bg: #fef3c7;
+  --color-tag-review-exists-text: #92400e;
+  --color-tag-review-exists-border: #fcd34d;
+  --color-tag-review-mismatch-bg: #e8f3fc;
+  --color-tag-review-mismatch-text: #1e3a5f;
+  --color-tag-review-mismatch-border: #b8d4ea;
+  --color-tag-review-removed-bg: #e0e7ff;
+  --color-tag-review-removed-text: #3730a3;
+  --color-tag-review-removed-border: #a5b4fc;
 
   /* Signals */
   --color-signal-amber: #f59e0b;

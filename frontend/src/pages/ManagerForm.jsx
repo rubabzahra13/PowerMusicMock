@@ -307,6 +307,9 @@ export default function ManagerForm() {
       );
       if (user?.id) clearManagerFormDraft(user.id);
       setSubmittedCount(count);
+      setSearchInput('');
+      setPersonForms([{ ...EMPTY_PERSON_FORM }]);
+      setNotes('');
       setSubmitted(true);
     } catch (err) {
       console.error(err);
@@ -420,9 +423,10 @@ export default function ManagerForm() {
   }, [searchResults, formMatchResults, hasSearchQuery]);
 
   const showDirectoryResults =
-    hasSearchQuery ||
-    formMatchResults.length > 0 ||
-    personForms.some(formHasMatchCriteria);
+    !submitted &&
+    (hasSearchQuery ||
+      formMatchResults.length > 0 ||
+      personForms.some(formHasMatchCriteria));
   const showInitialDirectoryLoading = directoryLoading && directoryPeople.length === 0;
   const multipleUsers = personForms.length > 1;
   const userSectionTitle =
@@ -814,12 +818,13 @@ export default function ManagerForm() {
               placeholder="Search by name or email..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
+              disabled={submitted}
               aria-label="Search by name or email"
               className={`${inputClass} pl-9`}
             />
           </div>
 
-          {searchQueryHint && (
+          {searchQueryHint && !submitted && (
             <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]" role="status">
               {searchQueryHint}
             </p>
@@ -914,7 +919,8 @@ export default function ManagerForm() {
                         </td>
                       </tr>
                     )}
-                  {!showInitialDirectoryLoading &&
+                  {!submitted &&
+                    !showInitialDirectoryLoading &&
                     displayResults.map((row) => {
                       const isMatch = directoryRowMatchesForm(row);
                       const isAdded = row.status === 'Added';

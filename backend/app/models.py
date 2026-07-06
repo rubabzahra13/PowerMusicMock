@@ -47,6 +47,7 @@ class ManagerRequest(Base):
     outcome = Column(String, nullable=True)
     source_email_id = Column(String, ForeignKey("emails.id"), nullable=True, unique=True)
     source_gmail_message_id = Column(String, nullable=True, unique=True)
+    intake_persons = Column(JSONB, nullable=False, server_default="{}")
 
 
 # Backward-compatible alias used across the codebase during refactor.

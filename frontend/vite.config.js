@@ -6,4 +6,15 @@ export default defineConfig({
   plugins: [react()],
   // Only VITE_* vars are exposed to the client bundle.
   envPrefix: 'VITE_',
+  server: {
+    host: true,
+    port: 3000,
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
+  },
 })
