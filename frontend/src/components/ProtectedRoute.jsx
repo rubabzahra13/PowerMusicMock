@@ -30,26 +30,28 @@ export function AdminRoute() {
 export function ManagerRoute() {
   const { user, role, session, authReady } = useAuth();
 
+  // Already-known signed-in manager (remembered login, read from cache
+  // synchronously) → render instantly, no blank wait while the background
+  // session check runs. If that check later fails, the 401 handler signs out.
+  if (user && session?.access_token && role === 'manager') {
+    return <Outlet />;
+  }
+
+  // Known admin → straight to the admin dashboard.
+  if (user && (role === 'admin' || isAdminEmail(user.email))) {
+    return <Navigate to="/" replace />;
+  }
+
+  // Nothing known yet — wait for the auth check rather than flashing content.
   if (!authReady) {
     return <ManagerAuthLoading />;
   }
 
-  if (!user) {
+  if (!user || !session?.access_token) {
     return <Navigate to="/submit/signup" replace state={{ from: '/submit' }} />;
   }
 
-  if (!session?.access_token) {
-    return authReady ? (
-      <Navigate to="/submit/signup" replace state={{ from: '/submit' }} />
-    ) : (
-      <ManagerAuthLoading />
-    );
-  }
-
-  if (role === 'admin' || isAdminEmail(user.email)) {
-    return <Navigate to="/" replace />;
-  }
-
+  // Signed in but role not resolved yet.
   if (!role) {
     return <ManagerAuthLoading />;
   }
@@ -61,18 +63,21 @@ export function ManagerRoute() {
 export function ManagerGuestRoute() {
   const { user, role, authReady } = useAuth();
 
-  if (!authReady) {
-    return <ManagerAuthLoading />;
-  }
-
+  // Known signed-in user → redirect immediately, no blank.
   if (user && (role === 'admin' || isAdminEmail(user.email))) {
     return <Navigate to="/" replace />;
   }
-
   if (user && role === 'manager') {
     return <Navigate to="/submit" replace />;
   }
 
+  // A cached user with no known role yet — wait briefly so we don't flash the
+  // login form before redirecting them in.
+  if (user && !authReady) {
+    return <ManagerAuthLoading />;
+  }
+
+  // No signed-in user → show the login / signup form right away (it's public).
   return <Outlet />;
 }
 
