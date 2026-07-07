@@ -26,23 +26,17 @@ function AuthCanvasBackground() {
   );
 }
 
+/** Auth check placeholder — plain canvas, no spinner/text, so routes never
+ *  flash a "loading screen" (or a white one) while the session resolves. */
 export function ManagerAuthLoading() {
   useAuthPageCanvas();
 
   return (
     <div
-      className="fixed inset-0 z-0 flex items-center justify-center overflow-hidden overscroll-y-none"
+      className="fixed inset-0 z-0 overflow-hidden overscroll-y-none"
       style={{ backgroundColor: AUTH_PAGE_CANVAS }}
-    >
-      <div className="flex flex-col items-center gap-3 text-center px-6">
-        <div
-          className="w-10 h-10 border-[3px] border-white/90 border-t-transparent rounded-full animate-spin"
-          role="status"
-          aria-label="Loading"
-        />
-        <p className="text-sm font-medium text-white/80">Loading Power Music Ops…</p>
-      </div>
-    </div>
+      aria-hidden="true"
+    />
   );
 }
 
