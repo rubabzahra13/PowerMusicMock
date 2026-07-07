@@ -56,6 +56,7 @@ from app.manager_request_tags import (
 from app.directory_person_match import (
     find_roster_person,
     roster_match_candidates,
+    removed_snapshot_rows,
     roster_snapshot_rows,
     search_roster_rows,
 )
@@ -690,11 +691,17 @@ def mark_all_manager_requests_seen(
 
 @router.get("/api/manager/persons/directory", response_model=List[schemas.PersonSearchOut])
 def manager_person_directory(
+    outcome: str = "Added",
     db: Session = Depends(get_db),
     _manager=Depends(_limit_directory),
 ):
     """Roster snapshot for instant client-side search (load in background)."""
-    rows = roster_snapshot_rows(db, limit=1000)
+    if outcome not in {"Added", "Removed"}:
+        raise HTTPException(status_code=422, detail="outcome must be Added or Removed")
+    if outcome == "Removed":
+        rows = removed_snapshot_rows(db, limit=1000)
+    else:
+        rows = roster_snapshot_rows(db, limit=1000)
     return [_person_search_row(row) for row in rows]
 
 

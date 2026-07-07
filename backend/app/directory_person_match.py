@@ -145,7 +145,10 @@ def _probe_handled_rows(db: Session, person: schemas.PersonInfo) -> List[models.
     return list(by_id.values())
 
 
-def _dedupe_latest_roster(rows: List[models.ManagerRequest]) -> List[models.ManagerRequest]:
+def _dedupe_current_outcome(
+    rows: List[models.ManagerRequest],
+    outcome: str,
+) -> List[models.ManagerRequest]:
     roster: List[models.ManagerRequest] = []
     represented: List[models.ManagerRequest] = []
 
@@ -153,9 +156,13 @@ def _dedupe_latest_roster(rows: List[models.ManagerRequest]) -> List[models.Mana
         if any(same_person(row, prior) for prior in represented):
             continue
         represented.append(row)
-        if row.outcome == "Added":
+        if row.outcome == outcome:
             roster.append(row)
     return roster
+
+
+def _dedupe_latest_roster(rows: List[models.ManagerRequest]) -> List[models.ManagerRequest]:
+    return _dedupe_current_outcome(rows, "Added")
 
 
 def find_latest_directory_match(
@@ -217,6 +224,21 @@ def roster_snapshot_rows(db: Session, *, limit: int = 1000) -> List[models.Manag
         .all()
     )
     return _dedupe_latest_roster(rows)[:limit]
+
+
+def removed_snapshot_rows(db: Session, *, limit: int = 1000) -> List[models.ManagerRequest]:
+    """People currently off the roster (latest handled state is Removed)."""
+    rows = (
+        db.query(models.ManagerRequest)
+        .filter(
+            models.ManagerRequest.status == "handled",
+            models.ManagerRequest.outcome.isnot(None),
+        )
+        .order_by(models.ManagerRequest.handled_at.desc())
+        .limit(max(limit * 4, limit))
+        .all()
+    )
+    return _dedupe_current_outcome(rows, "Removed")[:limit]
 
 
 def active_roster_rows(db: Session) -> List[models.ManagerRequest]:

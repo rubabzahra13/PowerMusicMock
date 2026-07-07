@@ -128,13 +128,15 @@ export default function ManagerForm() {
   const [submitted, setSubmitted] = useState(false);
   const [submittedCount, setSubmittedCount] = useState(1);
   const [requestRefreshToken, setRequestRefreshToken] = useState(0);
-  const { people: directoryPeople, loading: directoryLoading, error: directoryError } =
-    useManagerDirectory(user?.id, session?.access_token, {
-      enabled: !submitted && Boolean(user?.id && session?.access_token),
-    });
   const [submitting, setSubmitting] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [action, setAction] = useState('Add');
+  const directoryOutcome = action === 'Remove' ? 'Removed' : 'Added';
+  const { people: directoryPeople, loading: directoryLoading, error: directoryError } =
+    useManagerDirectory(user?.id, session?.access_token, {
+      enabled: !submitted && Boolean(user?.id && session?.access_token),
+      outcome: directoryOutcome,
+    });
   const [searchInput, setSearchInput] = useState('');
 
   const [personForms, setPersonForms] = useState([{ ...EMPTY_PERSON_FORM }]);
@@ -507,6 +509,16 @@ export default function ManagerForm() {
     { value: 'Add', label: 'Request addition', icon: UserPlus },
     { value: 'Remove', label: 'Request removal', icon: UserMinus },
   ];
+  const isRemoveAction = action === 'Remove';
+  const directoryPanelTitle = isRemoveAction ? 'Removed users' : 'Existing Users';
+  const directoryPanelDescription = isRemoveAction
+    ? 'Search removed users by name or email. Person details on the form are checked automatically.'
+    : 'Search by name or email. Person details on the form are checked automatically.';
+  const directoryDateColumnLabel = isRemoveAction ? 'Removed' : 'Added';
+  const directoryLoadingLabel = isRemoveAction ? 'Loading removed users…' : 'Loading directory…';
+  const directoryFooterText = isRemoveAction
+    ? 'Rows that share any name, email, or location detail with your form are also listed here from removed users.'
+    : 'Rows that share any name, email, or location detail with your form are also listed here.';
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--color-surface-bg)] font-sans antialiased">
@@ -851,8 +863,10 @@ export default function ManagerForm() {
                               <p className="font-semibold">
                                 {showRowLabel ? `User ${index + 1}: ` : ''}
                                 {rowMatches.length === 1
-                                  ? 'This person may already be in the system.'
-                                  : `${rowMatches.length} possible matches found in the directory.`}
+                                  ? isRemoveAction
+                                    ? 'This person may already be removed from the system.'
+                                    : 'This person may already be in the system.'
+                                  : `${rowMatches.length} possible matches found in the ${isRemoveAction ? 'removed users' : 'directory'}.`}
                               </p>
                               <p className="opacity-90">
                                 Please review before submitting. You can still proceed.
@@ -944,10 +958,10 @@ export default function ManagerForm() {
               id="directory-search-heading"
               className="text-base font-semibold text-[var(--color-text-primary)]"
             >
-              Existing Users
+              {directoryPanelTitle}
             </h2>
             <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-              Search by name or email. Person details on the form are checked automatically.
+              {directoryPanelDescription}
             </p>
           </div>
 
@@ -977,7 +991,9 @@ export default function ManagerForm() {
           <div className="overflow-hidden rounded-lg border border-[var(--color-border-default)]">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[520px] table-fixed border-collapse text-left text-xs">
-                <caption className="sr-only">Directory search results</caption>
+                <caption className="sr-only">
+                  {isRemoveAction ? 'Removed users search results' : 'Directory search results'}
+                </caption>
                 <colgroup>
                   <col className="w-[22%]" />
                   <col className="w-[30%]" />
@@ -1009,7 +1025,7 @@ export default function ManagerForm() {
                       scope="col"
                       className="px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
                     >
-                      Added
+                      {directoryDateColumnLabel}
                     </th>
                     <th
                       scope="col"
@@ -1033,7 +1049,7 @@ export default function ManagerForm() {
                       <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
                         <span className="inline-flex items-center gap-2">
                           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                          Loading directory…
+                          {directoryLoadingLabel}
                         </span>
                       </td>
                     </tr>
@@ -1132,7 +1148,7 @@ export default function ManagerForm() {
           )}
 
           <p className="border-t border-[var(--color-border-default)] pt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-            Rows that share any name, email, or location detail with your form are also listed here.
+            {directoryFooterText}
           </p>
           </section>
         </aside>

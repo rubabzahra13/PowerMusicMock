@@ -281,6 +281,7 @@ export default function Signup() {
 
     if (signInInFlightRef.current) return;
     signInInFlightRef.current = true;
+    setLoading(true);
 
     try {
       await signInManager(signInEmail, signInPassword, {
@@ -303,6 +304,7 @@ export default function Signup() {
       }
     } finally {
       signInInFlightRef.current = false;
+      setLoading(false);
     }
   };
 
@@ -589,6 +591,7 @@ export default function Signup() {
                 if (errorMsg) setErrorMsg('');
                 if (successMsg) setSuccessMsg('');
               }}
+              disabled={loading}
               className={inputClass}
               required
             />
@@ -617,12 +620,20 @@ export default function Signup() {
                 if (errorMsg) setErrorMsg('');
                 if (successMsg) setSuccessMsg('');
               }}
+              disabled={loading}
               required
             />
           </div>
 
-          <button type="submit" className={buttonClass}>
-            Sign in
+          <button type="submit" disabled={loading} aria-busy={loading} className={buttonClass}>
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                <span>Signing in…</span>
+              </>
+            ) : (
+              'Sign in'
+            )}
           </button>
         </form>
 

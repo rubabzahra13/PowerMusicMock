@@ -14,7 +14,7 @@ function directoryErrorMessage(err) {
   return msg;
 }
 
-export function useManagerDirectory(userId, accessToken, { enabled = true } = {}) {
+export function useManagerDirectory(userId, accessToken, { enabled = true, outcome = 'Added' } = {}) {
   const [people, setPeople] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -26,7 +26,7 @@ export function useManagerDirectory(userId, accessToken, { enabled = true } = {}
       if (!userId || !accessToken || !enabled) return;
       if (inFlightRef.current) return;
 
-      const cached = readDirectoryCache(userId);
+      const cached = readDirectoryCache(userId, outcome);
       if (cached?.length && !hasLoadedRef.current) {
         setPeople(cached);
         setLoading(false);
@@ -36,17 +36,18 @@ export function useManagerDirectory(userId, accessToken, { enabled = true } = {}
       if (!silent && !hasLoadedRef.current) setLoading(true);
 
       try {
-        const data = await fetchJson('/api/manager/persons/directory');
+        const params = new URLSearchParams({ outcome });
+        const data = await fetchJson(`/api/manager/persons/directory?${params}`);
         const normalized = Array.isArray(data)
           ? data.map(normalizeDirectoryPerson).filter(Boolean)
           : [];
         setPeople(normalized);
-        writeDirectoryCache(userId, normalized);
+        writeDirectoryCache(userId, normalized, outcome);
         setError(null);
         hasLoadedRef.current = true;
       } catch (err) {
         console.error(err);
-        const stale = readDirectoryCache(userId);
+        const stale = readDirectoryCache(userId, outcome);
         if (stale?.length) {
           setPeople(stale);
         } else if (!isRateLimitError(err)) {
@@ -58,15 +59,17 @@ export function useManagerDirectory(userId, accessToken, { enabled = true } = {}
         inFlightRef.current = false;
       }
     },
-    [userId, accessToken, enabled],
+    [userId, accessToken, enabled, outcome],
   );
 
   useEffect(() => {
     if (!enabled) return undefined;
     hasLoadedRef.current = false;
+    setPeople([]);
+    setLoading(true);
     load();
     return undefined;
-  }, [enabled, load]);
+  }, [enabled, load, outcome]);
 
   useBackgroundRefresh(() => load({ silent: true }), { enabled: enabled && Boolean(userId) });
 

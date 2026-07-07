@@ -3,10 +3,14 @@ import { normalizeDirectoryPerson } from './managerDirectory';
 const CACHE_KEY = 'pm_manager_directory_snapshot';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-export function readDirectoryCache(userId) {
+function cacheStorageKey(outcome = 'Added') {
+  return `${CACHE_KEY}:${outcome}`;
+}
+
+export function readDirectoryCache(userId, outcome = 'Added') {
   if (!userId || typeof sessionStorage === 'undefined') return null;
   try {
-    const raw = sessionStorage.getItem(CACHE_KEY);
+    const raw = sessionStorage.getItem(cacheStorageKey(outcome));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.userId !== userId || !Array.isArray(parsed.people)) return null;
@@ -17,11 +21,11 @@ export function readDirectoryCache(userId) {
   }
 }
 
-export function writeDirectoryCache(userId, people) {
+export function writeDirectoryCache(userId, people, outcome = 'Added') {
   if (!userId || typeof sessionStorage === 'undefined') return;
   try {
     sessionStorage.setItem(
-      CACHE_KEY,
+      cacheStorageKey(outcome),
       JSON.stringify({
         userId,
         cachedAt: Date.now(),
@@ -33,10 +37,15 @@ export function writeDirectoryCache(userId, people) {
   }
 }
 
-export function clearDirectoryCache() {
+export function clearDirectoryCache(outcome) {
   if (typeof sessionStorage === 'undefined') return;
   try {
-    sessionStorage.removeItem(CACHE_KEY);
+    if (outcome) {
+      sessionStorage.removeItem(cacheStorageKey(outcome));
+      return;
+    }
+    sessionStorage.removeItem(cacheStorageKey('Added'));
+    sessionStorage.removeItem(cacheStorageKey('Removed'));
   } catch {
     /* ignore */
   }

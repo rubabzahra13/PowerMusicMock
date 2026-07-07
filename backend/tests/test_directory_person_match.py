@@ -15,6 +15,7 @@ from app.directory_person_match import (
     duplicate_tags_for_person,
     find_directory_conflict,
     find_roster_person,
+    removed_snapshot_rows,
 )
 from app.manager_request_intake import intake_automated_email_request, intake_manager_submission
 from app.manager_request_tags import TAG_ALREADY_EXISTS
@@ -219,3 +220,23 @@ class TestActiveRoster:
         db.flush()
 
         assert find_roster_person(db, person) is None
+
+    def test_removed_snapshot_rows_returns_currently_removed_only(self, db: Session):
+        email = f"removed-snapshot-{uuid.uuid4().hex[:8]}@example.com"
+        person = _person(email=email)
+        added = _handled_row(db, person, outcome="Added", action="Add")
+        removed = _handled_row(db, person, outcome="Removed", action="Remove")
+        readded = _handled_row(db, person, outcome="Added", action="Add")
+        other_removed = _handled_row(
+            db,
+            _person(email=f"other-removed-{uuid.uuid4().hex[:8]}@example.com"),
+            outcome="Removed",
+            action="Remove",
+        )
+        db.flush()
+
+        snapshot_ids = {row.id for row in removed_snapshot_rows(db, limit=100)}
+        assert other_removed.id in snapshot_ids
+        assert removed.id not in snapshot_ids
+        assert added.id not in snapshot_ids
+        assert readded.id not in snapshot_ids
