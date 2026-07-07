@@ -2,10 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const DOT_COUNT = 3;
 
-export default function DottedScroll({ children, className = '', contentClassName = 'flex flex-col gap-4' }) {
+const DEFAULT_SCROLL_CLASS = 'h-full overflow-y-scroll scrollbar-hide pr-5';
+
+export default function DottedScroll({
+  children,
+  className = '',
+  contentClassName = 'flex flex-col gap-4',
+  scrollClassName = DEFAULT_SCROLL_CLASS,
+}) {
   const containerRef = useRef(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [canScroll, setCanScroll] = useState(false);
+  const bounded = !scrollClassName.includes('h-full');
 
   const updateScrollState = useCallback(() => {
     const el = containerRef.current;
@@ -43,10 +51,10 @@ export default function DottedScroll({ children, className = '', contentClassNam
   }, [updateScrollState]);
 
   return (
-    <div className={`relative flex-1 min-h-0 ${className}`}>
+    <div className={`relative ${bounded ? 'shrink-0 w-full' : 'flex-1 min-h-0'} ${className}`}>
       <div
         ref={containerRef}
-        className="h-full overflow-y-scroll scrollbar-hide pr-5"
+        className={scrollClassName}
       >
         <div className={contentClassName}>
           {children}

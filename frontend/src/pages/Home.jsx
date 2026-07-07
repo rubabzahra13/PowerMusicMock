@@ -17,7 +17,12 @@ import {
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClass } from '../utils/responsiveLayout';
 import { loadWithCache, getDashboard, getPilot2Overview } from '../utils/pilot2Api';
+import DottedScroll from '../components/ui/DottedScroll';
 import { PanelListSkeleton, ActivitySkeleton } from '../components/ui';
+
+const PANEL_VISIBLE_ITEMS = 3;
+const ALERT_LIST_SCROLL_CLASS = 'max-h-[15.5rem] overflow-y-scroll scrollbar-hide pr-5';
+const ACTIVITY_LIST_SCROLL_CLASS = 'max-h-[12.75rem] overflow-y-scroll scrollbar-hide pr-5';
 import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
 
 const CUSTOMER_ACTIVITY_TYPES = new Set(['template_updated']);
@@ -38,7 +43,6 @@ const COLUMN_THEMES = {
     panelSubtitle: 'text-[var(--color-text-secondary)]',
     panelIconWell: 'bg-[var(--color-surface-highlight)]',
     panelIconColor: 'text-[var(--color-text-muted)]',
-    dot: 'bg-[#6baff0]',
     kpiIconWell: 'bg-[var(--color-surface-highlight)]',
     kpiIconColor: 'text-[var(--color-text-muted)]',
     iconWell: 'bg-[var(--color-surface-highlight)]',
@@ -60,7 +64,7 @@ const COLUMN_THEMES = {
     panelSubtitle: 'text-white/65',
     panelIconWell: 'bg-white/10',
     panelIconColor: 'text-white',
-    dot: 'bg-[#252542]',
+    kpiIconWell: 'bg-[var(--color-surface-highlight)]',
     iconWell: 'bg-[#b8d4f0]',
     iconColor: 'text-[#1e558f]',
     badge: 'bg-[var(--color-brand-accent)]',
@@ -124,6 +128,8 @@ function ServiceColumn({
   alertEmptyText,
   onAlertClick,
   activities,
+  activityTitle = 'Recent activity',
+  activitySubtitle = 'Latest events',
   activityEmptyText,
   formatActivityDate,
   onActivityClick,
@@ -136,11 +142,8 @@ function ServiceColumn({
   return (
     <div className={`flex flex-col gap-3 h-full min-h-0 overflow-hidden rounded-2xl p-4 xl:p-5 border ${theme.shell}`}>
       <div className="shrink-0">
-        <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full shrink-0 ${theme.dot}`} />
-          <h2 className="text-base font-bold uppercase tracking-wide text-[var(--color-text-primary)]">{title}</h2>
-        </div>
-        <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 ml-4">{description}</p>
+        <h2 className="text-base font-bold uppercase tracking-wide text-[var(--color-text-primary)]">{title}</h2>
+        <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">{description}</p>
       </div>
 
       <div className={`grid gap-2.5 shrink-0 ${kpis.length >= 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
@@ -150,7 +153,7 @@ function ServiceColumn({
       </div>
 
       <div className="flex-1 flex flex-col gap-3 min-h-0">
-        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col flex-1 min-h-0`}>
+        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col shrink-0`}>
           <div className={`px-3.5 py-2.5 border-b flex items-center justify-between gap-3 shrink-0 ${theme.panelHeader}`}>
             <div className="flex items-center gap-2.5 min-w-0">
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.panelIconWell}`}>
@@ -168,111 +171,113 @@ function ServiceColumn({
             )}
           </div>
 
-          <div className="p-2.5 flex-1 min-h-0 overflow-y-auto">
+          <DottedScroll
+            scrollClassName={ALERT_LIST_SCROLL_CLASS}
+            contentClassName="space-y-1.5 p-2.5"
+          >
             {alertsLoading ? (
-              <PanelListSkeleton rows={2} />
+              <PanelListSkeleton rows={PANEL_VISIBLE_ITEMS} />
             ) : alerts.length === 0 ? (
-              <div className="h-full min-h-[72px] flex flex-col items-center justify-center text-center px-3 py-4">
+              <div className="min-h-[72px] flex flex-col items-center justify-center text-center px-3 py-4">
                 <CheckCircle className="w-7 h-7 text-[var(--color-signal-green)] mb-1.5" />
                 <p className="text-sm font-medium text-[var(--color-text-secondary)]">{alertEmptyText}</p>
               </div>
             ) : (
-              <div className="space-y-1.5">
-                {alerts.map((alert) => {
-                  const isClickable = Boolean(onAlertClick);
-                  const alertBorder = theme.alertBorder[alert.type] || theme.alertBorder.warning;
-                  const AlertIcon = alert.type === 'critical' ? Flag : Users;
+              alerts.map((alert) => {
+                const isClickable = Boolean(onAlertClick);
+                const alertBorder = theme.alertBorder[alert.type] || theme.alertBorder.warning;
+                const AlertIcon = alert.type === 'critical' ? Flag : Users;
 
-                  return (
-                    <button
-                      key={alert.id}
-                      type="button"
-                      onClick={isClickable ? () => onAlertClick(alert) : undefined}
-                      className={`w-full text-left rounded-lg border border-[var(--color-border-default)] bg-white p-2.5 transition-all border-l-[3px] ${alertBorder} ${
-                        isClickable
-                          ? `cursor-pointer group ${theme.alertCardHover}`
-                          : 'cursor-default'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell}`}>
-                          <AlertIcon className={`w-4 h-4 ${theme.iconColor}`} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-[var(--color-text-primary)]">{alert.title}</p>
-                          <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 leading-relaxed">{alert.subtitle}</p>
-                          <p className="text-[10px] font-semibold text-[var(--color-text-muted)] mt-1.5">{alert.time}</p>
-                        </div>
+                return (
+                  <button
+                    key={alert.id}
+                    type="button"
+                    onClick={isClickable ? () => onAlertClick(alert) : undefined}
+                    className={`w-full text-left rounded-lg border border-[var(--color-border-default)] bg-white p-2.5 transition-all border-l-[3px] ${alertBorder} ${
+                      isClickable
+                        ? `cursor-pointer group ${theme.alertCardHover}`
+                        : 'cursor-default'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell}`}>
+                        <AlertIcon className={`w-4 h-4 ${theme.iconColor}`} />
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-[var(--color-text-primary)]">{alert.title}</p>
+                        <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 leading-relaxed">{alert.subtitle}</p>
+                        <p className="text-[10px] font-semibold text-[var(--color-text-muted)] mt-1.5">{alert.time}</p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
             )}
-          </div>
+          </DottedScroll>
         </div>
 
-        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col flex-1 min-h-0`}>
+        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col shrink-0`}>
           <div className={`px-3.5 py-2.5 border-b flex items-center gap-2.5 shrink-0 ${theme.panelHeader}`}>
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.panelIconWell}`}>
               <Clock className={`w-4 h-4 ${theme.panelIconColor}`} />
             </div>
             <div>
-              <h3 className={`text-sm font-bold ${theme.panelTitle}`}>Recent activity</h3>
-              <p className={`text-xs ${theme.panelSubtitle}`}>Latest events</p>
+              <h3 className={`text-sm font-bold ${theme.panelTitle}`}>{activityTitle}</h3>
+              <p className={`text-xs ${theme.panelSubtitle}`}>{activitySubtitle}</p>
             </div>
           </div>
 
-          <div className="p-3 flex-1 min-h-0 overflow-y-auto">
+          <DottedScroll
+            scrollClassName={ACTIVITY_LIST_SCROLL_CLASS}
+            contentClassName="space-y-0 p-3"
+          >
             {activityLoading ? (
-              <ActivitySkeleton rows={3} />
+              <ActivitySkeleton rows={PANEL_VISIBLE_ITEMS} />
             ) : activities.length === 0 ? (
               <p className="text-sm text-[var(--color-text-muted)] text-center py-4">{activityEmptyText}</p>
             ) : (
-              <div className="space-y-0">
-                {activities.map((activity, index) => {
-                  const isClickable = Boolean(activity.link) || activity.type === 'template_updated';
-                  const meta = getActivityMeta(activity.type);
-                  const Icon = meta.icon;
-                  const isLast = index === activities.length - 1;
+              activities.map((activity, index) => {
+                const isClickable = Boolean(activity.link) || activity.type === 'template_updated';
+                const meta = getActivityMeta(activity.type);
+                const Icon = meta.icon;
+                const isLast = index === activities.length - 1;
 
-                  return (
-                    <div
-                      key={activity.id}
-                      onClick={() => isClickable && onActivityClick(activity)}
-                      className={`relative flex gap-2.5 ${isLast ? '' : 'pb-3'} ${
-                        isClickable ? 'cursor-pointer group' : ''
-                      }`}
-                    >
-                      {!isLast && (
-                        <div className="absolute left-[15px] top-8 bottom-0 w-px bg-[var(--color-border-default)]" />
-                      )}
-                      <div className={`relative z-10 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell} ${
-                        isClickable ? 'group-hover:ring-2 group-hover:ring-[rgba(26,26,46,0.06)] transition-shadow' : ''
-                      }`}>
-                        <Icon className={`w-4 h-4 ${theme.iconColor}`} />
-                      </div>
-                      <div className={`flex-1 min-w-0 rounded-lg px-2 py-1 -mx-1 transition-colors ${
-                        isClickable ? theme.activityHover : ''
-                      }`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-semibold text-[var(--color-text-primary)] leading-snug">
-                            {activity.description}
-                          </p>
-                          {isClickable && (
-                            <ArrowRight className={`w-3.5 h-3.5 shrink-0 opacity-0 group-hover:opacity-100 transition-all ${theme.iconColor}`} />
-                          )}
-                        </div>
-                        <p className="text-xs font-medium text-[var(--color-text-muted)] mt-0.5">
-                          {formatActivityDate(activity.timestamp)}
-                        </p>
-                      </div>
+                return (
+                  <div
+                    key={activity.id}
+                    onClick={() => isClickable && onActivityClick(activity)}
+                    className={`relative flex gap-2.5 ${isLast ? '' : 'pb-3'} ${
+                      isClickable ? 'cursor-pointer group' : ''
+                    }`}
+                  >
+                    {!isLast && (
+                      <div className="absolute left-[15px] top-8 bottom-0 w-px bg-[var(--color-border-default)]" />
+                    )}
+                    <div className={`relative z-10 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell} ${
+                      isClickable ? 'group-hover:ring-2 group-hover:ring-[rgba(26,26,46,0.06)] transition-shadow' : ''
+                    }`}>
+                      <Icon className={`w-4 h-4 ${theme.iconColor}`} />
                     </div>
-                  );
-                })}
-              </div>
+                    <div className={`flex-1 min-w-0 rounded-lg px-2 py-1 -mx-1 transition-colors ${
+                      isClickable ? theme.activityHover : ''
+                    }`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold text-[var(--color-text-primary)] leading-snug">
+                          {activity.description}
+                        </p>
+                        {isClickable && (
+                          <ArrowRight className={`w-3.5 h-3.5 shrink-0 opacity-0 group-hover:opacity-100 transition-all ${theme.iconColor}`} />
+                        )}
+                      </div>
+                      <p className="text-xs font-medium text-[var(--color-text-muted)] mt-0.5">
+                        {formatActivityDate(activity.timestamp)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
             )}
-          </div>
+          </DottedScroll>
         </div>
       </div>
     </div>
@@ -366,8 +371,8 @@ export default function Home() {
     .filter((req) => req.tags?.includes(TAG_ALREADY_EXISTS))
     .map((req) => ({
       id: req.id,
-      title: 'Potential duplicate entry',
-      subtitle: `${req.person.firstName} ${req.person.lastName} (${req.person.email})`,
+      title: `${req.person.firstName} ${req.person.lastName}`.trim(),
+      subtitle: req.person.email,
       time: formatActivityDate(req.receivedAt),
       type: 'warning',
       isNew: true
@@ -379,16 +384,14 @@ export default function Home() {
   }));
 
   const customerActivity = liveCustomerActivity
-    .filter((a) => CUSTOMER_ACTIVITY_TYPES.has(a.type))
-    .slice(0, 4);
+    .filter((a) => CUSTOMER_ACTIVITY_TYPES.has(a.type));
 
   const partnerActivity = (Array.isArray(livePartnerActivity) ? livePartnerActivity : [])
     .filter((a) => PARTNER_ACTIVITY_TYPES.has(a.type))
     .map((a) => ({
       ...a,
       link: a.linkedRequestId ? `/new-requests?id=${a.linkedRequestId}` : null
-    }))
-    .slice(0, 4);
+    }));
 
   return (
     <div className={`${adminPageShellClass} select-none`}>
@@ -433,11 +436,13 @@ export default function Home() {
             { label: 'Users in ledger', value: liveKpis.usersInLedger, icon: Users, onClick: () => navigate('/directory') }
           ]}
           alertsTitle="Priority alerts"
-          alertsSubtitle={duplicateAlerts.length ? 'Items need attention' : 'Nothing urgent'}
+          alertsSubtitle={duplicateAlerts.length ? 'Potential duplicate entries' : 'Nothing urgent'}
           alerts={duplicateAlerts}
           alertEmptyText="No duplicate warnings right now."
           onAlertClick={() => navigate('/new-requests')}
           activities={partnerActivity}
+          activityTitle="Recent Requests"
+          activitySubtitle="Latest requests"
           activityEmptyText="No recent partner activity."
           formatActivityDate={formatActivityDate}
           onActivityClick={handleActivityClick}
