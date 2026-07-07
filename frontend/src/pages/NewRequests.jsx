@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
@@ -14,13 +15,20 @@ import {
   markDirectoryPersonHighlight,
   markRequestUnseen,
   isRequestUnseen,
-  clearRequestHighlight,
+  markRequestViewed,
+  removeRequestHighlight,
+  registerNewRequestsPageVisit,
   ADMIN_NEW_ROW_HIGHLIGHT_CLASS,
 } from '../utils/adminUiHighlights';
 import { useAuth } from '../context/AuthContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { TAG_ALREADY_EXISTS, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission } from '../utils/requestTags';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
+import {
+  PERSON_FIELD_LIMITS,
+  sanitizePersonFieldInput,
+  validatePersonForms,
+} from '../utils/managerFormValidation';
 
 const SORT_PRESETS = [
   { value: 'displayId-desc', label: 'ID (newest first)' },
@@ -233,7 +241,8 @@ const emptyPersonForm = () => ({
   firstName: '',
   lastName: '',
   email: '',
-  location: ''
+  location: '',
+  notes: '',
 });
 
 const emptyManagerForm = () => ({
@@ -247,6 +256,7 @@ const emptyManagerForm = () => ({
 export default function Requests() {
   const { showToast } = useToast();
   const { profile } = useAuth();
+  const location = useLocation();
   const adminDisplayName = profile?.full_name?.trim() || 'Power Music Admin';
 
   // ── Action tab (Add / Remove) ──
@@ -262,10 +272,15 @@ export default function Requests() {
   const bumpHighlights = () => setHighlightVersion((v) => v + 1);
 
   const handleOpenRequest = (row) => {
-    clearRequestHighlight(row.id);
+    markRequestViewed(row.id);
     bumpHighlights();
     setSelectedNewRequest(row);
   };
+
+  useEffect(() => {
+    registerNewRequestsPageVisit(location.key);
+    bumpHighlights();
+  }, [location.key]);
 
   useEffect(() => {
     const applyPage = (data, isStale) => {
@@ -318,7 +333,7 @@ export default function Requests() {
   const [managerForm, setManagerForm] = useState(emptyManagerForm());
   const [personForms, setPersonForms] = useState([emptyPersonForm()]);
   const [action, setAction] = useState('Add');
-  const [notes, setNotes] = useState('');
+  const [manualSubmitAttempted, setManualSubmitAttempted] = useState(false);
   const personRowRefs = useRef([]);
   const scrollToPersonIndexRef = useRef(null);
 
@@ -326,13 +341,21 @@ export default function Requests() {
     setManagerForm(emptyManagerForm());
     setPersonForms([emptyPersonForm()]);
     setAction(nextAction);
-    setNotes('');
+    setManualSubmitAttempted(false);
   };
 
+  const personValidation = useMemo(() => validatePersonForms(personForms), [personForms]);
+
   const updatePersonForm = (index, field, value) => {
+    const sanitized = sanitizePersonFieldInput(field, value);
     setPersonForms((prev) => prev.map((person, i) => (
-      i === index ? { ...person, [field]: value } : person
+      i === index ? { ...person, [field]: sanitized } : person
     )));
+  };
+
+  const getManualFieldError = (index, field) => {
+    if (!manualSubmitAttempted) return null;
+    return personValidation.errorsByRow[index]?.[field] || null;
   };
 
   const addPersonForm = () => {
@@ -476,17 +499,14 @@ export default function Requests() {
   ].filter(Boolean).length;
 
   // ── Manual form submit ──
-  const isPersonFormValid = (person) =>
-    person.firstName.trim() &&
-    person.lastName.trim() &&
-    person.email.trim() &&
-    person.location.trim();
-
-  const isModalFormValid = personForms.every(isPersonFormValid);
+  const isModalFormValid = personValidation.ok;
 
   const handleCreateRequest = async (e) => {
     e.preventDefault();
+    setManualSubmitAttempted(true);
     if (!isModalFormValid) return;
+
+    const normalizedPeople = personValidation.normalizedForms;
 
     try {
       const created = await fetchJson('/api/admin/requests/manual', {
@@ -494,9 +514,14 @@ export default function Requests() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           submittedBy: managerForm,
-          people: personForms,
+          people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
+            firstName,
+            lastName,
+            email,
+            location,
+            notes: notes?.trim() || undefined,
+          })),
           action: action,
-          notes: notes
         })
       });
 
@@ -524,7 +549,7 @@ export default function Requests() {
 
     setConfirmActionRequest(null);
     setSelectedNewRequest(null);
-    clearRequestHighlight(req.id);
+    removeRequestHighlight(req.id);
     bumpHighlights();
 
     const nextRequests = newRequests.filter((r) => r.id !== req.id);
@@ -955,32 +980,73 @@ export default function Requests() {
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  {[['First Name *', 'firstName', 'text'], ['Last Name *', 'lastName', 'text']].map(([label, field, type]) => (
+                  {[['First Name *', 'firstName', 'text'], ['Last Name *', 'lastName', 'text']].map(([label, field, type]) => {
+                    const error = getManualFieldError(index, field);
+                    return (
                     <div key={field}>
                       <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
                       <input
                         type={type}
                         required
+                        maxLength={PERSON_FIELD_LIMITS[field]}
                         value={person[field]}
                         onChange={(e) => updatePersonForm(index, field, e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all"
+                        aria-invalid={error ? true : undefined}
+                        className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${error ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
                       />
+                      {error && <p className="mt-1 text-[11px] text-red-600">{error}</p>}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {[['Email *', 'email', 'email'], ['Location *', 'location', 'text']].map(([label, field, type]) => (
-                    <div key={field}>
-                      <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
-                      <input
-                        type={type}
-                        required
-                        value={person[field]}
-                        onChange={(e) => updatePersonForm(index, field, e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all"
-                      />
-                    </div>
-                  ))}
+                <div>
+                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Email *</label>
+                  <input
+                    type="email"
+                    required
+                    maxLength={PERSON_FIELD_LIMITS.email}
+                    value={person.email}
+                    onChange={(e) => updatePersonForm(index, 'email', e.target.value)}
+                    onBlur={() => updatePersonForm(index, 'email', person.email.trim().toLowerCase())}
+                    aria-invalid={getManualFieldError(index, 'email') ? true : undefined}
+                    className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${getManualFieldError(index, 'email') ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
+                  />
+                  {getManualFieldError(index, 'email') && (
+                    <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'email')}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Location *</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={PERSON_FIELD_LIMITS.location}
+                    value={person.location}
+                    onChange={(e) => updatePersonForm(index, 'location', e.target.value)}
+                    aria-invalid={getManualFieldError(index, 'location') ? true : undefined}
+                    className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${getManualFieldError(index, 'location') ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
+                  />
+                  {getManualFieldError(index, 'location') && (
+                    <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'location')}</p>
+                  )}
+                </div>
+                <div>
+                  <label
+                    htmlFor={`manual-person-${person.id}-notes`}
+                    className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1"
+                  >
+                    {personForms.length > 1
+                      ? `Additional notes for Person ${index + 1} (optional)`
+                      : 'Additional notes for this request (optional)'}
+                  </label>
+                  <textarea
+                    id={`manual-person-${person.id}-notes`}
+                    value={person.notes}
+                    onChange={(e) => updatePersonForm(index, 'notes', e.target.value)}
+                    placeholder="Any additional notes for this request..."
+                    rows={2}
+                    className="w-full px-3 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all resize-none"
+                  />
                 </div>
               </div>
             ))}
@@ -998,11 +1064,6 @@ export default function Requests() {
             )}
           </div>
 
-          <div className="space-y-1.5">
-            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Additional Notes</span>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Any additional notes..."
-              className="w-full h-16 px-3 py-2 bg-[var(--color-surface-panel)]/50 border border-[var(--color-border-default)] rounded-lg text-sm placeholder-[var(--color-text-muted)] focus:outline-none focus:bg-white focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all resize-none" />
-          </div>
           <div className="text-[11px] font-medium text-[var(--color-text-muted)] select-none pt-3 border-t border-[var(--color-border-default)]/80">
             Created by Andrea (Admin)
           </div>

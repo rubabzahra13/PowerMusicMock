@@ -36,5 +36,11 @@
     { "source": "/api/(.*)", "destination": { "service": "backend" } },
     { "source": "/health", "destination": { "service": "backend" } },
     { "source": "/(.*)", "destination": { "service": "frontend" } }
+  ],
+  "crons": [
+    {
+      "path": "/api/jobs/process-manager-submissions",
+      "schedule": "* * * * *"
+    }
   ]
 }

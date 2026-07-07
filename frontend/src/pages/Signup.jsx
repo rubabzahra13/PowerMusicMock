@@ -24,6 +24,7 @@ import ManagerAuthShell, {
 import PasswordRequirements, { PasswordMatchHint } from '../components/auth/PasswordRequirements';
 import PasswordInput from '../components/auth/PasswordInput';
 import ManagerAuthEmailNotice from '../components/auth/ManagerAuthEmailNotice';
+import { getAuthLinkExpiryLabel } from '../utils/authRedirect';
 
 export default function Signup() {
   const {
@@ -43,7 +44,7 @@ export default function Signup() {
   const signInPasswordId = `${formId}-signin-password`;
   const forgotEmailId = `${formId}-forgot-email`;
 
-  const [mode, setMode] = useState(() => (location.state?.passwordUpdated ? 'signin' : 'signup'));
+  const [mode, setMode] = useState('signin');
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -358,7 +359,7 @@ export default function Signup() {
         title="Check your email"
         onBack={() => switchMode('signin')}
         onResend={handleResendSignupEmail}
-        resendLabel="Resend confirmation link"
+        resendLabel="Send again"
         resendLoading={resendLoading}
         resendCooldownMs={cooldownMs}
         resendError={resendError}
@@ -366,7 +367,12 @@ export default function Signup() {
       >
         We sent a confirmation link to{' '}
         <span className="font-medium text-[var(--color-text-primary)]">{registeredEmail}</span>.
-        Click it once to finish setting up your account. Check spam if it does not arrive within a few minutes.
+        Click it once to finish setting up your account. The link expires in{' '}
+        <span className="font-medium text-[var(--color-text-primary)]">{getAuthLinkExpiryLabel()}</span>.
+        If you do not see it within a few minutes, check{' '}
+        <span className="font-medium text-[var(--color-text-primary)]">All Mail</span> and{' '}
+        <span className="font-medium text-[var(--color-text-primary)]">Spam</span>, or send again
+        below.
       </ManagerAuthEmailNotice>
     );
   }
@@ -381,7 +387,9 @@ export default function Signup() {
           <p className="mt-1 mb-6 text-sm text-[var(--color-text-secondary)]">
             We sent a password reset link to{' '}
             <span className="font-medium text-[var(--color-text-primary)]">{resetEmail}</span>. Open it to
-            choose a new password, then sign in. Check spam if it does not arrive within a few minutes.
+            choose a new password, then sign in. The link expires in{' '}
+            <span className="font-medium text-[var(--color-text-primary)]">{getAuthLinkExpiryLabel()}</span>.
+            If you do not see it within a few minutes, check All Mail and Spam, or send again below.
           </p>
 
           {resendNotice && (
@@ -413,9 +421,9 @@ export default function Signup() {
                 <span>Sending link…</span>
               </>
             ) : cooldownMs > 0 ? (
-              `Resend in ${formatCooldown(cooldownMs)}`
+              `Send again in ${formatCooldown(cooldownMs)}`
             ) : (
-              'Resend link'
+              'Send again'
             )}
           </button>
 

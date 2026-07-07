@@ -15,8 +15,7 @@ import {
   Users
 } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
-import { kpiData, recentActivity } from '../data/mockData';
-import { loadWithCache, getDashboard } from '../utils/pilot2Api';
+import { loadWithCache, getDashboard, getPilot2Overview } from '../utils/pilot2Api';
 import { PanelListSkeleton, ActivitySkeleton } from '../components/ui';
 import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
 
@@ -285,7 +284,15 @@ export default function Home() {
   const [livePendingRequests, setLivePendingRequests] = useState([]);
   const [liveKpis, setLiveKpis] = useState({ pendingRequests: 0, usersInLedger: 0 });
   const [livePartnerActivity, setLivePartnerActivity] = useState([]);
+  const [liveCustomerKpis, setLiveCustomerKpis] = useState({
+    newEmails: 0,
+    flaggedEmails: 0,
+    templatesActive: 0,
+  });
+  const [liveCustomerActivity, setLiveCustomerActivity] = useState([]);
+  const [liveFlaggedAlerts, setLiveFlaggedAlerts] = useState([]);
   const [partnerReady, setPartnerReady] = useState(false);
+  const [customerReady, setCustomerReady] = useState(false);
 
   useEffect(() => {
     const applyDashboard = (data) => {
@@ -294,8 +301,37 @@ export default function Home() {
       setLivePartnerActivity(data.activity);
       setPartnerReady(true);
     };
+    const applyCustomerOverview = (data) => {
+      setLiveCustomerKpis({
+        newEmails: data.newEmails ?? 0,
+        flaggedEmails: data.flaggedEmails ?? 0,
+        templatesActive: data.templatesActive ?? 0,
+      });
+      setLiveCustomerActivity(
+        (Array.isArray(data.activity) ? data.activity : []).map((entry) => ({
+          id: `act-${entry.id}`,
+          timestamp: entry.timestamp,
+          type: entry.type,
+          description: entry.description,
+          link: null,
+        })),
+      );
+      setLiveFlaggedAlerts(
+        (Array.isArray(data.flaggedAlerts) ? data.flaggedAlerts : []).map((alert) => ({
+          id: alert.id,
+          title: alert.title,
+          subtitle: alert.subtitle,
+          timestamp: alert.timestamp,
+          type: 'critical',
+          isNew: true,
+        })),
+      );
+      setCustomerReady(true);
+    };
     const load = () => {
       loadWithCache('home_dashboard', getDashboard, applyDashboard)
+        .catch((err) => console.error(err));
+      loadWithCache('home_customer_overview', getPilot2Overview, applyCustomerOverview)
         .catch((err) => console.error(err));
     };
     load();
@@ -336,16 +372,12 @@ export default function Home() {
       isNew: true
     }));
 
-  const flaggedEmailAlerts = kpiData.flaggedEmails > 0 ? [{
-    id: 'flag-001',
-    title: 'Flagged email requires review',
-    subtitle: 'System detected aggressive or unhandled intent',
-    time: 'Today, 08:30',
-    type: 'critical',
-    isNew: true
-  }] : [];
+  const flaggedEmailAlerts = liveFlaggedAlerts.map((alert) => ({
+    ...alert,
+    time: alert.timestamp ? formatActivityDate(alert.timestamp) : '',
+  }));
 
-  const customerActivity = recentActivity
+  const customerActivity = liveCustomerActivity
     .filter((a) => CUSTOMER_ACTIVITY_TYPES.has(a.type))
     .slice(0, 4);
 
@@ -371,10 +403,12 @@ export default function Home() {
           themeKey="customer"
           title="Customer Support"
           description="Gmail templates, connected inboxes, and flagged emails."
+          alertsLoading={!customerReady}
+          activityLoading={!customerReady}
           kpis={[
-            { label: 'New Emails', value: kpiData.newEmails, icon: Mail, onClick: () => navigate('/email-responses') },
-            { label: 'Flagged', value: kpiData.flaggedEmails, icon: Flag, onClick: goToFlaggedEmails },
-            { label: 'Active Templates', value: kpiData.templatesActive, icon: FileText, onClick: () => navigate('/templates') }
+            { label: 'New Emails', value: liveCustomerKpis.newEmails, icon: Mail, onClick: () => navigate('/email-responses') },
+            { label: 'Flagged', value: liveCustomerKpis.flaggedEmails, icon: Flag, onClick: goToFlaggedEmails },
+            { label: 'Active Templates', value: liveCustomerKpis.templatesActive, icon: FileText, onClick: () => navigate('/templates') }
           ]}
           alertsTitle="Flagged emails"
           alertsSubtitle={flaggedEmailAlerts.length ? 'Requires review' : 'All clear'}
@@ -395,7 +429,7 @@ export default function Home() {
           activityLoading={!partnerReady}
           kpis={[
             { label: 'Pending requests', value: liveKpis.pendingRequests, icon: Inbox, onClick: () => navigate('/new-requests') },
-            { label: 'Users in ledger', value: liveKpis.usersInLedger, icon: Users, onClick: () => navigate('/user-ledger') }
+            { label: 'Users in ledger', value: liveKpis.usersInLedger, icon: Users, onClick: () => navigate('/directory') }
           ]}
           alertsTitle="Priority alerts"
           alertsSubtitle={duplicateAlerts.length ? 'Items need attention' : 'Nothing urgent'}

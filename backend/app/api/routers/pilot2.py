@@ -1,6 +1,5 @@
 """Pilot 2 · Inbound Email Management API."""
 
-import hmac
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -24,6 +23,53 @@ router = APIRouter(prefix="/api/pilot2", tags=["pilot2"])
 @router.get("/inboxes", response_model=List[schemas.InboxOut])
 def list_inboxes(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     return db.query(models.EmailAccount).order_by(models.EmailAccount.id).all()
+
+
+@router.get("/overview", response_model=schemas.Pilot2OverviewOut)
+def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
+    """Lightweight home-dashboard payload — avoids loading the full email workspace."""
+    visible = models.Email.draft_status.notin_(["Ignored", "Imported", "Processing"])
+    base = db.query(models.Email).filter(visible, models.Email.deleted.is_(False))
+
+    new_emails = base.filter(
+        models.Email.read.is_(False),
+        models.Email.archived.is_(False),
+    ).count()
+    flagged_emails = base.filter(models.Email.flagged.is_(True)).count()
+    templates_active = (
+        db.query(models.EmailTemplate)
+        .filter(models.EmailTemplate.status == "Active")
+        .count()
+    )
+    activity = (
+        db.query(models.ProcessingLog)
+        .filter(models.ProcessingLog.type == "template_updated")
+        .order_by(models.ProcessingLog.timestamp.desc())
+        .limit(8)
+        .all()
+    )
+    flagged_rows = (
+        base.filter(models.Email.flagged.is_(True))
+        .order_by(models.Email.received_at.desc())
+        .limit(3)
+        .all()
+    )
+    flagged_alerts = [
+        {
+            "id": row.id,
+            "title": row.subject or "Flagged email requires review",
+            "subtitle": row.flag_reason or "Requires manual review",
+            "timestamp": row.received_at.isoformat() if row.received_at else None,
+        }
+        for row in flagged_rows
+    ]
+    return {
+        "newEmails": new_emails,
+        "flaggedEmails": flagged_emails,
+        "templatesActive": templates_active,
+        "activity": activity,
+        "flaggedAlerts": flagged_alerts,
+    }
 
 
 @router.get("/workspace", response_model=schemas.Pilot2WorkspaceOut)
@@ -568,38 +614,40 @@ def reject_suggestion(suggestion_id: int, db: Session = Depends(get_db), _admin=
     return suggestion
 
 
-def require_cron_secret(request: Request, secret: Optional[str] = None) -> None:
-    """Guard the job-trigger endpoints. Open when PILOT2_CRON_SECRET is unset
-    (local dev only); in production the secret is mandatory."""
-    import os
-
-    expected = config.CRON_SECRET
-    is_production = bool(os.getenv("VERCEL")) or os.getenv("ENVIRONMENT", "").lower() == "production"
-    if is_production and not expected:
-        raise HTTPException(
-            status_code=503,
-            detail="Cron endpoints require PILOT2_CRON_SECRET in production",
-        )
-    if not expected:
-        return
-    header_secret = request.headers.get("x-cron-secret")
-    bearer = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-    if is_production:
-        provided = header_secret or bearer or ""
-    else:
-        provided = header_secret or bearer or secret or ""
-    if not hmac.compare_digest(provided, expected):
-        raise HTTPException(status_code=401, detail="Invalid or missing cron secret.")
-
-
-# GET is allowed because hosted cron services typically only send GET requests.
+from app.api.cron_auth import require_cron_secret
 @router.api_route("/poll", methods=["GET", "POST"])
 def trigger_poll(request: Request, secret: Optional[str] = None, db: Session = Depends(get_db)):
     """Manually fetch new Gmail messages (also runs on a schedule in live
     mode; an external cron service hits this endpoint on serverless hosting)."""
     require_cron_secret(request, secret)
+    connected = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.status == "Connected")
+        .order_by(models.EmailAccount.email)
+        .all()
+    )
     processed = pipeline.poll_all_accounts(db)
-    return {"emailsProcessed": processed}
+    for account in connected:
+        db.refresh(account)
+    result = {
+        "emailsProcessed": processed,
+        "gmailMode": config.GMAIL_MODE,
+        "connectedInboxes": len(connected),
+        "inboxes": [
+            {
+                "email": account.email,
+                "lastSyncedAt": account.last_synced_at.isoformat() if account.last_synced_at else None,
+                "backfillStatus": account.backfill_status,
+                "hasRefreshToken": bool(account.oauth_refresh_token),
+            }
+            for account in connected
+        ],
+    }
+    if config.GMAIL_MODE != "live":
+        result["warning"] = "PILOT2_GMAIL_MODE is not 'live' — poll is a no-op until set on Vercel."
+    elif not connected:
+        result["warning"] = "No connected inboxes — connect Gmail on Email accounts in the admin dashboard."
+    return result
 
 
 # GET is allowed because hosted cron services typically only send GET requests.

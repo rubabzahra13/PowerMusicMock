@@ -2,9 +2,12 @@
 // (see utils/api.js: localhost in dev, same-origin in production).
 import API_BASE, { fetchJson } from './api';
 
+const ADMIN_TIMEOUT_MS = 45000;
+
 async function request(path, options = {}) {
   return fetchJson(path, {
     headers: { 'Content-Type': 'application/json' },
+    timeout: ADMIN_TIMEOUT_MS,
     ...options,
   });
 }
@@ -19,36 +22,79 @@ function isApiErrorPayload(data) {
   );
 }
 
+function isRateLimitError(err) {
+  const msg = err?.message || '';
+  return msg.includes('Too many requests') || msg.includes('429');
+}
+
+export { isRateLimitError };
+
+function readSessionCache(key) {
+  try {
+    const cached = sessionStorage.getItem(`pm_cache_${key}`);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    if (isApiErrorPayload(parsed)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFreshWithRateLimitRetry(fetcher, cacheKey) {
+  try {
+    return await fetcher();
+  } catch (err) {
+    if (!isRateLimitError(err) || !readSessionCache(cacheKey)) {
+      throw err;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 2000));
+    return fetcher();
+  }
+}
+
 // Stale-while-revalidate: show the last known data instantly from
 // sessionStorage, then fetch fresh data and update. `apply(data, isStale)`
 // is called up to twice — once with cached data, once with fresh data.
 export async function loadWithCache(key, fetcher, apply) {
+  const cached = readSessionCache(key);
+  if (cached) apply(cached, true);
+
   try {
-    const cached = sessionStorage.getItem(`pm_cache_${key}`);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (!isApiErrorPayload(parsed)) apply(parsed, true);
+    const fresh = await fetchFreshWithRateLimitRetry(fetcher, key);
+    if (isApiErrorPayload(fresh)) {
+      throw new Error(fresh.detail);
     }
-  } catch { /* corrupt cache — ignore */ }
-  const fresh = await fetcher();
-  if (isApiErrorPayload(fresh)) {
-    throw new Error(fresh.detail);
+    try { sessionStorage.setItem(`pm_cache_${key}`, JSON.stringify(fresh)); } catch { /* quota */ }
+    apply(fresh, false);
+    return fresh;
+  } catch (err) {
+    if (cached && isRateLimitError(err)) {
+      return cached;
+    }
+    throw err;
   }
-  try { sessionStorage.setItem(`pm_cache_${key}`, JSON.stringify(fresh)); } catch { /* quota */ }
-  apply(fresh, false);
-  return fresh;
 }
 
 // Network-only refresh for post-mutation revalidation. Skips the stale
 // sessionStorage apply so optimistic updates are not briefly reverted.
 export async function refreshCache(key, fetcher, apply) {
-  const fresh = await fetcher();
-  if (isApiErrorPayload(fresh)) {
-    throw new Error(fresh.detail);
+  try {
+    const fresh = await fetchFreshWithRateLimitRetry(fetcher, key);
+    if (isApiErrorPayload(fresh)) {
+      throw new Error(fresh.detail);
+    }
+    try { sessionStorage.setItem(`pm_cache_${key}`, JSON.stringify(fresh)); } catch { /* quota */ }
+    apply(fresh, false);
+    return fresh;
+  } catch (err) {
+    const cached = readSessionCache(key);
+    if (cached && isRateLimitError(err)) {
+      apply(cached, true);
+      return cached;
+    }
+    throw err;
   }
-  try { sessionStorage.setItem(`pm_cache_${key}`, JSON.stringify(fresh)); } catch { /* quota */ }
-  apply(fresh, false);
-  return fresh;
 }
 
 // Write-through: keep the cache in step with an optimistic local update so
@@ -73,6 +119,7 @@ export function patchCache(key, patch) {
 
 // Combined page payloads (one round trip per view)
 export const getDashboard = () => request('/api/dashboard');
+export const getPilot2Overview = () => request('/api/pilot2/overview');
 export const getNewRequestsPage = () => request('/api/admin/requests/page');
 export const getPilot2Workspace = () => request('/api/pilot2/workspace');
 

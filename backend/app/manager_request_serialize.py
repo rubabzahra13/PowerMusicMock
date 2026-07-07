@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from app import models
-from app.directory_person_match import handled_directory_rows
+from app.directory_person_match import (
+    find_directory_conflict,
+    request_person_for_match,
+)
+from app.manager_request_views import is_request_unread
 from app.manager_request_tags import TAG_ALREADY_EXISTS, merge_tags
 from app.request_display import parse_request_display_number
-from app.request_match_summary import build_directory_match, build_intake_match, find_directory_match
+from app.request_match_summary import build_directory_match, build_intake_match
 from app.user_display import (
     hydrate_request_users,
     resolve_handled_by_name,
@@ -19,8 +24,18 @@ from app.user_display import (
 )
 
 
-def _handled_directory_rows(db: Session) -> List[models.ManagerRequest]:
-    return handled_directory_rows(db)
+def _directory_conflict_for_request(
+    db: Session,
+    req: models.ManagerRequest,
+) -> Optional[models.ManagerRequest]:
+    person = request_person_for_match(req)
+    from app.directory_person_match import _probe_handled_rows
+
+    return find_directory_conflict(
+        person=person,
+        action=req.action or "",
+        directory_rows=_probe_handled_rows(db, person),
+    )
 
 
 def _effective_tags(
@@ -83,10 +98,9 @@ def request_to_api_dict(
 def requests_to_api_dicts(db: Session, requests: List[models.ManagerRequest]) -> List[Dict[str, Any]]:
     rows = list(requests)
     hydrate_request_users(db, rows)
-    directory_rows = _handled_directory_rows(db)
     results: List[Dict[str, Any]] = []
     for req in rows:
-        directory_row = find_directory_match(req, directory_rows)
+        directory_row = _directory_conflict_for_request(db, req)
         results.append(
             request_to_api_dict(req, directory_row=directory_row),
         )
@@ -129,6 +143,42 @@ def directory_person_to_api_dict(
         "adminNotes": req.admin_notes,
         "notes": req.manager_notes,
     }
+
+
+def manager_request_list_item_to_api_dict(
+    req: models.ManagerRequest,
+    *,
+    seen_at: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    return {
+        "id": req.id,
+        "displayId": parse_request_display_number(req.id),
+        "receivedAt": req.received_at,
+        "handledAt": req.handled_at,
+        "person": {
+            "firstName": req.person_first_name,
+            "lastName": req.person_last_name,
+            "email": req.person_email,
+            "location": req.person_location,
+        },
+        "action": req.action,
+        "status": req.status,
+        "outcome": req.outcome,
+        "notes": req.manager_notes,
+        "isUnread": is_request_unread(req, seen_at),
+    }
+
+
+def manager_requests_list_to_api_dicts(
+    requests: List[models.ManagerRequest],
+    *,
+    seen_map: Optional[Dict[str, datetime]] = None,
+) -> List[Dict[str, Any]]:
+    seen_map = seen_map or {}
+    return [
+        manager_request_list_item_to_api_dict(req, seen_at=seen_map.get(req.id))
+        for req in requests
+    ]
 
 
 def directory_rows_to_api_dicts(db: Session, rows: List[models.ManagerRequest]) -> List[Dict[str, Any]]:

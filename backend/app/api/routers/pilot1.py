@@ -1,14 +1,17 @@
 from typing import List, Optional
 from datetime import datetime, timezone
+import os
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, case, func
 
 from app import models
 from app import schemas
 from app.api.auth import AuthenticatedUser, require_admin, require_manager, auth_is_required
-from app.api.rate_limit import rate_limit
+from app.api.rate_limit import rate_limit, prune_old_rate_limit_buckets
+from app.api.cron_auth import require_cron_secret
 from app.input_validation import normalize_search_query
 from app.api.dependencies import get_db
 from app.request_display import (
@@ -19,11 +22,27 @@ from app.request_display import (
 from app.user_display import hydrate_request_users
 from app.manager_request_serialize import (
     directory_rows_to_api_dicts,
+    manager_requests_list_to_api_dicts,
     request_to_api_dict,
     requests_to_api_dicts,
 )
 from app.manager_request_activity import list_partner_activity
 from app.manager_request_intake import intake_manager_submission, manager_id_for_email
+from app.manager_request_views import (
+    mark_all_handled_seen,
+    mark_request_seen,
+)
+from app.manager_submission_jobs import (
+    enqueue_manager_batch,
+    get_manager_submission_job,
+    process_manager_submission_job_by_id,
+    process_pending_manager_submission_jobs,
+)
+from app.manager_request_summary_cache import (
+    get_manager_request_summary,
+    invalidate_manager_request_summary,
+    set_manager_request_summary,
+)
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
     TAG_AUTO_MAIL,
@@ -31,9 +50,10 @@ from app.manager_request_tags import (
     TAG_VERIFIED,
 )
 from app.directory_person_match import (
-    active_roster_rows,
     find_roster_person,
     roster_match_candidates,
+    roster_snapshot_rows,
+    search_roster_rows,
 )
 
 router = APIRouter()
@@ -42,7 +62,10 @@ _limit_submit = rate_limit("manager_submit", max_requests=20, window_seconds=360
 _limit_duplicate = rate_limit("manager_duplicate", max_requests=120, window_seconds=60, user_dep=require_manager)
 _limit_search = rate_limit("manager_search", max_requests=60, window_seconds=60, user_dep=require_manager)
 _limit_match = rate_limit("manager_match", max_requests=120, window_seconds=60, user_dep=require_manager)
-_limit_directory = rate_limit("manager_directory", max_requests=100, window_seconds=300, user_dep=require_manager)
+# One directory snapshot per page visit — generous so managers never see throttle errors.
+_limit_directory = rate_limit("manager_directory", max_requests=30, window_seconds=60, user_dep=require_manager)
+# Full history list only (summary is cached server-side and not rate-limited).
+_limit_requests_list = rate_limit("manager_requests_list", max_requests=60, window_seconds=60, user_dep=require_manager)
 
 _REASON_RANK = {
     "Email": 6,
@@ -168,20 +191,7 @@ def _form_has_match_criteria(email: str, first_name: str, last_name: str, locati
 
 
 def _search_people(db: Session, query: str, *, limit: int) -> list[models.ManagerRequest]:
-    pattern = query.lower()
-    matches: list[models.ManagerRequest] = []
-    for row in active_roster_rows(db):
-        haystacks = (
-            (row.person_first_name or "").lower(),
-            (row.person_last_name or "").lower(),
-            (row.person_email or "").lower(),
-            (row.person_location or "").lower(),
-        )
-        if any(pattern in value for value in haystacks):
-            matches.append(row)
-        if len(matches) >= limit:
-            break
-    return matches
+    return search_roster_rows(db, query, limit=limit)
 
 @router.get("/api/requests", response_model=List[schemas.RequestOut])
 def get_requests(db: Session = Depends(get_db), _admin=Depends(require_admin)):
@@ -195,11 +205,7 @@ def get_requests(db: Session = Depends(get_db), _admin=Depends(require_admin)):
 
 @router.get("/api/persons", response_model=List[schemas.PersonOut])
 def get_people(db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    rows = (
-        _handled_directory_query(db)
-        .order_by(models.ManagerRequest.handled_at.desc())
-        .all()
-    )
+    rows = roster_snapshot_rows(db, limit=2000)
     return directory_rows_to_api_dicts(db, rows)
 
 def _visible_new_requests_query(db: Session):
@@ -221,7 +227,14 @@ def _visible_new_requests_query(db: Session):
 @router.get("/api/kpis", response_model=schemas.KpiOut)
 def get_kpis(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     pending = _visible_new_requests_query(db).count()
-    users = _handled_directory_query(db).count()
+    users = (
+        db.query(models.ManagerRequest)
+        .filter(
+            models.ManagerRequest.status == "handled",
+            models.ManagerRequest.outcome == "Added",
+        )
+        .count()
+    )
     return {"pendingRequests": pending, "usersInLedger": users}
 
 
@@ -233,7 +246,14 @@ def get_dashboard(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         .all()
     )
     hydrate_request_display(pending)
-    users = _handled_directory_query(db).count()
+    users = (
+        db.query(models.ManagerRequest)
+        .filter(
+            models.ManagerRequest.status == "handled",
+            models.ManagerRequest.outcome == "Added",
+        )
+        .count()
+    )
     return {
         "kpis": {
             "pendingRequests": len(pending),
@@ -308,10 +328,15 @@ def create_request(
     db.refresh(new_request)
     hydrate_request_display([new_request])
     hydrate_request_users(db, [new_request])
+    invalidate_manager_request_summary(manager.id)
     return request_to_api_dict(new_request)
 
 
-@router.post("/api/requests/batch", response_model=List[schemas.RequestOut])
+@router.post(
+    "/api/requests/batch",
+    status_code=202,
+    response_model=schemas.ManagerSubmissionJobOut,
+)
 def create_requests_batch(
     req_in: schemas.ManagerBatchRequestIn,
     db: Session = Depends(get_db),
@@ -319,25 +344,53 @@ def create_requests_batch(
 ):
     _assert_manager_submitter(req_in.submittedBy, manager)
 
-    request_ids = allocate_request_ids(db, len(req_in.people))
-    new_requests = [
-        _create_manager_request_row(
-            db,
-            submitted_by=req_in.submittedBy,
-            person=person,
-            action=req_in.action,
-            notes=req_in.notes,
-            new_id=request_id,
-            manager_user_id=manager.id,
-        )
-        for request_id, person in zip(request_ids, req_in.people)
-    ]
-    db.commit()
+    job = enqueue_manager_batch(db, manager_id=manager.id, req_in=req_in)
+    invalidate_manager_request_summary(manager.id)
 
-    for req in new_requests:
-        db.refresh(req)
-    hydrate_request_display(new_requests)
-    return requests_to_api_dicts(db, new_requests)
+    if not os.getenv("VERCEL"):
+        job = process_manager_submission_job_by_id(db, job.id) or job
+
+    return _submission_job_response(job)
+
+
+def _submission_job_response(job: models.ManagerSubmissionJob) -> dict:
+    result = job.result if isinstance(job.result, dict) else {}
+    items = result.get("items") if isinstance(result.get("items"), list) else None
+    return {
+        "jobId": job.id,
+        "status": job.status,
+        "count": int(result.get("count") or len(job.payload.get("people") or [])),
+        "error": job.error,
+        "items": items,
+    }
+
+
+@router.get(
+    "/api/manager/submission-jobs/{job_id}",
+    response_model=schemas.ManagerSubmissionJobOut,
+)
+def get_manager_submission_job_status(
+    job_id: str,
+    db: Session = Depends(get_db),
+    manager=Depends(require_manager),
+):
+    job = get_manager_submission_job(db, job_id=job_id, manager_id=manager.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Submission job not found")
+    return _submission_job_response(job)
+
+
+@router.api_route("/api/jobs/process-manager-submissions", methods=["GET", "POST"])
+def process_manager_submission_jobs(
+    request: Request,
+    secret: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Cron worker — processes queued manager batch submissions."""
+    require_cron_secret(request, secret)
+    stats = process_pending_manager_submission_jobs(db)
+    stats["prunedRateLimitBuckets"] = prune_old_rate_limit_buckets(db)
+    return stats
 
 @router.get("/api/admin/requests", response_model=List[schemas.RequestOut])
 def get_admin_requests(status: Optional[str] = None, db: Session = Depends(get_db), _admin=Depends(require_admin)):
@@ -361,11 +414,7 @@ def get_new_requests_page(db: Session = Depends(get_db), _admin=Depends(require_
         .all()
     )
     hydrate_request_display(db_requests)
-    directory = (
-        _handled_directory_query(db)
-        .order_by(models.ManagerRequest.handled_at.desc())
-        .all()
-    )
+    directory = roster_snapshot_rows(db, limit=2000)
     return {
         "requests": requests_to_api_dicts(db, db_requests),
         "persons": directory_rows_to_api_dicts(db, directory),
@@ -418,7 +467,7 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
             submitted_by=manual_submitter,
             person=person_in,
             action=req_in.action,
-            notes=req_in.notes,
+            notes=person_in.notes or req_in.notes,
             new_id=new_id,
         )
         for new_id, person_in in zip(request_ids, req_in.people)
@@ -489,20 +538,152 @@ def match_person_candidates(
     )
 
 
+def _manager_requests_query(db: Session, manager: AuthenticatedUser):
+    query = db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.tags.contains([TAG_VERIFIED]),
+    )
+    if manager.id and manager.id != "dev-bypass":
+        try:
+            manager_uuid = uuid.UUID(str(manager.id))
+        except ValueError:
+            return query.filter(models.ManagerRequest.id.is_(None))
+        query = query.filter(models.ManagerRequest.manager_id == manager_uuid)
+    return query
+
+
+@router.get("/api/manager/requests/summary", response_model=schemas.ManagerRequestsSummaryOut)
+def manager_requests_summary(
+    db: Session = Depends(get_db),
+    manager: AuthenticatedUser = Depends(require_manager),
+):
+    """Lightweight counts for the manager portal card."""
+    cached = get_manager_request_summary(manager.id)
+    if cached is not None:
+        return cached
+
+    base = _manager_requests_query(db, manager)
+    total, pending_count = base.with_entities(
+        func.count(),
+        func.sum(case((models.ManagerRequest.status == "new", 1), else_=0)),
+    ).one()
+    payload = {
+        "total": int(total or 0),
+        "pendingCount": int(pending_count or 0),
+    }
+    set_manager_request_summary(
+        manager.id,
+        total=payload["total"],
+        pending_count=payload["pendingCount"],
+    )
+    return payload
+
+
+@router.get("/api/manager/requests", response_model=schemas.ManagerRequestsPageOut)
+def list_manager_requests(
+    status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    manager: AuthenticatedUser = Depends(_limit_requests_list),
+):
+    """Paginated requests submitted by the signed-in manager (portal submissions only)."""
+    if status and status not in ("new", "handled"):
+        raise HTTPException(status_code=400, detail="status must be new or handled")
+
+    safe_page = max(page, 1)
+    safe_limit = min(max(limit, 1), 50)
+    offset = (safe_page - 1) * safe_limit
+
+    query = _manager_requests_query(db, manager)
+    if status:
+        query = query.filter(models.ManagerRequest.status == status)
+
+    base = _manager_requests_query(db, manager)
+    if status:
+        total = query.count()
+        pending_count = (
+            total if status == "new" else base.filter(models.ManagerRequest.status == "new").count()
+        )
+    else:
+        total, pending_count = base.with_entities(
+            func.count(),
+            func.sum(case((models.ManagerRequest.status == "new", 1), else_=0)),
+        ).one()
+        total = int(total or 0)
+        pending_count = int(pending_count or 0)
+
+    if status == "handled":
+        rows = (
+            query.order_by(models.ManagerRequest.handled_at.desc())
+            .offset(offset)
+            .limit(safe_limit)
+            .all()
+        )
+    else:
+        rows = query.order_by(request_id_numeric_desc()).offset(offset).limit(safe_limit).all()
+
+    hydrate_request_display(rows)
+    return {
+        "items": manager_requests_list_to_api_dicts(rows),
+        "total": total,
+        "page": safe_page,
+        "limit": safe_limit,
+        "unreadCount": 0,
+        "pendingCount": pending_count,
+    }
+
+
+@router.post("/api/manager/requests/{request_id}/mark-seen")
+def mark_manager_request_seen(
+    request_id: str,
+    db: Session = Depends(get_db),
+    manager: AuthenticatedUser = Depends(_limit_requests_list),
+):
+    """Mark a handled request as seen by the signed-in manager."""
+    req = (
+        _manager_requests_query(db, manager)
+        .filter(models.ManagerRequest.id == request_id)
+        .first()
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.status != "handled":
+        return {"ok": True, "marked": 0}
+
+    mark_request_seen(db, manager_id=manager.id, request_id=request_id)
+    db.commit()
+    return {"ok": True, "marked": 1}
+
+
+@router.post("/api/manager/requests/mark-all-seen")
+def mark_all_manager_requests_seen(
+    db: Session = Depends(get_db),
+    manager: AuthenticatedUser = Depends(_limit_requests_list),
+):
+    """Mark all handled requests as seen for the signed-in manager."""
+    marked = mark_all_handled_seen(
+        db,
+        manager_id=manager.id,
+        base_query=_manager_requests_query(db, manager),
+    )
+    db.commit()
+    return {"ok": True, "marked": marked}
+
+
 @router.get("/api/manager/persons/directory", response_model=List[schemas.PersonSearchOut])
 def manager_person_directory(
     db: Session = Depends(get_db),
     _manager=Depends(_limit_directory),
 ):
-    """Active directory snapshot for instant client-side search on the manager form."""
-    rows = active_roster_rows(db)[:1000]
+    """Roster snapshot for instant client-side search (load in background)."""
+    rows = roster_snapshot_rows(db, limit=1000)
     return [_person_search_row(row) for row in rows]
 
 
 @router.get("/api/manager/persons/search", response_model=List[schemas.PersonSearchOut])
 def search_persons_for_manager(
     q: str = "",
-    limit: int = 5,
+    limit: int = 25,
     db: Session = Depends(get_db),
     _manager=Depends(_limit_search),
 ):
@@ -514,6 +695,6 @@ def search_persons_for_manager(
     if len(query) < 2:
         return []
 
-    capped = min(max(limit, 1), 10)
+    capped = min(max(limit, 1), 25)
     people = _search_people(db, query, limit=capped)
     return [_person_search_row(person) for person in people]

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import functools
 import os
+import time
 from dataclasses import dataclass
+from threading import Lock
 
 import jwt
 from fastapi import Depends, Header, HTTPException
@@ -23,6 +25,10 @@ JWT_KEY_ID = os.getenv("SUPABASE_JWT_KEY_ID", "")
 JWT_AUDIENCE = "authenticated"
 JWKS_ALGORITHMS = ["RS256", "ES256", "EdDSA"]
 AUTH_DISABLED = os.getenv("DISABLE_API_AUTH", "").lower() in ("1", "true", "yes")
+_AUTH_CACHE: dict[str, tuple[float, AuthenticatedUser]] = {}
+_AUTH_CACHE_TTL_SECONDS = 300
+_AUTH_CACHE_LOCK = Lock()
+_AUTH_CACHE_MAX = 5000
 
 
 @dataclass(frozen=True)
@@ -116,6 +122,43 @@ def verify_bearer_token(authorization: str | None) -> dict:
     ) from jwks_error
 
 
+def _role_from_claims(claims: dict) -> str | None:
+    """Legacy helper — role must come from powermusic_users, not JWT metadata."""
+    for key in ("app_metadata", "user_metadata"):
+        meta = claims.get(key) or {}
+        role = meta.get("role")
+        if role in ("admin", "manager"):
+            return role
+    return None
+
+
+def invalidate_auth_cache(user_id: str | None = None) -> None:
+    with _AUTH_CACHE_LOCK:
+        if user_id:
+            _AUTH_CACHE.pop(user_id, None)
+        else:
+            _AUTH_CACHE.clear()
+
+
+def _cache_get(user_id: str) -> AuthenticatedUser | None:
+    with _AUTH_CACHE_LOCK:
+        entry = _AUTH_CACHE.get(user_id)
+        if entry is None:
+            return None
+        cached_at, user = entry
+        if time.time() - cached_at > _AUTH_CACHE_TTL_SECONDS:
+            _AUTH_CACHE.pop(user_id, None)
+            return None
+        return user
+
+
+def _cache_set(user_id: str, user: AuthenticatedUser) -> None:
+    with _AUTH_CACHE_LOCK:
+        if len(_AUTH_CACHE) >= _AUTH_CACHE_MAX:
+            _AUTH_CACHE.clear()
+        _AUTH_CACHE[user_id] = (time.time(), user)
+
+
 def get_authenticated_user(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
@@ -128,15 +171,21 @@ def get_authenticated_user(
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
+    cached = _cache_get(user_id)
+    if cached is not None:
+        return cached
+
     profile = db.query(models.Profile).filter(models.Profile.id == user_id).first()
     if profile is None:
         raise HTTPException(status_code=403, detail="User profile not found")
 
-    return AuthenticatedUser(
+    user = AuthenticatedUser(
         id=str(profile.id),
-        email=profile.email,
+        email=profile.email or (claims.get("email") or ""),
         role=profile.role,
     )
+    _cache_set(user_id, user)
+    return user
 
 
 def require_admin(

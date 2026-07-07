@@ -40,7 +40,7 @@ FRONTEND_URL = os.getenv("PILOT2_FRONTEND_URL", "http://localhost:5173")
 # Shared secret for the poll/distill trigger endpoints. When set, callers
 # must send it (X-Cron-Secret header, Authorization: Bearer, or ?secret=).
 # Leave empty in local dev to keep the endpoints open.
-CRON_SECRET = os.getenv("PILOT2_CRON_SECRET", "")
+CRON_SECRET = os.getenv("PILOT2_CRON_SECRET") or os.getenv("CRON_SECRET") or ""
 
 # Background jobs — disabled on Vercel by default (use cron + PILOT2_CRON_SECRET).
 POLL_INTERVAL_MINUTES = int(os.getenv("PILOT2_POLL_INTERVAL_MINUTES", "1"))

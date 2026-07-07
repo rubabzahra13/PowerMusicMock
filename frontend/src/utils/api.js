@@ -4,7 +4,24 @@
 const API_BASE =
   import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '' : '');
 
-const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_TIMEOUT_MS = import.meta.env.PROD ? 45000 : 12000;
+
+const DEV_BACKEND_HINT =
+  'Check that the backend is running: cd backend && .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000';
+
+function timeoutErrorMessage() {
+  if (import.meta.env.PROD) {
+    return 'The server is taking longer than usual. Please wait a moment and refresh, or try again shortly.';
+  }
+  return `The API did not respond in time. ${DEV_BACKEND_HINT}`;
+}
+
+function networkErrorMessage() {
+  if (import.meta.env.PROD) {
+    return 'Could not reach the server. Check your connection and try again.';
+  }
+  return `Could not reach the API. Start the backend: ${DEV_BACKEND_HINT}`;
+}
 
 let accessTokenProvider = null;
 
@@ -80,14 +97,10 @@ export async function fetchJson(path, options = {}) {
   } catch (err) {
     if (isUserAbort(err, userSignal)) throw err;
     if (err?.name === 'AbortError') {
-      throw new Error(
-        'The API did not respond in time. Check that the backend is running: cd backend && .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000',
-      );
+      throw new Error(timeoutErrorMessage());
     }
     if (err instanceof TypeError) {
-      throw new Error(
-        'Could not reach the API. Start the backend: cd backend && .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000',
-      );
+      throw new Error(networkErrorMessage());
     }
     throw err;
   } finally {

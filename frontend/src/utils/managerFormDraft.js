@@ -47,11 +47,13 @@ export const EMPTY_PERSON_FORM = {
   lastName: '',
   email: '',
   location: '',
+  notes: '',
 };
 
 export const MAX_MANAGER_PERSON_ROWS = 10;
 
 export function isPersonFormComplete(personForm) {
+  // Kept for backwards compatibility — delegates to strict validation.
   return (
     personForm.firstName.trim() !== '' &&
     personForm.lastName.trim() !== '' &&
@@ -62,13 +64,20 @@ export function isPersonFormComplete(personForm) {
 
 export function normalizePersonFormsFromDraft(draft) {
   if (!draft) return [{ ...EMPTY_PERSON_FORM }];
+  let forms;
   if (Array.isArray(draft.personForms) && draft.personForms.length > 0) {
-    return draft.personForms
+    forms = draft.personForms
       .slice(0, MAX_MANAGER_PERSON_ROWS)
       .map((person) => ({ ...EMPTY_PERSON_FORM, ...person }));
+  } else if (draft.personForm) {
+    forms = [{ ...EMPTY_PERSON_FORM, ...draft.personForm }];
+  } else {
+    forms = [{ ...EMPTY_PERSON_FORM }];
   }
-  if (draft.personForm) {
-    return [{ ...EMPTY_PERSON_FORM, ...draft.personForm }];
+
+  if (typeof draft.notes === 'string' && draft.notes.trim() && !forms[0].notes?.trim()) {
+    forms[0] = { ...forms[0], notes: draft.notes };
   }
-  return [{ ...EMPTY_PERSON_FORM }];
+
+  return forms;
 }

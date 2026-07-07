@@ -5,7 +5,11 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.input_validation import (
     normalize_email,
+    normalize_club_label,
+    normalize_roster_person_location,
+    normalize_roster_person_name,
     normalize_person_name,
+    normalize_person_notes,
     normalize_text,
 )
 
@@ -16,12 +20,19 @@ class SubmittedBy(BaseModel):
     email: Optional[str] = Field(default=None, max_length=254)
     club: Optional[str] = Field(default=None, max_length=200)
 
-    @field_validator("firstName", "lastName", "club", mode="before")
+    @field_validator("firstName", "lastName", mode="before")
     @classmethod
-    def clean_submitter_text(cls, value, info):
+    def clean_submitter_name(cls, value, info):
         if value is None:
             return None
         return normalize_person_name(value, field_name=info.field_name)
+
+    @field_validator("club", mode="before")
+    @classmethod
+    def clean_submitter_club(cls, value):
+        if value is None:
+            return None
+        return normalize_club_label(value, field_name="club")
 
     @field_validator("email", mode="before")
     @classmethod
@@ -34,15 +45,27 @@ class PersonInfo(BaseModel):
     lastName: Optional[str] = Field(default=None, max_length=100)
     email: Optional[str] = Field(default=None, max_length=254)
     location: Optional[str] = Field(default=None, max_length=200)
+    notes: Optional[str] = Field(default=None, max_length=5000)
 
-    @field_validator("firstName", "lastName", "location", mode="before")
+    @field_validator("firstName", "lastName", mode="before")
     @classmethod
-    def clean_person_text(cls, value, info):
+    def clean_person_name(cls, value, info):
         if value is None:
             return None
-        if info.field_name == "location":
-            return normalize_text(value, max_length=200, allow_empty=True, field_name="location")
-        return normalize_person_name(value, field_name=info.field_name)
+        label = "User first name" if info.field_name == "firstName" else "User last name"
+        return normalize_roster_person_name(value, field_name=label)
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def clean_person_location(cls, value):
+        if value is None:
+            return None
+        return normalize_roster_person_location(value, field_name="User location")
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def clean_person_notes(cls, value):
+        return normalize_person_notes(value, field_name="notes")
 
     @field_validator("email", mode="before")
     @classmethod
@@ -59,7 +82,18 @@ class RequestIn(BaseModel):
     @field_validator("notes", mode="before")
     @classmethod
     def clean_notes(cls, value):
-        return normalize_text(value, max_length=5000, allow_empty=True, field_name="notes")
+        return normalize_person_notes(value, field_name="notes")
+
+
+def _validate_unique_person_emails(people: List[PersonInfo]) -> None:
+    seen: set[str] = set()
+    for person in people:
+        email = (person.email or "").strip().lower()
+        if not email:
+            continue
+        if email in seen:
+            raise ValueError("Each request must use a different email address.")
+        seen.add(email)
 
 
 class ManualRequestIn(BaseModel):
@@ -71,7 +105,12 @@ class ManualRequestIn(BaseModel):
     @field_validator("notes", mode="before")
     @classmethod
     def clean_notes(cls, value):
-        return normalize_text(value, max_length=5000, allow_empty=True, field_name="notes")
+        return normalize_person_notes(value, field_name="notes")
+
+    @model_validator(mode="after")
+    def ensure_unique_emails(self) -> "ManualRequestIn":
+        _validate_unique_person_emails(self.people)
+        return self
 
 
 class ManagerBatchRequestIn(BaseModel):
@@ -83,7 +122,12 @@ class ManagerBatchRequestIn(BaseModel):
     @field_validator("notes", mode="before")
     @classmethod
     def clean_notes(cls, value):
-        return normalize_text(value, max_length=5000, allow_empty=True, field_name="notes")
+        return normalize_person_notes(value, field_name="notes")
+
+    @model_validator(mode="after")
+    def ensure_unique_emails(self) -> "ManagerBatchRequestIn":
+        _validate_unique_person_emails(self.people)
+        return self
 
 
 class PersonFieldMatchOut(BaseModel):
@@ -288,6 +332,41 @@ class MarkHandledIn(BaseModel):
     @classmethod
     def clean_admin_note(cls, value):
         return normalize_text(value, max_length=5000, allow_empty=True, field_name="adminNote")
+
+
+class ManagerRequestListItemOut(BaseModel):
+    id: str
+    displayId: int
+    receivedAt: Optional[datetime] = None
+    handledAt: Optional[datetime] = None
+    person: PersonInfo
+    action: str
+    status: str
+    outcome: Optional[str] = None
+    notes: Optional[str] = None
+    isUnread: bool = False
+
+
+class ManagerRequestsPageOut(BaseModel):
+    items: List[ManagerRequestListItemOut]
+    total: int
+    page: int
+    limit: int
+    unreadCount: int
+    pendingCount: int = 0
+
+
+class ManagerRequestsSummaryOut(BaseModel):
+    total: int
+    pendingCount: int = 0
+
+
+class ManagerSubmissionJobOut(BaseModel):
+    jobId: str
+    status: Literal["pending", "processing", "done", "failed"]
+    count: int = 0
+    error: Optional[str] = None
+    items: Optional[List[RequestOut]] = None
 
 
 class DuplicateCheckIn(BaseModel):

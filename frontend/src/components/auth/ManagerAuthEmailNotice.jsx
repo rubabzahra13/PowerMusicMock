@@ -45,7 +45,7 @@ export default function ManagerAuthEmailNotice({
               {resendLoading
                 ? 'Sending…'
                 : resendCooldownMs > 0
-                  ? `Resend in ${formatCooldown(resendCooldownMs)}`
+                  ? `Send again in ${formatCooldown(resendCooldownMs)}`
                   : resendLabel}
             </button>
           </div>

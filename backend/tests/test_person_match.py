@@ -20,7 +20,7 @@ class TestSamePerson:
     def test_email_location_diff_name(self):
         assert same_person(
             _person(firstName="Nik", lastName="Hall"),
-            _person(firstName="N", lastName="Hall"),
+            _person(firstName="Nick", lastName="Hall"),
         )
 
     def test_name_location_diff_email(self):
@@ -31,8 +31,8 @@ class TestSamePerson:
 
     def test_same_email_only(self):
         assert same_person(
-            _person(firstName="A", lastName="One", email="shared@example.com", location="X"),
-            _person(firstName="B", lastName="Two", email="shared@example.com", location="Y"),
+            _person(firstName="Ann", lastName="One", email="shared@example.com", location="Leeds"),
+            _person(firstName="Bob", lastName="Two", email="shared@example.com", location="York"),
         )
 
     def test_different_people(self):
@@ -43,8 +43,8 @@ class TestSamePerson:
 
     def test_name_only_not_enough(self):
         assert not same_person(
-            _person(email="a@example.com", location="X"),
-            _person(email="b@example.com", location="Y"),
+            _person(email="a@example.com", location="Leeds"),
+            _person(email="b@example.com", location="York"),
         )
 
     def test_location_only_not_enough(self):

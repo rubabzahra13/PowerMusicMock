@@ -2,6 +2,54 @@ import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
+let bodyScrollLockCount = 0;
+let lockedScrollY = 0;
+let savedBodyStyles = null;
+
+function lockBodyScroll() {
+  if (bodyScrollLockCount === 0) {
+    lockedScrollY = window.scrollY;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+
+    savedBodyStyles = {
+      position: document.body.style.position,
+      top: document.body.style.top,
+      left: document.body.style.left,
+      right: document.body.style.right,
+      width: document.body.style.width,
+      overflow: document.body.style.overflow,
+      paddingRight: document.body.style.paddingRight,
+    };
+
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${lockedScrollY}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    document.body.style.width = '100%';
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+  }
+
+  bodyScrollLockCount += 1;
+}
+
+function unlockBodyScroll() {
+  bodyScrollLockCount = Math.max(0, bodyScrollLockCount - 1);
+  if (bodyScrollLockCount !== 0 || savedBodyStyles == null) return;
+
+  document.body.style.position = savedBodyStyles.position;
+  document.body.style.top = savedBodyStyles.top;
+  document.body.style.left = savedBodyStyles.left;
+  document.body.style.right = savedBodyStyles.right;
+  document.body.style.width = savedBodyStyles.width;
+  document.body.style.overflow = savedBodyStyles.overflow;
+  document.body.style.paddingRight = savedBodyStyles.paddingRight;
+  savedBodyStyles = null;
+  window.scrollTo(0, lockedScrollY);
+}
+
 const closeButtonClass =
   'p-1.5 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(26,26,46,0.12)]';
 
@@ -28,14 +76,16 @@ export default function Modal({
   children,
   footer,
   wide = false,
+  extraWide = false,
   confirm = false,
   belowDrawer = false,
+  stableHeight = false,
+  flushBody = false,
 }) {
   useEffect(() => {
     if (!isOpen) return undefined;
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    lockBodyScroll();
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') onClose();
@@ -43,7 +93,7 @@ export default function Modal({
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      document.body.style.overflow = previousOverflow;
+      unlockBodyScroll();
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen, onClose]);
@@ -111,7 +161,9 @@ export default function Modal({
         role="dialog"
         aria-modal="true"
         className={`relative z-[1] flex w-full max-h-[min(90dvh,calc(100dvh-2rem))] flex-col overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-modal)] ${
-          wide ? 'max-w-[560px]' : 'max-w-[480px]'
+          stableHeight ? 'h-[min(90dvh,calc(100dvh-2rem))]' : ''
+        } ${
+          extraWide ? 'max-w-[720px]' : wide ? 'max-w-[560px]' : 'max-w-[480px]'
         }`}
       >
         <div className="flex shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/60 px-5 py-4">
@@ -131,7 +183,11 @@ export default function Modal({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white p-6 text-sm leading-relaxed text-[var(--color-text-primary)]">
+        <div
+          className={`flex min-h-0 flex-1 flex-col overscroll-contain bg-white text-sm leading-relaxed text-[var(--color-text-primary)] ${
+            flushBody ? 'p-0' : 'p-6'
+          } ${stableHeight ? 'overflow-hidden' : 'overflow-y-auto'}`}
+        >
           {children}
         </div>
 

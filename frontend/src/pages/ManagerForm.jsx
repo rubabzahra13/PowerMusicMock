@@ -14,13 +14,14 @@ import {
 import { format, parseISO } from 'date-fns';
 import { Toast, useToast } from '../components/ui';
 import { fetchJson } from '../utils/api';
+import { clearCache } from '../utils/pilot2Api';
+import { waitForSubmissionJob } from '../utils/managerSubmissionJobs';
 import { useAuth } from '../context/AuthContext';
 import {
   readManagerFormDraft,
   writeManagerFormDraft,
   clearManagerFormDraft,
   EMPTY_PERSON_FORM,
-  isPersonFormComplete,
   MAX_MANAGER_PERSON_ROWS,
   normalizePersonFormsFromDraft,
 } from '../utils/managerFormDraft';
@@ -30,14 +31,26 @@ import {
   formHasMatchCriteria,
   getSearchQueryHint,
   isUsableSearchQuery,
-  normalizeDirectoryPerson,
 } from '../utils/managerDirectory';
+import {
+  PERSON_FIELD_LIMITS,
+  sanitizePersonFieldInput,
+  validatePersonForms,
+  firstInvalidPersonField,
+} from '../utils/managerFormValidation';
+import ManagerRequestHistory from '../components/manager/ManagerRequestHistory';
+import { useManagerDirectory } from '../hooks/useManagerDirectory';
 
 const cardClass =
   'rounded-xl border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-card)]';
 
 const inputClass =
   'w-full h-9 rounded-lg border border-[var(--color-border-default)] bg-white px-3 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-[border-color,box-shadow] focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/15 disabled:cursor-not-allowed disabled:bg-[var(--color-surface-panel)]';
+
+const invalidInputClass =
+  'border-red-300 focus:border-red-400 focus:ring-red-200/60';
+
+const textareaClass = `${inputClass} h-auto resize-none py-2`;
 
 const readonlyInputClass = `${inputClass} cursor-default bg-[var(--color-surface-panel)] read-only:cursor-default focus:ring-0`;
 
@@ -46,8 +59,11 @@ const labelClass = 'mb-1.5 block text-xs font-medium text-[var(--color-text-prim
 const sectionTitleClass =
   'text-[11px] font-semibold tracking-wide text-[var(--color-text-secondary)]';
 
-function Field({ id, label, required, hint, children }) {
+function Field({ id, label, required, hint, error, children }) {
   const hintId = hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [errorId, hintId].filter(Boolean).join(' ') || undefined;
+
   return (
     <div>
       <label htmlFor={id} className={labelClass}>
@@ -62,8 +78,15 @@ function Field({ id, label, required, hint, children }) {
           </>
         )}
       </label>
-      {children}
-      {hint && (
+      {typeof children === 'function'
+        ? children({ errorId, describedBy, invalid: Boolean(error) })
+        : children}
+      {error && (
+        <p id={errorId} role="alert" className="mt-1 text-[11px] text-red-600">
+          {error}
+        </p>
+      )}
+      {hint && !error && (
         <p id={hintId} className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
           {hint}
         </p>
@@ -102,19 +125,22 @@ export default function ManagerForm() {
   const navigate = useNavigate();
   const draftRestoredRef = useRef(false);
 
-  const [directoryPeople, setDirectoryPeople] = useState([]);
-  const [directoryLoading, setDirectoryLoading] = useState(true);
-  const [directoryError, setDirectoryError] = useState(null);
-
   const [submitted, setSubmitted] = useState(false);
   const [submittedCount, setSubmittedCount] = useState(1);
+  const [requestRefreshToken, setRequestRefreshToken] = useState(0);
+  const { people: directoryPeople, loading: directoryLoading, error: directoryError } =
+    useManagerDirectory(user?.id, session?.access_token, {
+      enabled: !submitted && Boolean(user?.id && session?.access_token),
+    });
   const [submitting, setSubmitting] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [action, setAction] = useState('Add');
-  const [notes, setNotes] = useState('');
   const [searchInput, setSearchInput] = useState('');
 
   const [personForms, setPersonForms] = useState([{ ...EMPTY_PERSON_FORM }]);
+  const [touchedFields, setTouchedFields] = useState({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const personFieldRefs = useRef({});
 
   const managerDetails = useMemo(() => {
     const nameParts = (profile?.full_name || '').trim().split(/\s+/).filter(Boolean);
@@ -132,14 +158,33 @@ export default function ManagerForm() {
     last: `${formId}-person-${index}-last`,
     email: `${formId}-person-${index}-email`,
     location: `${formId}-person-${index}-location`,
+    notes: `${formId}-person-${index}-notes`,
   });
+
+  const personValidation = useMemo(
+    () => validatePersonForms(personForms),
+    [personForms],
+  );
+
+  const touchKey = (index, field) => `${index}.${field}`;
+
+  const shouldShowFieldError = (index, field) =>
+    submitAttempted || Boolean(touchedFields[touchKey(index, field)]);
+
+  const getFieldError = (index, field) => {
+    if (!shouldShowFieldError(index, field)) return '';
+    return personValidation.errorsByRow[index]?.[field] || '';
+  };
+
+  const setPersonFieldRef = (index, field, node) => {
+    personFieldRefs.current[touchKey(index, field)] = node;
+  };
 
   const ids = {
     managerFirst: `${formId}-manager-first`,
     managerLast: `${formId}-manager-last`,
     managerEmail: `${formId}-manager-email`,
     managerClub: `${formId}-manager-club`,
-    notes: `${formId}-notes`,
     search: `${formId}-search`,
   };
 
@@ -155,7 +200,6 @@ export default function ManagerForm() {
     draftRestoredRef.current = true;
     setPersonForms(normalizePersonFormsFromDraft(draft));
     if (draft.action) setAction(draft.action);
-    if (typeof draft.notes === 'string') setNotes(draft.notes);
     if (typeof draft.searchInput === 'string') setSearchInput(draft.searchInput);
   }, [user?.id, submitted]);
 
@@ -165,7 +209,6 @@ export default function ManagerForm() {
     const persistDraft = () => {
       const hasContent =
         personForms.some((person) => Object.values(person).some((v) => String(v).trim())) ||
-        notes.trim() ||
         searchInput.trim();
 
       if (!hasContent) {
@@ -176,7 +219,6 @@ export default function ManagerForm() {
       writeManagerFormDraft(user.id, {
         personForms,
         action,
-        notes,
         searchInput,
       });
       draftRestoredRef.current = true;
@@ -193,57 +235,28 @@ export default function ManagerForm() {
       window.clearTimeout(timer);
       window.removeEventListener('visibilitychange', handleHidden);
     };
-  }, [user?.id, personForms, action, notes, searchInput, submitted]);
-
-  useEffect(() => {
-    if (!user?.id || !session?.access_token) return undefined;
-
-    let cancelled = false;
-    setDirectoryLoading(true);
-
-    fetchJson('/api/manager/persons/directory')
-      .then((data) => {
-        if (cancelled) return;
-        setDirectoryPeople(
-          Array.isArray(data)
-            ? data.map(normalizeDirectoryPerson).filter(Boolean)
-            : [],
-        );
-        setDirectoryError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error(err);
-        setDirectoryPeople([]);
-        const msg = err.message || 'Could not load the directory.';
-        if (msg.includes('Too many requests')) {
-          setDirectoryError('The directory is busy. Wait a moment, then refresh the page.');
-        } else {
-          setDirectoryError(
-            msg.includes('Authorization header')
-              ? 'We could not load the directory. Sign out and sign in again.'
-              : msg,
-          );
-        }
-      })
-      .finally(() => {
-        // Always clear the loading flag, even if this effect run was superseded
-        // (e.g. React StrictMode's dev double-invoke) — otherwise a stale
-        // "cancelled" run can leave the UI stuck showing the loading state.
-        setDirectoryLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id, session?.access_token]);
+  }, [user?.id, personForms, action, searchInput, submitted]);
 
   const handlePersonChange = (index, field, val) => {
+    const sanitized = sanitizePersonFieldInput(field, val);
     setPersonForms((prev) =>
       prev.map((person, rowIndex) =>
-        rowIndex === index ? { ...person, [field]: val } : person,
+        rowIndex === index ? { ...person, [field]: sanitized } : person,
       ),
     );
+  };
+
+  const handlePersonBlur = (index, field) => {
+    setTouchedFields((prev) => ({ ...prev, [touchKey(index, field)]: true }));
+    if (field === 'email') {
+      setPersonForms((prev) =>
+        prev.map((person, rowIndex) =>
+          rowIndex === index
+            ? { ...person, email: person.email.trim().toLowerCase() }
+            : person,
+        ),
+      );
+    }
   };
 
   const handleAddPersonRow = () => {
@@ -267,49 +280,101 @@ export default function ManagerForm() {
       managerDetails.email.trim() !== '' &&
       managerDetails.club.trim() !== '' &&
       personForms.length > 0 &&
-      personForms.every(isPersonFormComplete),
-    [managerDetails, personForms],
+      personValidation.ok,
+    [managerDetails, personForms.length, personValidation.ok],
   );
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!isFormValid || submitting) return;
+    setSubmitAttempted(true);
+
+    const validation = validatePersonForms(personForms);
+    if (
+      !managerDetails.firstName.trim() ||
+      !managerDetails.lastName.trim() ||
+      !managerDetails.email.trim() ||
+      !managerDetails.club.trim() ||
+      !validation.ok
+    ) {
+      const firstInvalid = firstInvalidPersonField(validation.errorsByRow);
+      if (firstInvalid) {
+        const ref = personFieldRefs.current[touchKey(firstInvalid.rowIndex, firstInvalid.field)];
+        ref?.focus?.();
+        ref?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+        showToast(firstInvalid.message, 'error');
+      } else {
+        showToast('Fill all required fields to submit.', 'error');
+      }
+      return;
+    }
+
+    if (submitting) return;
+
+    const normalizedPeople = validation.normalizedForms;
 
     setSubmitting(true);
     try {
       const endpoint =
-        personForms.length === 1 ? '/api/requests' : '/api/requests/batch';
+        normalizedPeople.length === 1 ? '/api/requests' : '/api/requests/batch';
       const body =
-        personForms.length === 1
+        normalizedPeople.length === 1
           ? {
               submittedBy: managerDetails,
-              person: personForms[0],
+              person: {
+                firstName: normalizedPeople[0].firstName,
+                lastName: normalizedPeople[0].lastName,
+                email: normalizedPeople[0].email,
+                location: normalizedPeople[0].location,
+              },
               action,
-              notes,
+              notes: normalizedPeople[0].notes?.trim() || undefined,
             }
           : {
               submittedBy: managerDetails,
-              people: personForms,
+              people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
+                firstName,
+                lastName,
+                email,
+                location,
+                notes: notes?.trim() || undefined,
+              })),
               action,
-              notes,
             };
 
-      await fetchJson(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      if (normalizedPeople.length === 1) {
+        await fetchJson(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } else {
+        const queued = await fetchJson(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (queued?.status === 'pending' || queued?.status === 'processing') {
+          showToast('Processing your requests…', 'success');
+          await waitForSubmissionJob(queued.jobId);
+        } else if (queued?.status === 'failed') {
+          throw new Error(queued.error || 'Could not process your batch submission.');
+        }
+      }
 
-      const count = personForms.length;
+      const count = normalizedPeople.length;
       showToast(
         count === 1 ? 'Request submitted.' : `${count} requests submitted.`,
         'success',
       );
       if (user?.id) clearManagerFormDraft(user.id);
+      clearCache('manager_requests_all');
+      clearCache('manager_requests_summary');
       setSubmittedCount(count);
+      setRequestRefreshToken((token) => token + 1);
       setSearchInput('');
       setPersonForms([{ ...EMPTY_PERSON_FORM }]);
-      setNotes('');
+      setTouchedFields({});
+      setSubmitAttempted(false);
       setSubmitted(true);
     } catch (err) {
       console.error(err);
@@ -329,7 +394,8 @@ export default function ManagerForm() {
     setSubmitted(false);
     setSubmittedCount(1);
     setPersonForms([{ ...EMPTY_PERSON_FORM }]);
-    setNotes('');
+    setTouchedFields({});
+    setSubmitAttempted(false);
     setSearchInput('');
     setAction('Add');
   };
@@ -506,6 +572,7 @@ export default function ManagerForm() {
               </h2>
               <p className="mt-1.5 text-sm text-[var(--color-text-secondary)]">
                 Power Music admin will action {submittedCount === 1 ? 'this' : 'these'} shortly.
+                Open <span className="font-medium text-[var(--color-text-primary)]">Your requests</span> on the right to track progress.
               </p>
               <button
                 type="button"
@@ -666,53 +733,111 @@ export default function ManagerForm() {
                           </div>
                         )}
                         <div className="grid grid-cols-2 gap-3">
-                          <Field id={rowIds.first} label="User first name" required>
-                            <input
-                              id={rowIds.first}
-                              type="text"
-                              required
-                              value={personForm.firstName}
-                              onChange={(e) =>
-                                handlePersonChange(index, 'firstName', e.target.value)
-                              }
-                              className={inputClass}
-                            />
+                          <Field
+                            id={rowIds.first}
+                            label="User first name"
+                            required
+                            error={getFieldError(index, 'firstName')}
+                          >
+                            {({ errorId, describedBy, invalid }) => (
+                              <input
+                                ref={(node) => setPersonFieldRef(index, 'firstName', node)}
+                                id={rowIds.first}
+                                type="text"
+                                required
+                                autoComplete="given-name"
+                                spellCheck={false}
+                                maxLength={PERSON_FIELD_LIMITS.firstName}
+                                value={personForm.firstName}
+                                onChange={(e) =>
+                                  handlePersonChange(index, 'firstName', e.target.value)
+                                }
+                                onBlur={() => handlePersonBlur(index, 'firstName')}
+                                aria-invalid={invalid || undefined}
+                                aria-describedby={describedBy}
+                                className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                              />
+                            )}
                           </Field>
-                          <Field id={rowIds.last} label="User last name" required>
-                            <input
-                              id={rowIds.last}
-                              type="text"
-                              required
-                              value={personForm.lastName}
-                              onChange={(e) =>
-                                handlePersonChange(index, 'lastName', e.target.value)
-                              }
-                              className={inputClass}
-                            />
+                          <Field
+                            id={rowIds.last}
+                            label="User last name"
+                            required
+                            error={getFieldError(index, 'lastName')}
+                          >
+                            {({ errorId, describedBy, invalid }) => (
+                              <input
+                                ref={(node) => setPersonFieldRef(index, 'lastName', node)}
+                                id={rowIds.last}
+                                type="text"
+                                required
+                                autoComplete="family-name"
+                                spellCheck={false}
+                                maxLength={PERSON_FIELD_LIMITS.lastName}
+                                value={personForm.lastName}
+                                onChange={(e) =>
+                                  handlePersonChange(index, 'lastName', e.target.value)
+                                }
+                                onBlur={() => handlePersonBlur(index, 'lastName')}
+                                aria-invalid={invalid || undefined}
+                                aria-describedby={describedBy}
+                                className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                              />
+                            )}
                           </Field>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                          <Field id={rowIds.email} label="User email" required>
-                            <input
-                              id={rowIds.email}
-                              type="email"
-                              required
-                              value={personForm.email}
-                              onChange={(e) => handlePersonChange(index, 'email', e.target.value)}
-                              className={inputClass}
-                            />
+                          <Field
+                            id={rowIds.email}
+                            label="User email"
+                            required
+                            error={getFieldError(index, 'email')}
+                          >
+                            {({ describedBy, invalid }) => (
+                              <input
+                                ref={(node) => setPersonFieldRef(index, 'email', node)}
+                                id={rowIds.email}
+                                type="email"
+                                required
+                                inputMode="email"
+                                autoComplete="email"
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                                spellCheck={false}
+                                maxLength={PERSON_FIELD_LIMITS.email}
+                                value={personForm.email}
+                                onChange={(e) => handlePersonChange(index, 'email', e.target.value)}
+                                onBlur={() => handlePersonBlur(index, 'email')}
+                                aria-invalid={invalid || undefined}
+                                aria-describedby={describedBy}
+                                className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                              />
+                            )}
                           </Field>
-                          <Field id={rowIds.location} label="User location" required>
-                            <input
-                              id={rowIds.location}
-                              type="text"
-                              required
-                              value={personForm.location}
-                              onChange={(e) =>
-                                handlePersonChange(index, 'location', e.target.value)
-                              }
-                              className={inputClass}
-                            />
+                          <Field
+                            id={rowIds.location}
+                            label="User location"
+                            required
+                            error={getFieldError(index, 'location')}
+                          >
+                            {({ describedBy, invalid }) => (
+                              <input
+                                ref={(node) => setPersonFieldRef(index, 'location', node)}
+                                id={rowIds.location}
+                                type="text"
+                                required
+                                autoComplete="organization"
+                                maxLength={PERSON_FIELD_LIMITS.location}
+                                value={personForm.location}
+                                onChange={(e) =>
+                                  handlePersonChange(index, 'location', e.target.value)
+                                }
+                                onBlur={() => handlePersonBlur(index, 'location')}
+                                aria-invalid={invalid || undefined}
+                                aria-describedby={describedBy}
+                                className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                              />
+                            )}
                           </Field>
                         </div>
 
@@ -735,6 +860,32 @@ export default function ManagerForm() {
                             </div>
                           </div>
                         )}
+
+                        <Field
+                          id={rowIds.notes}
+                          label={
+                            showRowLabel
+                              ? `Additional notes for User ${index + 1} (optional)`
+                              : 'Additional notes for this request (optional)'
+                          }
+                          error={getFieldError(index, 'notes')}
+                        >
+                          {({ describedBy, invalid }) => (
+                            <textarea
+                              ref={(node) => setPersonFieldRef(index, 'notes', node)}
+                              id={rowIds.notes}
+                              value={personForm.notes}
+                              onChange={(e) => handlePersonChange(index, 'notes', e.target.value)}
+                              onBlur={() => handlePersonBlur(index, 'notes')}
+                              placeholder="Any additional information for this request..."
+                              rows={2}
+                              maxLength={PERSON_FIELD_LIMITS.notes}
+                              aria-invalid={invalid || undefined}
+                              aria-describedby={describedBy}
+                              className={`${textareaClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                            />
+                          )}
+                        </Field>
                       </div>
                     );
                   })}
@@ -750,17 +901,6 @@ export default function ManagerForm() {
                     Add another user
                   </button>
                 )}
-              </FormSection>
-
-              <FormSection title="Additional Notes (optional)">
-                <textarea
-                  id={ids.notes}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Any additional information for the Power Music admin..."
-                  rows={3}
-                  className={`${inputClass} h-auto resize-none py-2`}
-                />
               </FormSection>
 
               <div className="space-y-2 border-t border-[var(--color-border-default)] pt-4">
@@ -783,7 +923,9 @@ export default function ManagerForm() {
                 </button>
                 {!isFormValid && (
                   <p className="text-center text-[11px] text-[var(--color-text-muted)]">
-                    Fill all required fields to submit.
+                    {submitAttempted
+                      ? 'Fix the highlighted fields to submit.'
+                      : 'Fill all required fields with valid details to submit.'}
                   </p>
                 )}
               </div>
@@ -792,9 +934,11 @@ export default function ManagerForm() {
         </section>
 
         <aside
-          className={`${cardClass} flex w-full min-w-0 flex-col gap-4 self-start p-5 md:w-[56%] md:p-6 lg:w-[58%]`}
-          aria-labelledby="directory-search-heading"
+          className={`${cardClass} flex w-full min-w-0 flex-col gap-5 self-start p-5 md:w-[56%] md:p-6 lg:w-[58%]`}
         >
+          <ManagerRequestHistory refreshToken={requestRefreshToken} />
+
+          <section aria-labelledby="directory-search-heading" className="space-y-4">
           <div>
             <h2
               id="directory-search-heading"
@@ -990,6 +1134,7 @@ export default function ManagerForm() {
           <p className="border-t border-[var(--color-border-default)] pt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">
             Rows that share any name, email, or location detail with your form are also listed here.
           </p>
+          </section>
         </aside>
       </main>
     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getSupabase } from '../supabaseClient';
 import { AlertCircle, Loader2 } from 'lucide-react';
@@ -10,115 +10,239 @@ import PasswordRequirements, { PasswordMatchHint } from '../components/auth/Pass
 
 const CALLBACK_TIMEOUT_MS = 45000;
 
-function readAuthErrorFromUrl() {
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-  const queryParams = new URLSearchParams(window.location.search);
-  return (
+function readHashParams() {
+  return new URLSearchParams(window.location.hash.replace(/^#/, ''));
+}
+
+function readQueryParams() {
+  return new URLSearchParams(window.location.search);
+}
+
+function readCallbackContext() {
+  const hashParams = readHashParams();
+  const queryParams = readQueryParams();
+  const urlError =
     hashParams.get('error_description') ||
     hashParams.get('error') ||
     queryParams.get('error_description') ||
-    queryParams.get('error')
-  );
+    queryParams.get('error');
+
+  return {
+    urlError,
+    code: queryParams.get('code'),
+    hasAccessToken: hashParams.has('access_token'),
+    isRecovery: hashParams.get('type') === 'recovery' || queryParams.get('type') === 'recovery',
+  };
+}
+
+function formatAuthCallbackError(raw) {
+  if (!raw) {
+    return 'This sign-in link is invalid or has expired. Please request a new one.';
+  }
+
+  const normalized = String(raw).replace(/\+/g, ' ');
+  try {
+    return decodeURIComponent(normalized);
+  } catch {
+    return normalized;
+  }
 }
 
 function clearAuthParamsFromUrl() {
   window.history.replaceState(null, '', window.location.pathname);
 }
 
-function isRecoveryCallback() {
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-  const queryParams = new URLSearchParams(window.location.search);
-  return hashParams.get('type') === 'recovery' || queryParams.get('type') === 'recovery';
+function isExpiredLinkMessage(message) {
+  const msg = (message || '').toLowerCase();
+  return (
+    msg.includes('expired') ||
+    msg.includes('invalid') ||
+    msg.includes('already been used') ||
+    msg.includes('otp_expired')
+  );
+}
+
+function CallbackLoading({ title, detail }) {
+  return (
+    <ManagerAuthShell footnote="">
+      <div className="text-center py-4">
+        <Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--color-brand-primary)]" aria-hidden="true" />
+        <h2 className="mt-4 text-base font-semibold text-[var(--color-text-primary)]">{title}</h2>
+        {detail && (
+          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{detail}</p>
+        )}
+      </div>
+    </ManagerAuthShell>
+  );
 }
 
 export default function AuthCallback() {
   const navigate = useNavigate();
-  const { user, role, logout, initializing: authInitializing } = useAuth();
-  const [errorMsg, setErrorMsg] = useState(() => readAuthErrorFromUrl());
-  const [sessionPending, setSessionPending] = useState(true);
-  const [recoveryMode, setRecoveryMode] = useState(() => isRecoveryCallback());
+  const { user, role, logout } = useAuth();
+  const initialContext = useRef(readCallbackContext()).current;
+
+  const [callbackStatus, setCallbackStatus] = useState(() => {
+    if (initialContext.urlError) return 'error';
+    if (initialContext.isRecovery && !initialContext.code) return 'recovery';
+    return 'loading';
+  });
+  const [errorMsg, setErrorMsg] = useState(() =>
+    initialContext.urlError ? formatAuthCallbackError(initialContext.urlError) : '',
+  );
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
-  const recoveryModeRef = useRef(isRecoveryCallback());
+  const callbackFinishedRef = useRef(
+    initialContext.urlError || (initialContext.isRecovery && !initialContext.code),
+  );
   const callbackTimeoutRef = useRef(null);
 
-  const enterRecoveryMode = () => {
-    recoveryModeRef.current = true;
-    setRecoveryMode(true);
-    setSessionPending(false);
-    setErrorMsg('');
+  const finishWithError = async (message) => {
+    if (callbackFinishedRef.current) return;
+    callbackFinishedRef.current = true;
     if (callbackTimeoutRef.current) {
       window.clearTimeout(callbackTimeoutRef.current);
       callbackTimeoutRef.current = null;
     }
+    await logout();
+    setErrorMsg(message);
+    setCallbackStatus('error');
+    clearAuthParamsFromUrl();
+  };
+
+  const finishWithSuccess = () => {
+    if (callbackFinishedRef.current) return;
+    callbackFinishedRef.current = true;
+    if (callbackTimeoutRef.current) {
+      window.clearTimeout(callbackTimeoutRef.current);
+      callbackTimeoutRef.current = null;
+    }
+    setCallbackStatus('success');
+  };
+
+  const enterRecoveryMode = () => {
+    if (callbackFinishedRef.current && callbackStatus !== 'loading') return;
+    callbackFinishedRef.current = true;
+    if (callbackTimeoutRef.current) {
+      window.clearTimeout(callbackTimeoutRef.current);
+      callbackTimeoutRef.current = null;
+    }
+    setErrorMsg('');
+    setCallbackStatus('recovery');
+    clearAuthParamsFromUrl();
   };
 
   useEffect(() => {
-    if (readAuthErrorFromUrl()) {
-      setSessionPending(false);
+    if (initialContext.urlError) {
+      logout();
       return undefined;
     }
 
     const supabase = getSupabase();
     if (!supabase) {
-      setErrorMsg('Authentication is not configured.');
-      setSessionPending(false);
+      finishWithError('Authentication is not configured.');
       return undefined;
     }
 
     let active = true;
 
     async function completeCallback() {
-      const queryParams = new URLSearchParams(window.location.search);
-      const code = queryParams.get('code');
+      const context = readCallbackContext();
 
-      if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (context.code) {
+        await logout();
         if (!active) return;
+
+        const { error } = await supabase.auth.exchangeCodeForSession(context.code);
+        if (!active) return;
+
         if (error) {
-          setErrorMsg(error.message || 'This sign-in link is invalid or has expired.');
-          setSessionPending(false);
+          const friendly = formatAuthCallbackError(error.message);
+          await finishWithError(
+            isExpiredLinkMessage(friendly)
+              ? 'This sign-in link is invalid or has expired. Please request a new one.'
+              : friendly,
+          );
           return;
         }
+
+        if (readCallbackContext().isRecovery) {
+          enterRecoveryMode();
+          return;
+        }
+
+        finishWithSuccess();
+        return;
       }
 
-      if (isRecoveryCallback()) {
+      if (context.isRecovery) {
+        if (!active) return;
         enterRecoveryMode();
         return;
       }
 
-      const { data } = await supabase.auth.getSession();
+      if (context.hasAccessToken) {
+        const { data, error } = await supabase.auth.getSession();
+        if (!active) return;
+
+        if (error) {
+          await finishWithError(formatAuthCallbackError(error.message));
+          return;
+        }
+
+        if (data.session) {
+          if (readCallbackContext().isRecovery) {
+            enterRecoveryMode();
+            return;
+          }
+          finishWithSuccess();
+        }
+        return;
+      }
+
+      const { data, error } = await supabase.auth.getSession();
       if (!active) return;
 
-      if (data.session) {
-        setSessionPending(false);
+      if (error) {
+        await finishWithError(formatAuthCallbackError(error.message));
+        return;
       }
+
+      if (data.session) {
+        finishWithSuccess();
+        return;
+      }
+
+      await finishWithError('This sign-in link is invalid or has expired. Please request a new one.');
     }
 
     completeCallback();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active || !session) return;
+      if (!active || callbackFinishedRef.current) return;
 
       if (event === 'PASSWORD_RECOVERY') {
         enterRecoveryMode();
         return;
       }
 
-      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
-        if (isRecoveryCallback()) {
+      if (!session) return;
+
+      const context = readCallbackContext();
+      if (context.code) return;
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (context.isRecovery) {
           enterRecoveryMode();
           return;
         }
-        setSessionPending(false);
+        finishWithSuccess();
       }
     });
 
     callbackTimeoutRef.current = window.setTimeout(() => {
-      if (!active || recoveryModeRef.current) return;
-      setSessionPending(false);
-      setErrorMsg((prev) => prev || 'This sign-in link is invalid or has expired. Please request a new one.');
+      if (!active || callbackFinishedRef.current) return;
+      finishWithError('This sign-in link is invalid or has expired. Please request a new one.');
     }, CALLBACK_TIMEOUT_MS);
 
     return () => {
@@ -129,7 +253,22 @@ export default function AuthCallback() {
         callbackTimeoutRef.current = null;
       }
     };
-  }, []);
+  }, [logout]);
+
+  useEffect(() => {
+    if (callbackStatus !== 'success') return;
+
+    if (!user || !role) return;
+
+    clearAuthParamsFromUrl();
+    if (role === 'manager') {
+      navigate('/submit', { replace: true });
+      return;
+    }
+    if (role === 'admin') {
+      navigate('/', { replace: true });
+    }
+  }, [callbackStatus, user, role, navigate]);
 
   const handleSetNewPassword = async (e) => {
     e.preventDefault();
@@ -161,9 +300,6 @@ export default function AuthCallback() {
       if (error) throw error;
 
       const email = user?.email || '';
-      setRecoveryMode(false);
-      recoveryModeRef.current = false;
-      clearAuthParamsFromUrl();
       await logout();
       navigate('/submit/signup', {
         replace: true,
@@ -176,29 +312,7 @@ export default function AuthCallback() {
     }
   };
 
-  useEffect(() => {
-    if (recoveryMode || errorMsg || sessionPending || authInitializing) return;
-
-    if (user && role === 'manager') {
-      clearAuthParamsFromUrl();
-      navigate('/submit', { replace: true });
-      return;
-    }
-
-    if (user && role === 'admin') {
-      clearAuthParamsFromUrl();
-      navigate('/', { replace: true });
-      return;
-    }
-
-    if (user && !role) return;
-
-    if (!user) {
-      setErrorMsg((prev) => prev || 'Could not sign you in. Please request a new link.');
-    }
-  }, [user, role, authInitializing, sessionPending, errorMsg, navigate, recoveryMode]);
-
-  if (recoveryMode) {
+  if (callbackStatus === 'recovery') {
     return (
       <ManagerAuthShell footnote="">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Choose a new password</h2>
@@ -266,50 +380,30 @@ export default function AuthCallback() {
     );
   }
 
-  if (!errorMsg && (sessionPending || authInitializing || (user && !role))) {
+  if (callbackStatus === 'loading' || callbackStatus === 'success') {
     return (
-      <ManagerAuthShell footnote="">
-        <div className="text-center py-4">
-          <Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--color-brand-primary)]" aria-hidden="true" />
-          <h2 className="mt-4 text-base font-semibold text-[var(--color-text-primary)]">Signing you in…</h2>
-          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-            Confirming your email and opening the submission form.
-          </p>
-        </div>
-      </ManagerAuthShell>
+      <CallbackLoading
+        title={callbackStatus === 'success' ? 'Opening your account…' : 'Signing you in…'}
+        detail={
+          callbackStatus === 'success'
+            ? 'One moment while we finish signing you in.'
+            : 'Confirming your email and opening the submission form.'
+        }
+      />
     );
-  }
-
-  if (errorMsg) {
-    return (
-      <ManagerAuthShell footnote="">
-        <div role="alert" className={errorClass}>
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
-          <span>{errorMsg}</span>
-        </div>
-        <p className="mt-6 text-center text-sm text-[var(--color-text-secondary)]">
-          <Link to="/submit/signup" className="font-medium text-[var(--color-brand-accent)] hover:underline">
-            Back to sign in
-          </Link>
-        </p>
-      </ManagerAuthShell>
-    );
-  }
-
-  if (user && role === 'manager') {
-    return <Navigate to="/submit" replace />;
-  }
-
-  if (user && role === 'admin') {
-    return <Navigate to="/" replace />;
   }
 
   return (
     <ManagerAuthShell footnote="">
-      <div className="text-center py-4">
-        <Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--color-brand-primary)]" aria-hidden="true" />
-        <h2 className="mt-4 text-base font-semibold text-[var(--color-text-primary)]">Finishing sign-in…</h2>
+      <div role="alert" className={errorClass}>
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
+        <span>{errorMsg}</span>
       </div>
+      <p className="mt-6 text-center text-sm text-[var(--color-text-secondary)]">
+        <Link to="/submit/signup" className="font-medium text-[var(--color-brand-accent)] hover:underline">
+          Back to sign in
+        </Link>
+      </p>
     </ManagerAuthShell>
   );
 }

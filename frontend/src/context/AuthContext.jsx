@@ -534,6 +534,7 @@ export function AuthProvider({ children }) {
           lastName,
           club,
           full_name,
+          role: 'manager',
         },
       },
     });

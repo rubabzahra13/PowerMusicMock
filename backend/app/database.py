@@ -93,6 +93,12 @@ def create_db_engine():
             kwargs["poolclass"] = NullPool
         else:
             kwargs["pool_pre_ping"] = True
+            # Local/dev: default pool is larger than Supabase serverless caps.
+            # Small pools (3+5) exhaust quickly with background jobs + parallel API polls.
+            kwargs["pool_size"] = int(os.getenv("DB_POOL_SIZE", "8"))
+            kwargs["max_overflow"] = int(os.getenv("DB_MAX_OVERFLOW", "12"))
+            kwargs["pool_timeout"] = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+            kwargs["pool_recycle"] = int(os.getenv("DB_POOL_RECYCLE", "300"))
         return create_engine(get_database_url(), **kwargs)
     except Exception as exc:
         if _is_network_unreachable(exc):

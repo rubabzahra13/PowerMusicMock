@@ -50,6 +50,43 @@ class ManagerRequest(Base):
     intake_persons = Column(JSONB, nullable=False, server_default="{}")
 
 
+class ManagerRequestView(Base):
+    """When a manager last viewed a handled request (unread until seen_at >= handled_at)."""
+
+    __tablename__ = "manager_request_views"
+
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("powermusic_users.id"), primary_key=True)
+    request_id = Column(String, ForeignKey("manager_requests.id"), primary_key=True)
+    seen_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class ManagerSubmissionJob(Base):
+    """Queued manager batch submissions processed by cron."""
+
+    __tablename__ = "manager_submission_jobs"
+
+    id = Column(String, primary_key=True)
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("powermusic_users.id"), nullable=True)
+    status = Column(String, nullable=False, default="pending")
+    payload = Column(JSONB, nullable=False)
+    result = Column(JSONB, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class ApiRateLimitBucket(Base):
+    """Shared rate-limit counters across serverless instances."""
+
+    __tablename__ = "api_rate_limit_buckets"
+
+    rate_key = Column(String, primary_key=True)
+    window_start = Column(Integer, primary_key=True)
+    hit_count = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
 # Backward-compatible alias used across the codebase during refactor.
 Request = ManagerRequest
 
