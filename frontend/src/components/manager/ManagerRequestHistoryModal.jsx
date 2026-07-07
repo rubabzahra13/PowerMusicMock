@@ -120,15 +120,6 @@ export default function ManagerRequestHistoryModal({
           </button>
         ) : null
       }
-      footer={
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg border border-[var(--color-border-default)] px-4 py-2 text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:bg-white"
-        >
-          Close
-        </button>
-      }
     >
       <div className="flex h-full min-h-0 flex-col gap-3">
         <p className="shrink-0 text-xs leading-relaxed text-[var(--color-text-secondary)]">
