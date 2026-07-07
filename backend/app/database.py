@@ -88,6 +88,7 @@ def _is_network_unreachable(error: Exception) -> bool:
 def create_db_engine():
     try:
         kwargs = {}
+        db_url = get_database_url()
         if os.getenv("VERCEL"):
             # Serverless: reuse one live connection while the function stays warm
             # so repeat invocations skip the costly connect/TLS handshake (the DB
@@ -108,7 +109,7 @@ def create_db_engine():
             kwargs["max_overflow"] = int(os.getenv("DB_MAX_OVERFLOW", "12"))
             kwargs["pool_timeout"] = int(os.getenv("DB_POOL_TIMEOUT", "30"))
             kwargs["pool_recycle"] = int(os.getenv("DB_POOL_RECYCLE", "300"))
-        return create_engine(get_database_url(), **kwargs)
+        return create_engine(db_url, **kwargs)
     except Exception as exc:
         if _is_network_unreachable(exc):
             host = urlparse(os.getenv("DATABASE_URL", "")).hostname or "unknown"
