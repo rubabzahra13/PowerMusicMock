@@ -91,6 +91,11 @@ export async function fetchJson(path, options = {}) {
       } catch {
         /* keep statusText */
       }
+      if (res.status === 401) {
+        // Token rejected (expired/invalid). Tell the auth layer so the user
+        // is signed out and routed to login instead of a broken dashboard.
+        window.dispatchEvent(new CustomEvent('auth:session-expired'));
+      }
       throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
     }
     return res.json();

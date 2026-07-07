@@ -4,10 +4,11 @@ import { isAdminEmail } from '../utils/adminAccess';
 import { ManagerAuthLoading } from '../components/auth/ManagerAuthShell';
 
 export function AdminRoute() {
-  const { user, role } = useAuth();
+  const { user, role, authReady } = useAuth();
 
+  // Never show the dashboard shell before the session has been verified.
   if (!user) {
-    return <Navigate to="/submit/signup" replace />;
+    return authReady ? <Navigate to="/admin/login" replace /> : <ManagerAuthLoading />;
   }
 
   if (!role) {

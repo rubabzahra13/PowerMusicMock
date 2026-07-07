@@ -9,7 +9,7 @@ import {
 } from '../utils/managerAuth';
 import { getAuthCallbackUrl } from '../utils/authRedirect';
 import { clearAuthCache, readAuthCache, writeAuthCache } from '../utils/authCache';
-import { readInitialAuthState, clearStoredSession, readStoredSession } from '../utils/authBootstrap';
+import { readInitialAuthState, clearStoredSession, readStoredSession, isSessionExpired } from '../utils/authBootstrap';
 import { setAccessTokenProvider } from '../utils/api';
 import { requestManagerPasswordReset, resendManagerSignupConfirmation } from '../utils/managerAuthEmail';
 
@@ -142,7 +142,10 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     setAccessTokenProvider(async () => {
-      if (session?.access_token) return session.access_token;
+      // Only hand out tokens that are still valid — an expired token turns
+      // every API call into a 401. readStoredSession() already drops expired
+      // sessions; for the in-memory one we check explicitly.
+      if (session?.access_token && !isSessionExpired(session)) return session.access_token;
 
       const stored = readStoredSession();
       if (stored?.access_token) return stored.access_token;
@@ -150,6 +153,7 @@ export function AuthProvider({ children }) {
       const supabase = getSupabase();
       if (!supabase) return null;
 
+      // getSession() silently refreshes an expired session when possible.
       const { data } = await supabase.auth.getSession();
       return data.session?.access_token ?? null;
     });
@@ -173,6 +177,18 @@ export function AuthProvider({ children }) {
       setRole(null);
       setProfile(null);
     }
+
+    // The API layer fires this when a request comes back 401 — the token is
+    // dead, so sign out fully; route guards then send the user to login.
+    let sessionExpiredHandled = false;
+    const onSessionExpired = () => {
+      if (sessionExpiredHandled) return;
+      sessionExpiredHandled = true;
+      window.setTimeout(() => { sessionExpiredHandled = false; }, 3000);
+      clearStoredSession();
+      clearAuthState();
+    };
+    window.addEventListener('auth:session-expired', onSessionExpired);
 
     async function refreshProfile(currentSession, { allowCachedFallback = false } = {}) {
       const currentUser = currentSession?.user ?? null;
@@ -301,6 +317,7 @@ export function AuthProvider({ children }) {
       active = false;
       window.clearTimeout(bootTimeout);
       subscription.unsubscribe();
+      window.removeEventListener('auth:session-expired', onSessionExpired);
     };
   }, []);
 

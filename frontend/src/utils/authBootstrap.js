@@ -11,14 +11,26 @@ function getLegacyStorageKey() {
   }
 }
 
+/** True when the session's access token is already (or almost) expired. */
+export function isSessionExpired(session) {
+  const exp = session?.expires_at;
+  if (typeof exp !== 'number') return false;
+  return exp * 1000 <= Date.now() + 30_000; // 30s safety margin
+}
+
 function parseStoredSession(raw) {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (parsed?.access_token && parsed?.user) return parsed;
-    if (parsed?.currentSession?.access_token) return parsed.currentSession;
-    if (parsed?.session?.access_token) return parsed.session;
-    return null;
+    let session = null;
+    if (parsed?.access_token && parsed?.user) session = parsed;
+    else if (parsed?.currentSession?.access_token) session = parsed.currentSession;
+    else if (parsed?.session?.access_token) session = parsed.session;
+    // An expired token must never drive the UI or API calls (it renders a
+    // dashboard whose every request 401s). The Supabase client still owns the
+    // raw storage entry and can silently refresh it — we just don't trust it.
+    if (session && isSessionExpired(session)) return null;
+    return session;
   } catch {
     return null;
   }
