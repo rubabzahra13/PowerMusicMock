@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ClipboardList, Loader2 } from 'lucide-react';
 import ManagerRequestHistoryModal from './ManagerRequestHistoryModal';
@@ -35,7 +35,7 @@ export default function ManagerRequestHistory({ refreshToken = 0 }) {
   const [showAllModal, setShowAllModal] = useState(false);
   const [highlightVersion, setHighlightVersion] = useState(0);
 
-  const bumpHighlights = () => setHighlightVersion((v) => v + 1);
+  const bumpHighlights = useCallback(() => setHighlightVersion((v) => v + 1), []);
   const { meta: summaryMeta, loading: summaryLoading, error: summaryError, refresh: refreshSummary } =
     useManagerRequestSummary(refreshToken);
   const {

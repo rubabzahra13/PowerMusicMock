@@ -134,18 +134,19 @@ export function useManagerRequests(
   const [error, setError] = useState(null);
   const hasLoadedRef = useRef(false);
   const refreshInFlightRef = useRef(false);
+  const onHighlightChangeRef = useRef(onHighlightChange);
+  onHighlightChangeRef.current = onHighlightChange;
 
-  const apply = useCallback(
-    (data, isStale) => {
-      const next = applyManagerRequestsPayload(data, onHighlightChange);
-      setRequests(next.items);
-      setMeta({ total: next.total, pendingCount: next.pendingCount });
-      setError(null);
-      setInitialLoading(false);
-      if (!isStale) hasLoadedRef.current = true;
-    },
-    [onHighlightChange],
-  );
+  const apply = useCallback((data, isStale) => {
+    const next = applyManagerRequestsPayload(data, () => {
+      onHighlightChangeRef.current?.();
+    });
+    setRequests(next.items);
+    setMeta({ total: next.total, pendingCount: next.pendingCount });
+    setError(null);
+    setInitialLoading(false);
+    if (!isStale) hasLoadedRef.current = true;
+  }, []);
 
   const fetchAll = useCallback(
     () => fetchManagerRequestsPage({ page: 1, limit: FETCH_LIMIT }),
