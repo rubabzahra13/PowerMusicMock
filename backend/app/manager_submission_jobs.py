@@ -13,6 +13,7 @@ from app.manager_request_intake import intake_manager_submission, manager_id_for
 from app.request_display import allocate_request_ids, hydrate_request_display
 from app.manager_request_serialize import requests_to_api_dicts
 from app.manager_request_summary_cache import invalidate_manager_request_summary
+from app.manager_request_stats import increment_manager_request_stats
 
 JOB_PENDING = "pending"
 JOB_PROCESSING = "processing"
@@ -94,6 +95,8 @@ def process_manager_batch_payload(
         )
         for request_id, person in zip(request_ids, req_in.people)
     ]
+    for req in new_requests:
+        increment_manager_request_stats(db, req)
     db.commit()
 
     for req in new_requests:

@@ -21,6 +21,7 @@ from app.manager_request_tags import (
 )
 from app.intake_persons import apply_person_to_row, sync_display_person
 from app.person_match import same_person
+from app.manager_request_stats import increment_manager_request_stats
 from app.request_display import allocate_request_ids
 
 

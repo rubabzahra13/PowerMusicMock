@@ -42,6 +42,11 @@ from app.manager_request_summary_cache import (
     invalidate_manager_request_summary,
     set_manager_request_summary,
 )
+from app.manager_request_stats import (
+    decrement_manager_pending_stat,
+    get_stored_manager_request_stats,
+    increment_manager_request_stats,
+)
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
     TAG_AUTO_MAIL,
@@ -323,6 +328,7 @@ def create_request(
         notes=req_in.notes,
         manager_user_id=manager.id,
     )
+    increment_manager_request_stats(db, new_request)
     db.commit()
     db.refresh(new_request)
     hydrate_request_display([new_request])
@@ -433,7 +439,8 @@ def mark_request_handled(
         return request_to_api_dict(req)
         
     outcome = "Added" if req.action == "Add" else "Removed"
-    
+    was_new = req.status == "new"
+
     req.status = "handled"
     req.handled_at = datetime.now(timezone.utc)
     req.outcome = outcome
@@ -442,10 +449,15 @@ def mark_request_handled(
     if payload.adminNote:
         req.admin_notes = payload.adminNote
 
+    if was_new:
+        decrement_manager_pending_stat(db, req)
+
     db.commit()
     db.refresh(req)
     hydrate_request_display([req])
     hydrate_request_users(db, [req])
+    if req.manager_id:
+        invalidate_manager_request_summary(str(req.manager_id))
     return request_to_api_dict(req)
 
 @router.post("/api/admin/requests/manual", response_model=List[schemas.RequestOut])
@@ -557,6 +569,15 @@ def manager_requests_summary(
     cached = get_manager_request_summary(manager.id)
     if cached is not None:
         return cached
+
+    stored = get_stored_manager_request_stats(db, manager.id)
+    if stored is not None:
+        set_manager_request_summary(
+            manager.id,
+            total=stored["total"],
+            pending_count=stored["pendingCount"],
+        )
+        return stored
 
     base = _manager_requests_query(db, manager)
     total, pending_count = base.with_entities(

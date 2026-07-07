@@ -15,6 +15,7 @@ import {
 
 function requestSummary({ total, pendingCount, pendingUnseenCount, unreadCount, loading, error, historyOpen }) {
   if (historyOpen && loading) return 'Loading your request history…';
+  if (loading && total === 0 && pendingCount === 0 && !error) return 'Loading your requests…';
   if (error) return error;
   if (total === 0) return 'You have not submitted any requests yet.';
   const parts = [];
@@ -45,10 +46,12 @@ export default function ManagerRequestHistory({ refreshToken = 0 }) {
     error: historyError,
     refresh: refreshRequests,
   } = useManagerRequests(refreshToken, bumpHighlights, {
-    enabled: true,
+    enabled: showAllModal,
     backgroundPollEnabled: showAllModal,
     pollIntervalMs: 15000,
   });
+
+  const summaryPending = summaryLoading && summaryMeta.total === 0 && summaryMeta.pendingCount === 0;
 
   const unreadCount = useMemo(() => {
     void highlightVersion;
@@ -124,7 +127,7 @@ export default function ManagerRequestHistory({ refreshToken = 0 }) {
               }`}
               role={summaryError ? 'alert' : 'status'}
             >
-              {summaryLoading ? (
+              {summaryPending ? (
                 <span className="inline-flex items-center gap-1.5">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                   {summary}
@@ -136,7 +139,7 @@ export default function ManagerRequestHistory({ refreshToken = 0 }) {
             <button
               type="button"
               onClick={() => setShowAllModal(true)}
-              disabled={summaryLoading}
+              disabled={summaryPending}
               className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-[var(--color-brand-primary)] px-4 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
             >
               View your requests
