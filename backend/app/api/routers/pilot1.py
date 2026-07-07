@@ -1,6 +1,5 @@
 from typing import List, Optional
 from datetime import datetime, timezone
-import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -346,9 +345,7 @@ def create_requests_batch(
 
     job = enqueue_manager_batch(db, manager_id=manager.id, req_in=req_in)
     invalidate_manager_request_summary(manager.id)
-
-    if not os.getenv("VERCEL"):
-        job = process_manager_submission_job_by_id(db, job.id) or job
+    job = process_manager_submission_job_by_id(db, job.id) or job
 
     return _submission_job_response(job)
 
