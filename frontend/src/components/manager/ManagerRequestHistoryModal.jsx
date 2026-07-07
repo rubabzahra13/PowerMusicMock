@@ -114,7 +114,7 @@ export default function ManagerRequestHistoryModal({
           <button
             type="button"
             onClick={handleDismissAll}
-            className="rounded-lg px-2.5 py-1 text-[11px] font-semibold text-[var(--color-brand-primary)] transition-colors hover:bg-[var(--color-surface-highlight)]"
+            className="rounded-lg px-2 py-1 text-[10px] font-semibold text-[var(--color-brand-primary)] transition-colors hover:bg-[var(--color-surface-highlight)] sm:px-2.5 sm:text-[11px]"
           >
             Dismiss all
           </button>
@@ -166,7 +166,7 @@ export default function ManagerRequestHistoryModal({
           {hasList && (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--color-border-default)]">
               <div
-                className={`grid shrink-0 ${MANAGER_REQUEST_HISTORY_GRID} gap-x-4 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/60 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]`}
+                className={`hidden shrink-0 sm:grid ${MANAGER_REQUEST_HISTORY_GRID} gap-x-4 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/60 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]`}
                 aria-hidden="true"
               >
                 <span className="text-left">#</span>
@@ -196,12 +196,12 @@ export default function ManagerRequestHistoryModal({
         </div>
 
         <div
-          className={`flex h-10 shrink-0 items-center justify-between gap-3 border-t border-[var(--color-border-default)] pt-3 ${
+          className={`flex shrink-0 flex-col gap-2 border-t border-[var(--color-border-default)] pt-3 sm:h-10 sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${
             hasList ? '' : 'invisible'
           }`}
           aria-hidden={!hasList}
         >
-          <p className="text-[11px] text-[var(--color-text-secondary)]">
+          <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
             Showing {pageRangeStart}–{pageRangeEnd} of {tabbedRequests.length}
             {pageCount > 1 ? ` · Page ${paged.page} of ${pageCount}` : ''}
             {activeTab === 'new' && pendingOnPage > 0

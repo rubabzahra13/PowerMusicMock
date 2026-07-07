@@ -1,12 +1,51 @@
+import { useEffect, useState } from 'react';
+import { Menu } from 'lucide-react';
 import Sidebar from './Sidebar';
 
 export default function AppLayout({ children }) {
-  return (
-    <div className="min-h-screen bg-[var(--color-surface-bg)] text-[var(--color-text-primary)] antialiased font-sans">
-      <Sidebar />
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-      <div className="ml-[240px] flex flex-col min-h-screen overflow-x-hidden">
-        <main className="flex-1 p-6 bg-[var(--color-surface-bg)] min-h-screen">
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileNavOpen]);
+
+  return (
+    <div className="min-h-[100dvh] bg-[var(--color-surface-bg)] text-[var(--color-text-primary)] antialiased font-sans">
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
+      <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+
+      <div className="flex min-h-[100dvh] flex-col md:ml-[240px]">
+        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border-default)] bg-white px-4 md:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-highlight)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/30"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="h-5 w-5" aria-hidden="true" />
+          </button>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">Power Music Ops</p>
+            <p className="truncate text-[11px] text-[var(--color-text-secondary)]">Admin dashboard</p>
+          </div>
+        </header>
+
+        <main className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-4 sm:p-6">
           {children}
         </main>
       </div>

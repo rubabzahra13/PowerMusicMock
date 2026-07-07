@@ -8,6 +8,7 @@ import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell
 import RequestDetailDrawer from '../components/RequestDetailDrawer';
 import RequestComparison from '../components/RequestComparison';
 import PageHeader from '../components/layout/PageHeader';
+import { adminPageScrollClass } from '../utils/responsiveLayout';
 import { getManagerColumnContent, getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 import { loadWithCache, patchCache, writeCache, refreshCache, getNewRequestsPage } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
@@ -24,6 +25,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { TAG_ALREADY_EXISTS, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission } from '../utils/requestTags';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
+import { formGridClass } from '../utils/responsiveLayout';
 import {
   PERSON_FIELD_LIMITS,
   sanitizePersonFieldInput,
@@ -217,6 +219,153 @@ const TimestampCell = ({ val }) => {
     </div>
   );
 };
+
+function NewRequestsMobileList({
+  rows,
+  loading,
+  emptyMessage,
+  onOpenRequest,
+  onMarkAs,
+  getRowClassName,
+  directory,
+}) {
+  if (loading) {
+    return (
+      <div className="overflow-hidden rounded-md border border-[var(--color-border-default)] bg-white sm:hidden">
+        <ul className="divide-y divide-[var(--color-border-default)]">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <li key={index} className="space-y-2 px-4 py-3">
+              <div className="h-3.5 w-20 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
+              <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
+              <div className="h-3 w-1/2 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  if (!rows.length) {
+    return (
+      <div className="rounded-md border border-[var(--color-border-default)] bg-white px-4 py-8 text-center text-sm text-[var(--color-text-secondary)] sm:hidden">
+        {emptyMessage}
+      </div>
+    );
+  }
+
+  return (
+    <ul className="overflow-hidden rounded-md border border-[var(--color-border-default)] bg-white sm:hidden">
+      {rows.map((row) => {
+        const extraClass = getRowClassName ? getRowClassName(row) : '';
+        const name = `${row.person.firstName} ${row.person.lastName}`.trim();
+        const manager = getManagerColumnContent(row);
+        const isAdd = row.action === 'Add';
+        const sentViaTags = sentViaTableRequestTags(row.tags || []);
+
+        return (
+          <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
+            <div
+              className={`px-4 py-3 ${extraClass} ${
+                row.alreadyExists ? 'border-l-[3px] border-l-[var(--color-already-exists-border)]' : ''
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => onOpenRequest(row)}
+                className="flex w-full flex-col gap-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
+                        {formatRequestDisplayId(row.displayId)}
+                      </span>
+                      <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={row.action} compact />
+                      {sentViaTags.map((tag) => (
+                        <Tag key={tag} variant={requestTagVariant(tag)} label={requestTagLabel(tag)} compact />
+                      ))}
+                    </div>
+
+                    <TimestampCell val={row.receivedAt} />
+
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{name}</p>
+                      <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{row.person.email}</p>
+                      <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
+                        {row.person.location || EMPTY_CELL}
+                      </p>
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
+                        Manager
+                      </p>
+                      <p
+                        className={`mt-0.5 truncate text-xs font-semibold ${
+                          manager.muted
+                            ? 'italic text-[var(--color-text-muted)]'
+                            : 'text-[var(--color-text-primary)]'
+                        }`}
+                      >
+                        {manager.primary || EMPTY_CELL}
+                      </p>
+                      {manager.secondary ? (
+                        <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-secondary)]">
+                          {manager.secondary}
+                        </p>
+                      ) : null}
+                      {manager.tertiary ? (
+                        <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
+                          {manager.tertiary}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="border-t border-[var(--color-border-default)]/70 pt-2">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
+                        Needs review
+                      </p>
+                      <RequestComparison
+                        intakeMatch={row.intakeMatch}
+                        directoryMatch={row.directoryMatch}
+                        directory={directory}
+                        requestPerson={row.person}
+                        variant="table"
+                      />
+                    </div>
+                  </div>
+                  <Eye className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+                </div>
+              </button>
+
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenRequest(row)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-highlight)]"
+                >
+                  <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                  View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onMarkAs(row)}
+                  className={`min-w-[4.75rem] rounded-md border px-3 py-1.5 text-center text-xs font-semibold text-white shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-all active:translate-y-px active:shadow-none ${
+                    isAdd
+                      ? 'border-[#15803d] bg-[#16a34a] hover:bg-[#15803d]'
+                      : 'border-[#b91c1c] bg-[#dc2626] hover:bg-[#b91c1c]'
+                  }`}
+                >
+                  {isAdd ? 'Added' : 'Removed'}
+                </button>
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 const matchesDateFilter = (iso, filterDate) => {
   if (filterDate === 'All') return true;
@@ -784,7 +933,7 @@ export default function Requests() {
   );
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 select-none">
+    <div className={adminPageScrollClass}>
       <Toast />
 
       <PageHeader
@@ -802,7 +951,7 @@ export default function Requests() {
           </button>
         }
         footer={
-            <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] w-fit">
+            <div className="flex max-w-full w-full items-center overflow-x-auto bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] sm:w-fit">
             {[
               { key: 'All', label: 'All', count: allCount },
               { key: 'Add', label: 'Add', count: addCount },
@@ -868,8 +1017,17 @@ export default function Requests() {
         setSortPreset={setSortPreset}
       />
 
-      {/* Table */}
-      <div className="w-full">
+      <NewRequestsMobileList
+        rows={displayedRows}
+        loading={tableLoading}
+        emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
+        onOpenRequest={handleOpenRequest}
+        onMarkAs={(row) => setConfirmActionRequest({ request: row, adminNote: '' })}
+        getRowClassName={(row) => (isRequestUnseen(row.id) ? ADMIN_NEW_ROW_HIGHLIGHT_CLASS : '')}
+        directory={liveDirectory}
+      />
+
+      <div className="hidden w-full sm:block">
         <DataTable
           columns={newColumns}
           rows={displayedRows}
@@ -927,7 +1085,7 @@ export default function Requests() {
         <form onSubmit={handleCreateRequest} className="space-y-4 text-left">
           <div className="space-y-3">
             <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Manager Details</span>
-            <div className="grid grid-cols-2 gap-3">
+            <div className={formGridClass}>
               {[['First Name', 'firstName', 'text'], ['Last Name', 'lastName', 'text']].map(([label, field, type]) => (
                 <div key={field}>
                   <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
@@ -937,7 +1095,7 @@ export default function Requests() {
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className={formGridClass}>
               {[['Email', 'email', 'email'], ['Club Location', 'club', 'text']].map(([label, field, type]) => (
                 <div key={field}>
                   <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
@@ -979,7 +1137,7 @@ export default function Requests() {
                     </button>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className={formGridClass}>
                   {[['First Name *', 'firstName', 'text'], ['Last Name *', 'lastName', 'text']].map(([label, field, type]) => {
                     const error = getManualFieldError(index, field);
                     return (

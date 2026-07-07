@@ -11,7 +11,7 @@ export function Skeleton({ className = '' }) {
 
 export function KpiSkeletonGrid({ count = 3, cols = 3 }) {
   return (
-    <div className={`grid gap-2.5 shrink-0 ${cols >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+    <div className={`grid gap-2.5 shrink-0 ${cols >= 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
       {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}

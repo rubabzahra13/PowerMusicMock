@@ -5,6 +5,7 @@ import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucid
 import { format, parseISO } from 'date-fns';
 import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
+import { adminPageScrollClass } from '../utils/responsiveLayout';
 import { loadWithCache } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import {
@@ -218,6 +219,112 @@ const TimestampCell = ({ val }) => {
     </div>
   );
 };
+
+function DirectoryMobileList({
+  rows,
+  loading,
+  emptyMessage,
+  onOpenUser,
+  highlightVersion,
+  getRowClassName,
+}) {
+  if (loading) {
+    return (
+      <div className="overflow-hidden rounded-md border border-[var(--color-border-default)] bg-white sm:hidden">
+        <ul className="divide-y divide-[var(--color-border-default)]">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <li key={index} className="space-y-2 px-4 py-3">
+              <div className="h-3.5 w-20 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
+              <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
+              <div className="h-3 w-1/2 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  if (!rows.length) {
+    return (
+      <div className="rounded-md border border-[var(--color-border-default)] bg-white px-4 py-8 text-center text-sm text-[var(--color-text-secondary)] sm:hidden">
+        {emptyMessage}
+      </div>
+    );
+  }
+
+  return (
+    <ul className="overflow-hidden rounded-md border border-[var(--color-border-default)] bg-white sm:hidden">
+      {rows.map((row) => {
+        void highlightVersion;
+        const extraClass = getRowClassName ? getRowClassName(row) : '';
+        const name = `${row.firstName} ${row.lastName}`.trim();
+        const managerName = personManagerName(row);
+        const managerNotes = personManagerNotes(row).trim();
+        const adminNotes = personAdminNotes(row).trim();
+
+        return (
+          <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
+            <button
+              type="button"
+              onClick={() => onOpenUser(row)}
+              aria-label={`View ${name}`}
+              className={`flex w-full flex-col gap-3 px-4 py-3 text-left transition-colors hover:bg-[#f9fafb] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35 ${extraClass}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
+                      {formatRequestDisplayId(row.displayId)}
+                    </span>
+                    <Tag variant={row.status === 'Added' ? 'added' : 'removed'} label={row.status} compact />
+                  </div>
+
+                  <TimestampCell val={row.dateAdded} />
+
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{name}</p>
+                    <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{row.email}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
+                      {row.location || EMPTY_CELL}
+                    </p>
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
+                      Manager
+                    </p>
+                    <p className="mt-0.5 truncate text-xs font-semibold text-[var(--color-text-primary)]">
+                      {managerName || EMPTY_CELL}
+                    </p>
+                    <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-secondary)]">
+                      {row.managerEmail || EMPTY_CELL}
+                    </p>
+                  </div>
+
+                  <p className="truncate text-[11px] text-[var(--color-text-muted)]">
+                    <span className="font-semibold">Club:</span> {row.club || EMPTY_CELL}
+                  </p>
+
+                  <div className="space-y-1.5 border-t border-[var(--color-border-default)]/70 pt-2">
+                    <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                      <span className="font-semibold text-[var(--color-text-muted)]">Manager notes: </span>
+                      {managerNotes || EMPTY_CELL}
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                      <span className="font-semibold text-[var(--color-text-muted)]">Admin notes: </span>
+                      {adminNotes || EMPTY_CELL}
+                    </p>
+                  </div>
+                </div>
+                <Eye className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+              </div>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function UserLedger() {
@@ -512,7 +619,7 @@ export default function UserLedger() {
   ];
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 select-none">
+    <div className={adminPageScrollClass}>
       <PageHeader
         section="Partner Support"
         title="Users"
@@ -528,7 +635,7 @@ export default function UserLedger() {
           </button>
         }
         footer={
-            <div className="flex items-center bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] w-fit">
+            <div className="flex max-w-full w-full items-center overflow-x-auto bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] sm:w-fit">
             {statusTabs.map(({ key, label, count }) => (
               <button
                 key={key}
@@ -579,7 +686,19 @@ export default function UserLedger() {
       />
 
       {/* Table */}
-      <div className="w-full">
+      <DirectoryMobileList
+        rows={filteredLedger}
+        loading={tableLoading}
+        emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
+        onOpenUser={handleOpenUser}
+        highlightVersion={highlightVersion}
+        getRowClassName={(row) => {
+          void highlightVersion;
+          return directoryHighlightClass(row);
+        }}
+      />
+
+      <div className="hidden w-full sm:block">
         <DataTable
           columns={columns}
           rows={filteredLedger}

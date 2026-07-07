@@ -9,6 +9,7 @@ import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { patchEmail, sendEmail, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache, refreshCache, patchCache, getPilot2Workspace } from '../utils/pilot2Api';
 import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton, DraftCreatingPanel } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
+import { adminPageShellClass } from '../utils/responsiveLayout';
 import DraftBodyDisplay from '../components/email/DraftBodyDisplay';
 import { buildEmailSignature, normalizeDraftSignature, resolveInboxTitle } from '../utils/emailSignature';
 
@@ -972,7 +973,7 @@ export default function EmailQueue() {
   const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredEmails.length);
 
   return (
-    <div className="max-w-7xl mx-auto flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden select-none">
+    <div className={`${adminPageShellClass} select-none`}>
       <Toast />
 
       <PageHeader
@@ -1037,9 +1038,9 @@ export default function EmailQueue() {
             </p>
           </div>
         )}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 flex-col md:flex-row">
         {/* ── Email list (Team Inbox style) ── */}
-        <div className="w-[320px] shrink-0 flex flex-col border-r border-[var(--color-border-default)] min-h-0 bg-white">
+        <div className={`${selectedId ? 'hidden md:flex' : 'flex'} w-full md:w-[320px] shrink-0 flex-col border-b md:border-b-0 md:border-r border-[var(--color-border-default)] min-h-0 bg-white`}>
           {/* List header */}
           <div className="shrink-0 px-4 pt-3 pb-1.5 border-b border-[var(--color-border-default)]">
             <div className="flex items-center justify-between gap-2 mb-2">
@@ -1200,7 +1201,7 @@ export default function EmailQueue() {
                   ))}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div>
                   <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-1">From date</label>
                   <input
@@ -1476,7 +1477,7 @@ export default function EmailQueue() {
         </div>
 
         {/* ── Reading pane ── */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white border-l border-[var(--color-border-default)]">
+        <div className={`${selectedId ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-w-0 min-h-0 bg-white md:border-l md:border-[var(--color-border-default)]`}>
           {!selectedEmail ? (
             <div className="flex-1 flex flex-col p-8">
               {hasSelection ? (
@@ -1534,7 +1535,7 @@ export default function EmailQueue() {
                             variant="soft"
                             fullWidth
                           />
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                             <BulkActionChip
                               icon={MailOpen}
                               label="Mark read"
@@ -1587,6 +1588,14 @@ export default function EmailQueue() {
               <div className="shrink-0 px-4 py-2 border-b border-[var(--color-border-default)] bg-white">
                 <div className="flex items-start justify-between gap-3 min-w-0">
                   <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(null)}
+                      className="mb-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-[var(--color-brand-primary)] transition-colors hover:bg-[var(--color-surface-highlight)] md:hidden"
+                    >
+                      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                      Back to list
+                    </button>
                     <p className="text-sm font-bold leading-snug text-[var(--color-brand-primary)] truncate">
                       {selectedEmail.subject}
                     </p>

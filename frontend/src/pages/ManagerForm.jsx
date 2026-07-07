@@ -59,6 +59,8 @@ const labelClass = 'mb-1.5 block text-xs font-medium text-[var(--color-text-prim
 const sectionTitleClass =
   'text-[11px] font-semibold tracking-wide text-[var(--color-text-secondary)]';
 
+const formGridClass = 'grid grid-cols-1 gap-3 sm:grid-cols-2';
+
 function Field({ id, label, required, hint, error, children }) {
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
@@ -531,7 +533,7 @@ export default function ManagerForm() {
       </a>
 
       <header className="shrink-0 border-b border-[var(--color-border-default)] bg-white">
-        <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between gap-4 px-6">
+        <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <img
               src="/image.png"
@@ -559,20 +561,21 @@ export default function ManagerForm() {
               type="button"
               onClick={handleSignOut}
               disabled={signingOut}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--color-brand-primary)] px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={signingOut ? 'Signing out' : 'Sign out'}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--color-brand-primary)] px-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
             >
               <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
-              {signingOut ? 'Signing out…' : 'Sign out'}
+              <span className="hidden min-[420px]:inline">{signingOut ? 'Signing out…' : 'Sign out'}</span>
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-6 p-6 md:flex-row md:items-start md:p-8">
+      <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-4 p-4 sm:gap-6 sm:p-6 md:flex-row md:items-start md:p-8">
         <section className="flex w-full min-w-0 flex-col md:w-[44%] lg:w-[42%]">
           {submitted ? (
             <div
-              className={`${cardClass} flex flex-1 flex-col items-center justify-center p-10 text-center`}
+              className={`${cardClass} flex flex-1 flex-col items-center justify-center p-6 text-center sm:p-10`}
             >
               <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
                 <CheckCircle2 className="h-7 w-7 text-[var(--color-signal-green)]" aria-hidden="true" />
@@ -584,7 +587,7 @@ export default function ManagerForm() {
               </h2>
               <p className="mt-1.5 text-sm text-[var(--color-text-secondary)]">
                 Power Music admin will action {submittedCount === 1 ? 'this' : 'these'} shortly.
-                Open <span className="font-medium text-[var(--color-text-primary)]">Your requests</span> on the right to track progress.
+                Open <span className="font-medium text-[var(--color-text-primary)]">Your requests</span> to track progress.
               </p>
               <button
                 type="button"
@@ -598,13 +601,13 @@ export default function ManagerForm() {
             <form
               id="manager-request-form"
               onSubmit={handleSubmit}
-              className={`${cardClass} space-y-5 p-6`}
+              className={`${cardClass} space-y-5 p-4 sm:p-6`}
             >
               <div className="space-y-4 border-b border-[var(--color-border-default)] pb-5">
                 <div
                   role="radiogroup"
                   aria-labelledby={actionGroupId}
-                  className="mx-auto flex w-full max-w-md rounded-lg bg-[var(--color-surface-panel)] p-0.5 ring-1 ring-[var(--color-border-default)]"
+                  className="mx-auto flex w-full max-w-md flex-col gap-1 rounded-lg bg-[var(--color-surface-panel)] p-1 ring-1 ring-[var(--color-border-default)] sm:flex-row sm:gap-0 sm:p-0.5"
                 >
                   <p id={actionGroupId} className="sr-only">
                     Request type
@@ -619,7 +622,7 @@ export default function ManagerForm() {
                         role="radio"
                         aria-checked={selected}
                         onClick={() => setAction(value)}
-                        className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/30 focus-visible:ring-offset-1 ${
+                        className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2.5 text-xs font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/30 focus-visible:ring-offset-1 sm:py-2 sm:text-sm ${
                           selected
                             ? isAdd
                               ? 'bg-white text-[var(--color-tag-add-action-text)] shadow-sm ring-1 ring-[var(--color-border-default)]'
@@ -659,7 +662,7 @@ export default function ManagerForm() {
                 <p className="-mt-1 text-[11px] text-[var(--color-text-secondary)]">
                   Taken from your signed-in account and cannot be changed here.
                 </p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className={formGridClass}>
                   <Field id={ids.managerFirst} label="Manager first name" required>
                     <input
                       id={ids.managerFirst}
@@ -685,7 +688,7 @@ export default function ManagerForm() {
                     />
                   </Field>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className={formGridClass}>
                   <Field id={ids.managerEmail} label="Manager email" required>
                     <input
                       id={ids.managerEmail}
@@ -744,7 +747,7 @@ export default function ManagerForm() {
                             </button>
                           </div>
                         )}
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className={formGridClass}>
                           <Field
                             id={rowIds.first}
                             label="User first name"
@@ -798,7 +801,7 @@ export default function ManagerForm() {
                             )}
                           </Field>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className={formGridClass}>
                           <Field
                             id={rowIds.email}
                             label="User email"
@@ -948,7 +951,7 @@ export default function ManagerForm() {
         </section>
 
         <aside
-          className={`${cardClass} flex w-full min-w-0 flex-col gap-5 self-start p-5 md:w-[56%] md:p-6 lg:w-[58%]`}
+          className={`${cardClass} flex w-full min-w-0 flex-col gap-4 self-start p-4 sm:gap-5 sm:p-5 md:w-[56%] md:p-6 lg:w-[58%]`}
         >
           <ManagerRequestHistory refreshToken={requestRefreshToken} />
 
@@ -988,7 +991,82 @@ export default function ManagerForm() {
             </p>
           )}
 
-          <div className="overflow-hidden rounded-lg border border-[var(--color-border-default)]">
+          <div className="overflow-hidden rounded-lg border border-[var(--color-border-default)] sm:hidden">
+            {!showDirectoryResults && !showInitialDirectoryLoading && !isSearchTooBroad && (
+              <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
+                Type at least 2 characters to search, or enter person details to check for matches.
+              </p>
+            )}
+            {showInitialDirectoryLoading && (
+              <p className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-[var(--color-text-muted)]">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                {directoryLoadingLabel}
+              </p>
+            )}
+            {!showInitialDirectoryLoading && directoryError && displayResults.length === 0 && (
+              <p className="px-3 py-8 text-center text-xs text-red-600">{directoryError}</p>
+            )}
+            {isSearchTooBroad && !showInitialDirectoryLoading && displayResults.length === 0 && (
+              <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
+                Nothing matched that search. Try a name or email address.
+              </p>
+            )}
+            {!showInitialDirectoryLoading &&
+              !directoryError &&
+              showDirectoryResults &&
+              !isSearchTooBroad &&
+              displayResults.length === 0 && (
+                <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
+                  No one matched that search.
+                </p>
+              )}
+            {!submitted && !showInitialDirectoryLoading && displayResults.length > 0 && (
+              <ul className="divide-y divide-[var(--color-border-default)]">
+                {displayResults.map((row) => {
+                  const isMatch = directoryRowMatchesForm(row);
+                  const isAdded = row.status === 'Added';
+                  const dateLabel = formatDirectoryDate(row.dateAdded);
+
+                  return (
+                    <li
+                      key={row.id}
+                      className={`px-3 py-3 ${isMatch ? (isAdded ? 'bg-emerald-50/80' : 'bg-red-50/80') : ''}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className={`truncate text-sm font-medium ${isMatch ? 'font-semibold' : ''}`}>
+                            {row.firstName} {row.lastName}
+                          </p>
+                          {row.email && (
+                            <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{row.email}</p>
+                          )}
+                          {row.location && (
+                            <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">{row.location}</p>
+                          )}
+                        </div>
+                        <span
+                          className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            isAdded
+                              ? 'bg-[var(--color-tag-added-bg)] text-[var(--color-tag-added-text)]'
+                              : 'bg-[var(--color-tag-removed-bg)] text-[var(--color-tag-removed-text)]'
+                          }`}
+                        >
+                          {row.status}
+                        </span>
+                      </div>
+                      {dateLabel && (
+                        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+                          {directoryDateColumnLabel}: {dateLabel}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          <div className="hidden overflow-hidden rounded-lg border border-[var(--color-border-default)] sm:block">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[520px] table-fixed border-collapse text-left text-xs">
                 <caption className="sr-only">

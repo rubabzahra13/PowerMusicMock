@@ -20,6 +20,7 @@ import ManagerAuthShell, {
   labelClass,
   buttonClass,
   errorClass,
+  formGridClass,
 } from '../components/auth/ManagerAuthShell';
 import PasswordRequirements, { PasswordMatchHint } from '../components/auth/PasswordRequirements';
 import PasswordInput from '../components/auth/PasswordInput';
@@ -677,7 +678,7 @@ export default function Signup() {
       )}
 
       <form onSubmit={handleSignupSubmit} className="space-y-4" noValidate>
-        <div className="grid grid-cols-2 gap-3">
+        <div className={formGridClass}>
           <div>
             <label htmlFor="signup-first" className={labelClass}>
               First name

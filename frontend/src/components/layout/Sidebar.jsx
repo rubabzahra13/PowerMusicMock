@@ -10,12 +10,13 @@ import {
   LogOut,
   Loader2,
   ChevronUp,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../ui/useToast';
 import { Modal } from '../ui';
 
-export default function Sidebar() {
+export default function Sidebar({ mobileOpen = false, onMobileClose }) {
   const { logout, user } = useAuth();
   const { clearToasts } = useToast();
   const navigate = useNavigate();
@@ -73,19 +74,36 @@ export default function Sidebar() {
         : 'text-white/85 hover:bg-[var(--color-surface-sidebar-hover)] hover:text-white hover:opacity-100'
     }`;
 
+  const handleNavClick = () => {
+    onMobileClose?.();
+  };
+
   return (
     <>
-      <aside className="fixed left-0 top-0 bottom-0 w-[240px] bg-[var(--color-surface-sidebar)] flex flex-col border-r border-white/5 z-20 text-white">
-        {/* Logo Section */}
-        <div className="h-14 flex items-center gap-2 px-4 shrink-0">
-          <img
-            src="/image.png"
-            alt="Power Music"
-            className="h-5 w-5 shrink-0 object-contain object-top"
-          />
-          <span className="text-[15px] font-semibold tracking-wide text-white">
-            Power Music Ops
-          </span>
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-[min(280px,88vw)] flex-col border-r border-white/5 bg-[var(--color-surface-sidebar)] text-white transition-transform duration-300 ease-out md:w-[240px] md:translate-x-0 ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <img
+              src="/image.png"
+              alt="Power Music"
+              className="h-5 w-5 shrink-0 object-contain object-top"
+            />
+            <span className="truncate text-[15px] font-semibold tracking-wide text-white">
+              Power Music Ops
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onMobileClose}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 md:hidden"
+            aria-label="Close navigation menu"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
 
         <div className="h-px bg-white/10 mx-4 shrink-0" />
@@ -93,7 +111,7 @@ export default function Sidebar() {
         {/* Nav Groups */}
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
           <div className="space-y-1">
-            <NavLink to="/" end className={navItemClass}>
+            <NavLink to="/" end className={navItemClass} onClick={handleNavClick}>
               <Home className="w-4 h-4 shrink-0" />
               <span>Overview</span>
             </NavLink>
@@ -103,15 +121,15 @@ export default function Sidebar() {
             <span className="block px-3 text-[11px] font-semibold tracking-wider text-[var(--color-text-muted)] uppercase mb-2">
               Customer support
             </span>
-            <NavLink to="/email-responses" className={navItemClass}>
+            <NavLink to="/email-responses" className={navItemClass} onClick={handleNavClick}>
               <Mail className="w-4 h-4 shrink-0" />
               <span>Email responses</span>
             </NavLink>
-            <NavLink to="/templates" className={navItemClass}>
+            <NavLink to="/templates" className={navItemClass} onClick={handleNavClick}>
               <FileText className="w-4 h-4 shrink-0" />
               <span>Templates</span>
             </NavLink>
-            <NavLink to="/email-accounts" className={navItemClass}>
+            <NavLink to="/email-accounts" className={navItemClass} onClick={handleNavClick}>
               <Settings className="w-4 h-4 shrink-0" />
               <span>Email accounts</span>
             </NavLink>
@@ -121,11 +139,11 @@ export default function Sidebar() {
             <span className="block px-3 text-[11px] font-semibold tracking-wider text-white/40 uppercase mb-2">
               Partner support
             </span>
-            <NavLink to="/new-requests" className={navItemClass}>
+            <NavLink to="/new-requests" className={navItemClass} onClick={handleNavClick}>
               <Inbox className="w-4 h-4 shrink-0" />
               <span>New requests</span>
             </NavLink>
-            <NavLink to="/directory" className={navItemClass}>
+            <NavLink to="/directory" className={navItemClass} onClick={handleNavClick}>
               <Users className="w-4 h-4 shrink-0" />
               <span>Directory</span>
             </NavLink>
@@ -191,6 +209,7 @@ export default function Sidebar() {
                   role="menuitem"
                   onClick={() => {
                     setMenuOpen(false);
+                    onMobileClose?.();
                     setConfirmOpen(true);
                   }}
                   className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-highlight)] focus:outline-none focus-visible:bg-[var(--color-surface-highlight)]"

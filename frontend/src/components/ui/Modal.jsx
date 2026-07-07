@@ -112,7 +112,10 @@ export default function Modal({
 
   if (confirm) {
     return createPortal(
-      <div className="flex items-center justify-center p-4" style={shellStyle}>
+      <div
+        className="flex items-center justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]"
+        style={shellStyle}
+      >
         {backdrop}
 
         <div
@@ -130,10 +133,10 @@ export default function Modal({
             <X className="w-4 h-4" />
           </button>
 
-          <div className="px-6 pb-4 pt-6 text-center">
+          <div className="px-5 pb-4 pt-6 text-center sm:px-6">
             <h3
               id="modal-confirm-title"
-              className="px-6 text-base font-semibold tracking-tight text-[var(--color-text-primary)]"
+              className="px-2 text-base font-semibold tracking-tight text-[var(--color-text-primary)] sm:px-6"
             >
               {title}
             </h3>
@@ -143,7 +146,7 @@ export default function Modal({
           </div>
 
           {footer && (
-            <div className="flex shrink-0 items-center justify-center gap-2.5 px-6 pb-6 pt-1">
+            <div className="flex shrink-0 flex-col-reverse gap-2.5 px-5 pb-5 pt-1 sm:flex-row sm:items-center sm:justify-center sm:px-6 sm:pb-6 [&>button]:w-full sm:[&>button]:w-auto">
               {footer}
             </div>
           )}
@@ -154,23 +157,23 @@ export default function Modal({
   }
 
   return createPortal(
-    <div className="flex items-center justify-center p-4" style={shellStyle}>
+    <div className="flex items-stretch justify-center p-0 sm:items-center sm:p-4" style={shellStyle}>
       {backdrop}
 
       <div
         role="dialog"
         aria-modal="true"
-        className={`relative z-[1] flex w-full max-h-[min(90dvh,calc(100dvh-2rem))] flex-col overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-modal)] ${
-          stableHeight ? 'h-[min(90dvh,calc(100dvh-2rem))]' : ''
+        className={`relative z-[1] flex w-full max-h-[100dvh] flex-col overflow-hidden border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-modal)] rounded-none sm:rounded-2xl ${
+          stableHeight ? 'h-[100dvh] sm:h-[min(90dvh,calc(100dvh-2rem))]' : 'max-h-[100dvh] sm:max-h-[min(90dvh,calc(100dvh-2rem))]'
         } ${
-          extraWide ? 'max-w-[720px]' : wide ? 'max-w-[560px]' : 'max-w-[480px]'
+          extraWide ? 'sm:max-w-[720px]' : wide ? 'sm:max-w-[560px]' : 'sm:max-w-[480px]'
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/60 px-5 py-4">
-          <h3 className="truncate text-base font-semibold tracking-tight text-[var(--color-text-primary)]">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/60 px-4 py-3 sm:gap-4 sm:px-5 sm:py-4">
+          <h3 className="min-w-0 truncate text-sm font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-base">
             {title}
           </h3>
-          <div className="flex shrink-0 items-center gap-2.5">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
             {headerExtra}
             <button
               type="button"
@@ -185,14 +188,14 @@ export default function Modal({
 
         <div
           className={`flex min-h-0 flex-1 flex-col overscroll-contain bg-white text-sm leading-relaxed text-[var(--color-text-primary)] ${
-            flushBody ? 'p-0' : 'p-6'
+            flushBody ? 'p-0' : 'p-4 sm:p-6'
           } ${stableHeight ? 'overflow-hidden' : 'overflow-y-auto'}`}
         >
           {children}
         </div>
 
         {footer && (
-          <div className="flex shrink-0 items-center justify-end gap-2.5 border-t border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-6 py-4">
+          <div className="flex shrink-0 flex-col-reverse items-stretch gap-2.5 border-t border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-end sm:px-6 sm:py-4 sm:pb-4">
             {footer}
           </div>
         )}

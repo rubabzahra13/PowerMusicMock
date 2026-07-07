@@ -56,7 +56,7 @@ export default function ManagerRequestHistoryTabs({
   };
 
   return (
-    <div className="shrink-0 -mx-6 border-b border-[var(--color-border-default)] px-6">
+    <div className="shrink-0 -mx-4 border-b border-[var(--color-border-default)] px-4 sm:-mx-6 sm:px-6">
       <div
         role="tablist"
         aria-label="Filter request history"
@@ -83,7 +83,7 @@ export default function ManagerRequestHistoryTabs({
               title={tab.hint}
               onClick={() => onChange(tab.value)}
               onKeyDown={(event) => handleKeyDown(event, tab.value)}
-              className={`group relative flex flex-col items-center gap-1.5 px-2 py-3 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35 ${
+              className={`group relative flex flex-col items-center gap-1 px-1.5 py-2.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35 sm:gap-1.5 sm:px-2 sm:py-3 ${
                 selected
                   ? 'text-[var(--color-brand-primary)]'
                   : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-panel)]/60 hover:text-[var(--color-text-secondary)]'
@@ -100,7 +100,7 @@ export default function ManagerRequestHistoryTabs({
                 />
                 <span
                   aria-hidden="true"
-                  className={`text-sm font-semibold leading-none ${
+                  className={`text-xs font-semibold leading-none sm:text-sm ${
                     selected
                       ? 'text-[var(--color-brand-primary)]'
                       : 'text-[var(--color-text-primary)] group-hover:text-[var(--color-text-primary)]'
@@ -130,9 +130,10 @@ export default function ManagerRequestHistoryTabs({
                 {tab.value === 'handled' && attentionCount > 0 && (
                   <span
                     aria-hidden="true"
-                    className="inline-flex items-center rounded-full bg-[var(--color-brand-primary)]/10 px-1.5 py-px text-[10px] font-semibold leading-none text-[var(--color-brand-primary)]"
+                    className="inline-flex items-center rounded-full bg-[var(--color-brand-primary)]/10 px-1.5 py-px text-[9px] font-semibold leading-none text-[var(--color-brand-primary)] sm:text-[10px]"
                   >
-                    {attentionCount} unread
+                    <span className="sm:hidden">{attentionCount}</span>
+                    <span className="hidden sm:inline">{attentionCount} unread</span>
                   </span>
                 )}
               </span>

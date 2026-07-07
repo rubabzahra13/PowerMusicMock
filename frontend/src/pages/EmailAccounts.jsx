@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Mail, Link2, Unlink, Trash2, Pencil } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import PageHeader from '../components/layout/PageHeader';
+import { adminPageShellClassNarrow } from '../utils/responsiveLayout';
 import DottedScroll from '../components/ui/DottedScroll';
 import { Toast, useToast, CardListSkeleton, Modal } from '../components/ui';
 import {
@@ -127,7 +128,7 @@ export default function GmailAccounts() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden">
+    <div className={adminPageShellClassNarrow}>
       <Toast />
       <PageHeader
         section="Customer support"
@@ -196,16 +197,16 @@ export default function GmailAccounts() {
 
               <div className="h-px bg-[var(--color-border-default)] w-full mb-4" />
 
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-sm font-bold text-[var(--color-text-primary)]">{account.email}</div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-[var(--color-text-primary)] break-all">{account.email}</div>
                   <div className="text-xs text-[var(--color-text-muted)] mt-0.5">
                     {isConnected && account.connectedAt
                       ? `Connected ${connectedDate(account.connectedAt)}`
                       : 'Not connected yet'}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <button
                     type="button"
                     onClick={() => handleConnect(account)}

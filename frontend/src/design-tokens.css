@@ -92,3 +92,10 @@
   --app-sidebar-width: 240px;
   --drawer-width: 420px;
 }
+
+@media (max-width: 767px) {
+  :root {
+    --app-sidebar-width: 0px;
+    --drawer-width: 100vw;
+  }
+}

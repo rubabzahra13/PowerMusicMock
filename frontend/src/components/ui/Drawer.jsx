@@ -9,7 +9,7 @@ export default function Drawer({
   children,
   footer,
   fill = false,
-  widthClass = 'max-w-[420px]',
+  widthClass = 'w-full max-w-full sm:max-w-[420px]',
 }) {
   const titleId = useId();
   const closeRef = useRef(null);
@@ -56,7 +56,7 @@ export default function Drawer({
           isOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'
         }`}
       >
-        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-default)] bg-white px-4">
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-default)] bg-white px-4 pt-[env(safe-area-inset-top)] sm:pt-0">
           <h2
             id={titleId}
             className="truncate text-sm font-semibold tracking-tight text-[var(--color-text-primary)]"
@@ -85,7 +85,7 @@ export default function Drawer({
         </div>
 
         {footer ? (
-          <footer className="shrink-0 border-t border-[var(--color-border-default)] bg-white px-4 py-3">
+          <footer className="shrink-0 border-t border-[var(--color-border-default)] bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-3">
             {footer}
           </footer>
         ) : null}

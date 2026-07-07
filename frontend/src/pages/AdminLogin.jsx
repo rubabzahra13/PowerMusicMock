@@ -99,7 +99,7 @@ export default function AdminLogin() {
       className="fixed inset-0 z-0 overflow-y-auto overscroll-y-none"
       style={{ backgroundColor: AUTH_PAGE_CANVAS }}
     >
-      <div className="relative flex min-h-full flex-col items-center justify-center px-4 py-10 sm:px-6 antialiased font-sans overflow-hidden">
+      <div className="relative flex min-h-[100dvh] flex-col items-center justify-center px-3 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))] sm:px-6 sm:py-10 antialiased font-sans overflow-hidden">
       <Toast />
 
       <div className="pointer-events-none absolute inset-0" aria-hidden="true">
@@ -110,19 +110,19 @@ export default function AdminLogin() {
         <div className="absolute -bottom-40 right-1/4 h-[28rem] w-[28rem] rounded-full bg-[#3b5bdb]/25 blur-[120px]" />
       </div>
 
-      <main className="relative z-10 w-full max-w-[420px]">
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-white shadow-[0_24px_64px_rgba(0,0,0,0.35)]">
-          <div className="border-b border-[var(--color-border-default)] bg-gradient-to-b from-white to-[var(--color-surface-panel)]/40 px-8 pb-7 pt-8 text-center">
-            <div className="mx-auto mb-4 inline-flex items-center justify-center rounded-xl bg-white p-3 shadow-[0_2px_12px_rgba(26,26,46,0.08)] ring-1 ring-black/[0.06]">
-              <img src="/image.png" alt="" className="h-10 w-auto object-contain" width={120} height={40} />
+      <main className="relative z-10 w-full min-w-0 max-w-[420px]">
+        <div className="overflow-hidden rounded-xl border border-white/10 bg-white shadow-[0_24px_64px_rgba(0,0,0,0.35)] sm:rounded-2xl">
+          <div className="border-b border-[var(--color-border-default)] bg-gradient-to-b from-white to-[var(--color-surface-panel)]/40 px-5 pb-6 pt-7 text-center sm:px-8 sm:pb-7 sm:pt-8">
+            <div className="mx-auto mb-4 inline-flex items-center justify-center rounded-xl bg-white p-2.5 shadow-[0_2px_12px_rgba(26,26,46,0.08)] ring-1 ring-black/[0.06] sm:p-3">
+              <img src="/image.png" alt="" className="h-9 w-auto object-contain sm:h-10" width={120} height={40} />
             </div>
-            <h1 className="text-lg font-semibold tracking-tight text-[var(--color-text-primary)]">
+            <h1 className="text-base font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-lg">
               Power Music Ops
             </h1>
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Admin dashboard</p>
+            <p className="mt-1 text-xs text-[var(--color-text-secondary)] sm:text-sm">Admin dashboard</p>
           </div>
 
-          <div className="px-8 py-7">
+          <div className="px-5 py-6 sm:px-8 sm:py-7">
             {signedOutNotice && (
               <div
                 role="status"
@@ -209,7 +209,7 @@ export default function AdminLogin() {
           </div>
         </div>
 
-        <p className="mt-6 text-center text-xs text-white/45">Authorized personnel only.</p>
+        <p className="mt-4 px-2 text-center text-xs text-white/45 sm:mt-6">Authorized personnel only.</p>
       </main>
       </div>
     </div>

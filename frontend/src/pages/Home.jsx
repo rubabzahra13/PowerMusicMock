@@ -15,6 +15,7 @@ import {
   Users
 } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
+import { adminPageShellClass } from '../utils/responsiveLayout';
 import { loadWithCache, getDashboard, getPilot2Overview } from '../utils/pilot2Api';
 import { PanelListSkeleton, ActivitySkeleton } from '../components/ui';
 import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
@@ -142,7 +143,7 @@ function ServiceColumn({
         <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 ml-4">{description}</p>
       </div>
 
-      <div className={`grid gap-2.5 shrink-0 ${kpis.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+      <div className={`grid gap-2.5 shrink-0 ${kpis.length >= 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
         {kpis.map((kpi) => (
           <KpiCard key={kpi.label} {...kpi} theme={theme} />
         ))}
@@ -390,7 +391,7 @@ export default function Home() {
     .slice(0, 4);
 
   return (
-    <div className="max-w-7xl mx-auto select-none flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden">
+    <div className={`${adminPageShellClass} select-none`}>
       <PageHeader
         section="Overview"
         title="Good morning, Andrea."

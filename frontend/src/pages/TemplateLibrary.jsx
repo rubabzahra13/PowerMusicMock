@@ -10,8 +10,9 @@ import {
   getTemplates, createTemplate, updateTemplate, deleteTemplate,
   restoreTemplate, deleteTemplateForever, getInboxes, loadWithCache, refreshCache, writeCache,
 } from '../utils/pilot2Api';
-import { Toast, useToast, SelectDropdown, CardListSkeleton, Modal, EMPTY_CELL } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
+import { adminPageShellClass } from '../utils/responsiveLayout';
+import { Toast, useToast, SelectDropdown, CardListSkeleton, Modal, EMPTY_CELL } from '../components/ui';
 
 // ─── Language content swapper ──────────────────────────────────────────────────
 const LANG_VARIANTS = {
@@ -1255,6 +1256,19 @@ export default function TemplateManagement() {
     setIsEditing(false);
   };
 
+  const handleMobileBackToList = () => {
+    if (isCreatingNew) {
+      handleDiscardNew();
+      return;
+    }
+    if (isEditing) {
+      handleCancel();
+    }
+    setSelectedId(null);
+  };
+
+  const showMobileDetail = Boolean(selectedId || isCreatingNew);
+
   const clearSelectionIfNeeded = (targetId) => {
     if (selectedId === targetId) {
       setSelectedId(null);
@@ -1511,7 +1525,7 @@ export default function TemplateManagement() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto select-none flex flex-col h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] overflow-hidden">
+    <div className={`${adminPageShellClass} select-none`}>
       <Toast />
 
       <PageHeader
@@ -1571,10 +1585,10 @@ export default function TemplateManagement() {
             </button>
           </div>
         ) : (
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 flex-col md:flex-row">
 
         {/* ── LEFT PANE ─────────────────────────────────────────── */}
-        <div className="w-[340px] shrink-0 flex flex-col border-r border-[var(--color-border-default)] min-h-0 bg-[var(--color-surface-panel)]/35">
+        <div className={`${showMobileDetail ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] shrink-0 flex-col border-b md:border-b-0 md:border-r border-[var(--color-border-default)] min-h-0 bg-[var(--color-surface-panel)]/35`}>
 
           <div className="shrink-0 bg-white border-b border-[var(--color-border-default)]">
             <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
@@ -1681,7 +1695,7 @@ export default function TemplateManagement() {
                 size="xs"
                 className="w-full"
               />
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div>
                   <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-1">
                     Created from
@@ -1768,7 +1782,7 @@ export default function TemplateManagement() {
         </div>
 
         {/* ── RIGHT PANE ────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-white overflow-hidden">
+        <div className={`${showMobileDetail ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-h-0 min-w-0 bg-white overflow-hidden md:border-l md:border-[var(--color-border-default)]`}>
           {!selectedTemplate && !isCreatingNew ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--color-text-muted)] p-8 text-center min-h-0">
               <div className="w-14 h-14 rounded-2xl bg-[var(--color-surface-highlight)] flex items-center justify-center">
@@ -1786,8 +1800,16 @@ export default function TemplateManagement() {
             <>
               {/* Detail header */}
               <div className="shrink-0 border-b border-[var(--color-border-default)] bg-white">
-                <div className="px-5 py-3.5">
-                  <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="px-4 py-3 sm:px-5 sm:py-3.5">
+                  <button
+                    type="button"
+                    onClick={handleMobileBackToList}
+                    className="mb-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-[var(--color-brand-primary)] transition-colors hover:bg-[var(--color-surface-highlight)] md:hidden"
+                  >
+                    <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                    Back to library
+                  </button>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 mb-2">
                     <div className="flex items-center gap-2 flex-wrap min-w-0">
                       {isCreatingNew ? (
                         <TemplateModeBadge mode="creating" />
@@ -1815,7 +1837,7 @@ export default function TemplateManagement() {
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0" data-template-toolbar>
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0" data-template-toolbar>
                       {libraryTab === 'deleted' && selectedTemplate && (
                         <>
                           <TemplateToolbarButton variant="restore" icon={RotateCcw} label="Restore" onClick={() => handleRestore()} />

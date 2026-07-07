@@ -57,6 +57,9 @@ function rowAriaLabel(request, meta, highlighted, kind, rowNumber) {
   return parts.join(', ');
 }
 
+const rowInteractionClass =
+  'w-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35';
+
 const ManagerRequestHistoryRow = forwardRef(function ManagerRequestHistoryRow(
   { request, onOpen, highlightVersion = 0, rowNumber = 1 },
   ref,
@@ -67,20 +70,53 @@ const ManagerRequestHistoryRow = forwardRef(function ManagerRequestHistoryRow(
   const highlighted = isRequestHighlighted(request);
   const isAdd = request.action === 'Add';
   const contactLine = [request.person?.email, request.person?.location].filter(Boolean).join(' · ');
+  const highlightClass = highlighted
+    ? MANAGER_UPDATE_HIGHLIGHT_CLASS
+    : 'hover:bg-[var(--color-surface-panel)]/50';
+  const ariaLabel = rowAriaLabel(request, meta, highlighted, kind, rowNumber);
+  const handleOpen = () => onOpen?.(request);
 
   return (
-    <li className="list-none">
+    <li ref={ref} className="list-none">
       <button
-        ref={ref}
         type="button"
-        onClick={() => onOpen?.(request)}
+        onClick={handleOpen}
         title={contactLine || undefined}
-        aria-label={rowAriaLabel(request, meta, highlighted, kind, rowNumber)}
-        className={`grid w-full ${MANAGER_REQUEST_HISTORY_GRID} items-center gap-x-4 px-3 py-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35 ${
-          highlighted
-            ? MANAGER_UPDATE_HIGHLIGHT_CLASS
-            : 'hover:bg-[var(--color-surface-panel)]/50'
-        }`}
+        aria-label={ariaLabel}
+        className={`${rowInteractionClass} flex flex-col gap-2 px-4 py-3 text-left sm:hidden ${highlightClass}`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+              {personName(request.person)}
+            </p>
+            {contactLine && (
+              <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">{contactLine}</p>
+            )}
+          </div>
+          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[var(--color-text-secondary)]">
+            #{rowNumber}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={isAdd ? 'Add' : 'Remove'} compact />
+          <Tag variant={statusTagVariant(request, meta)} label={meta.label} compact />
+          {highlighted && (
+            <span className="inline-flex rounded-full bg-[var(--color-brand-primary)] px-1.5 py-px text-[10px] font-semibold leading-none text-white">
+              New
+            </span>
+          )}
+          <span className="text-[11px] tabular-nums text-[var(--color-text-muted)]">{rowTimestamp(request)}</span>
+        </div>
+      </button>
+
+      <button
+        type="button"
+        onClick={handleOpen}
+        title={contactLine || undefined}
+        aria-label={ariaLabel}
+        className={`${rowInteractionClass} hidden sm:grid ${MANAGER_REQUEST_HISTORY_GRID} items-center gap-x-4 px-3 py-2 ${highlightClass}`}
       >
         <span className="text-left text-[11px] font-semibold tabular-nums text-[var(--color-text-secondary)]">
           {rowNumber}

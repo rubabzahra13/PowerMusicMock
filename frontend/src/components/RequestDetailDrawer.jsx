@@ -33,7 +33,7 @@ function DetailRow({ label, value, mono = false }) {
   if (!value) return null;
 
   return (
-    <div className="grid grid-cols-[88px_1fr] gap-2 py-2 text-xs leading-snug">
+    <div className="grid grid-cols-1 gap-0.5 py-2 text-xs leading-snug sm:grid-cols-[88px_1fr] sm:gap-2">
       <dt className="text-[var(--color-text-muted)]">{label}</dt>
       <dd
         className={`min-w-0 font-medium text-[var(--color-text-primary)] break-words ${

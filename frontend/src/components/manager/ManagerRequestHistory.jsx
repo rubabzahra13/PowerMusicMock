@@ -89,7 +89,7 @@ export default function ManagerRequestHistory({ refreshToken = 0 }) {
   return (
     <>
       <section
-        className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 p-4"
+        className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 p-3.5 sm:p-4"
         aria-labelledby="manager-requests-heading"
       >
         <div className="flex items-start gap-3">
@@ -140,7 +140,7 @@ export default function ManagerRequestHistory({ refreshToken = 0 }) {
               type="button"
               onClick={() => setShowAllModal(true)}
               disabled={summaryPending}
-              className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-[var(--color-brand-primary)] px-4 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-3 inline-flex h-9 w-full items-center justify-center rounded-lg bg-[var(--color-brand-primary)] px-4 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               View your requests
             </button>
