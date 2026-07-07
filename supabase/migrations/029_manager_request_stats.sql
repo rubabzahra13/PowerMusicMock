@@ -15,7 +15,7 @@ FROM (
     COUNT(*) FILTER (WHERE status = 'new')::INTEGER AS pending
   FROM public.manager_requests
   WHERE manager_id IS NOT NULL
-    AND tags @> ARRAY['verified']::TEXT[]
+    AND 'verified' = ANY(tags)
   GROUP BY manager_id
 ) AS stats
 WHERE u.id = stats.manager_id;
