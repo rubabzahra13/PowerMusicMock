@@ -128,7 +128,7 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(initialAuth.profile);
   const [appConfig] = useState({ enforceDomainCheck: true });
   const [initializing, setInitializing] = useState(false);
-  const [authReady, setAuthReady] = useState(true);
+  const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured());
   const initialSessionHandled = useRef(false);
   const authEpoch = useRef(0);
   const authTransitionRef = useRef(false);

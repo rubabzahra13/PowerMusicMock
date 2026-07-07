@@ -7,7 +7,7 @@ export function AdminRoute() {
   const { user, role } = useAuth();
 
   if (!user) {
-    return <Navigate to="/admin/login" replace />;
+    return <Navigate to="/submit/signup" replace />;
   }
 
   if (!role) {
@@ -38,7 +38,11 @@ export function ManagerRoute() {
   }
 
   if (!session?.access_token) {
-    return <ManagerAuthLoading />;
+    return authReady ? (
+      <Navigate to="/submit/signup" replace state={{ from: '/submit' }} />
+    ) : (
+      <ManagerAuthLoading />
+    );
   }
 
   if (role === 'admin' || isAdminEmail(user.email)) {
