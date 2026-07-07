@@ -89,8 +89,17 @@ def create_db_engine():
     try:
         kwargs = {}
         if os.getenv("VERCEL"):
-            # Serverless: open a fresh connection per request.
-            kwargs["poolclass"] = NullPool
+            # Serverless: reuse one live connection while the function stays warm
+            # so repeat invocations skip the costly connect/TLS handshake (the DB
+            # can be a different region from the function). pre_ping + recycle keep
+            # the pooled connection healthy; a fresh cold instance still reconnects.
+            if os.getenv("DB_SERVERLESS_NULLPOOL", "").lower() in ("1", "true", "yes"):
+                kwargs["poolclass"] = NullPool
+            else:
+                kwargs["pool_size"] = int(os.getenv("DB_POOL_SIZE", "1"))
+                kwargs["max_overflow"] = int(os.getenv("DB_MAX_OVERFLOW", "2"))
+                kwargs["pool_pre_ping"] = True
+                kwargs["pool_recycle"] = int(os.getenv("DB_POOL_RECYCLE", "280"))
         else:
             kwargs["pool_pre_ping"] = True
             # Local/dev: default pool is larger than Supabase serverless caps.
