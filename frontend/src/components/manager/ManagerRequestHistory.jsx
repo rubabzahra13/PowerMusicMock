@@ -46,7 +46,8 @@ export default function ManagerRequestHistory({ refreshToken = 0 }) {
     refresh: refreshRequests,
   } = useManagerRequests(refreshToken, bumpHighlights, {
     enabled: true,
-    pollIntervalMs: showAllModal ? 15000 : 60000,
+    backgroundPollEnabled: showAllModal,
+    pollIntervalMs: 15000,
   });
 
   const unreadCount = useMemo(() => {
@@ -62,13 +63,7 @@ export default function ManagerRequestHistory({ refreshToken = 0 }) {
   useEffect(() => {
     registerManagerHandledPageVisit(location.key);
     bumpHighlights();
-  }, [location.key]);
-
-  useEffect(() => {
-    if (!showAllModal) return;
-    refreshSummary();
-    refreshRequests();
-  }, [showAllModal, refreshSummary, refreshRequests]);
+  }, [location.key, bumpHighlights]);
 
   const summary = requestSummary({
     total: summaryMeta.total,

@@ -41,16 +41,30 @@ function readSessionCache(key) {
   }
 }
 
+const inFlightFreshByKey = new Map();
+
 async function fetchFreshWithRateLimitRetry(fetcher, cacheKey) {
-  try {
-    return await fetcher();
-  } catch (err) {
-    if (!isRateLimitError(err) || !readSessionCache(cacheKey)) {
-      throw err;
-    }
-    await new Promise((resolve) => window.setTimeout(resolve, 2000));
-    return fetcher();
+  if (inFlightFreshByKey.has(cacheKey)) {
+    return inFlightFreshByKey.get(cacheKey);
   }
+
+  const run = async () => {
+    try {
+      return await fetcher();
+    } catch (err) {
+      if (!isRateLimitError(err) || !readSessionCache(cacheKey)) {
+        throw err;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      return fetcher();
+    }
+  };
+
+  const promise = run().finally(() => {
+    inFlightFreshByKey.delete(cacheKey);
+  });
+  inFlightFreshByKey.set(cacheKey, promise);
+  return promise;
 }
 
 // Stale-while-revalidate: show the last known data instantly from

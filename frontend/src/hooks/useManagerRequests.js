@@ -126,7 +126,7 @@ export function useManagerRequestSummary(refreshToken = 0) {
 export function useManagerRequests(
   refreshToken = 0,
   onHighlightChange,
-  { enabled = false, pollIntervalMs = 60000 } = {},
+  { enabled = false, backgroundPollEnabled, pollIntervalMs = 60000 } = {},
 ) {
   const [requests, setRequests] = useState([]);
   const [meta, setMeta] = useState({ total: 0, pendingCount: 0 });
@@ -203,7 +203,10 @@ export function useManagerRequests(
     };
   }, [enabled, refreshToken, apply, fetchAll]);
 
-  useBackgroundRefresh(refresh, { enabled, intervalMs: pollIntervalMs });
+  useBackgroundRefresh(refresh, {
+    enabled: backgroundPollEnabled ?? enabled,
+    intervalMs: pollIntervalMs,
+  });
 
   return {
     requests,
