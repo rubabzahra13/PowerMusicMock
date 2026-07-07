@@ -49,6 +49,10 @@ export function ManagerRoute() {
     return <Navigate to="/" replace />;
   }
 
+  if (!role) {
+    return <ManagerAuthLoading />;
+  }
+
   return <Outlet />;
 }
 
