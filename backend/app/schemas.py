@@ -64,7 +64,7 @@ class RequestIn(BaseModel):
 
 class ManualRequestIn(BaseModel):
     submittedBy: SubmittedBy
-    people: List[PersonInfo] = Field(min_length=1, max_length=50)
+    people: List[PersonInfo] = Field(min_length=1, max_length=10)
     action: Literal["Add", "Remove"]
     notes: Optional[str] = Field(default=None, max_length=5000)
 
@@ -76,7 +76,7 @@ class ManualRequestIn(BaseModel):
 
 class ManagerBatchRequestIn(BaseModel):
     submittedBy: SubmittedBy
-    people: List[PersonInfo] = Field(min_length=1, max_length=20)
+    people: List[PersonInfo] = Field(min_length=1, max_length=10)
     action: Literal["Add", "Remove"]
     notes: Optional[str] = Field(default=None, max_length=5000)
 

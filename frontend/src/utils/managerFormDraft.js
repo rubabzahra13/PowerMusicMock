@@ -49,7 +49,7 @@ export const EMPTY_PERSON_FORM = {
   location: '',
 };
 
-export const MAX_MANAGER_PERSON_ROWS = 20;
+export const MAX_MANAGER_PERSON_ROWS = 10;
 
 export function isPersonFormComplete(personForm) {
   return (

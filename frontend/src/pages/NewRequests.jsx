@@ -20,6 +20,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { TAG_ALREADY_EXISTS, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission } from '../utils/requestTags';
+import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
 
 const SORT_PRESETS = [
   { value: 'displayId-desc', label: 'ID (newest first)' },
@@ -318,6 +319,8 @@ export default function Requests() {
   const [personForms, setPersonForms] = useState([emptyPersonForm()]);
   const [action, setAction] = useState('Add');
   const [notes, setNotes] = useState('');
+  const personRowRefs = useRef([]);
+  const scrollToPersonIndexRef = useRef(null);
 
   const resetManualForm = (nextAction = actionTab) => {
     setManagerForm(emptyManagerForm());
@@ -333,8 +336,21 @@ export default function Requests() {
   };
 
   const addPersonForm = () => {
-    setPersonForms((prev) => [...prev, emptyPersonForm()]);
+    setPersonForms((prev) => {
+      if (prev.length >= MAX_MANAGER_PERSON_ROWS) return prev;
+      scrollToPersonIndexRef.current = prev.length;
+      return [...prev, emptyPersonForm()];
+    });
   };
+
+  useEffect(() => {
+    const index = scrollToPersonIndexRef.current;
+    if (index == null) return;
+    scrollToPersonIndexRef.current = null;
+    requestAnimationFrame(() => {
+      personRowRefs.current[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [personForms]);
 
   const removePersonForm = (index) => {
     setPersonForms((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
@@ -466,12 +482,7 @@ export default function Requests() {
     person.email.trim() &&
     person.location.trim();
 
-  const isModalFormValid =
-    managerForm.firstName.trim() &&
-    managerForm.lastName.trim() &&
-    managerForm.email.trim() &&
-    managerForm.club.trim() &&
-    personForms.every(isPersonFormValid);
+  const isModalFormValid = personForms.every(isPersonFormValid);
 
   const handleCreateRequest = async (e) => {
     e.preventDefault();
@@ -892,20 +903,20 @@ export default function Requests() {
           <div className="space-y-3">
             <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Manager Details</span>
             <div className="grid grid-cols-2 gap-3">
-              {[['First Name *', 'firstName', 'text'], ['Last Name *', 'lastName', 'text']].map(([label, field, type]) => (
+              {[['First Name', 'firstName', 'text'], ['Last Name', 'lastName', 'text']].map(([label, field, type]) => (
                 <div key={field}>
                   <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
-                  <input type={type} required value={managerForm[field]}
+                  <input type={type} value={managerForm[field]}
                     onChange={(e) => setManagerForm({ ...managerForm, [field]: e.target.value })}
                     className="w-full px-3 py-2 bg-[var(--color-surface-panel)]/50 border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:bg-white focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all" />
                 </div>
               ))}
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {[['Email *', 'email', 'email'], ['Club Location *', 'club', 'text']].map(([label, field, type]) => (
+              {[['Email', 'email', 'email'], ['Club Location', 'club', 'text']].map(([label, field, type]) => (
                 <div key={field}>
                   <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
-                  <input type={type} required value={managerForm[field]}
+                  <input type={type} value={managerForm[field]}
                     onChange={(e) => setManagerForm({ ...managerForm, [field]: e.target.value })}
                     className="w-full px-3 py-2 bg-[var(--color-surface-panel)]/50 border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:bg-white focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all" />
                 </div>
@@ -924,6 +935,7 @@ export default function Requests() {
             {personForms.map((person, index) => (
               <div
                 key={person.id}
+                ref={(el) => { personRowRefs.current[index] = el; }}
                 className="space-y-2.5 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 p-3"
               >
                 <div className="flex items-center justify-between gap-3">
@@ -974,14 +986,16 @@ export default function Requests() {
             ))}
             </div>
 
-            <button
-              type="button"
-              onClick={addPersonForm}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-[var(--color-border-default)] text-sm font-semibold text-[var(--color-brand-primary)] bg-[var(--color-surface-panel)]/40 hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add one more</span>
-            </button>
+            {personForms.length < MAX_MANAGER_PERSON_ROWS && (
+              <button
+                type="button"
+                onClick={addPersonForm}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-[var(--color-border-default)] text-sm font-semibold text-[var(--color-brand-primary)] bg-[var(--color-surface-panel)]/40 hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add one more</span>
+              </button>
+            )}
           </div>
 
           <div className="space-y-1.5">
