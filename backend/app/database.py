@@ -90,17 +90,25 @@ def create_db_engine():
         kwargs = {}
         db_url = get_database_url()
         if os.getenv("VERCEL"):
-            # Serverless: reuse one live connection while the function stays warm
-            # so repeat invocations skip the costly connect/TLS handshake (the DB
-            # can be a different region from the function). pre_ping + recycle keep
-            # the pooled connection healthy; a fresh cold instance still reconnects.
-            if os.getenv("DB_SERVERLESS_NULLPOOL", "").lower() in ("1", "true", "yes"):
-                kwargs["poolclass"] = NullPool
-            else:
+            # Serverless: default to NullPool so each request releases its DB
+            # connection as soon as the session closes. Holding a warm
+            # per-instance connection (pool_size=1 for pool_recycle seconds)
+            # exhausts Supabase's session-mode pooler, which caps concurrent
+            # clients at ~15: many warm instances each keep a client checked out,
+            # and a burst of cold starts (each also opening a connection) trips
+            # "max clients reached in session mode". NullPool trades a small
+            # per-request reconnect cost for staying well under that cap.
+            #
+            # Opt back into a persistent warm pool with DB_SERVERLESS_PERSISTENT_POOL
+            # (only safe against a transaction-mode pooler, port 6543, which
+            # multiplexes and does not have the 15-client session cap).
+            if os.getenv("DB_SERVERLESS_PERSISTENT_POOL", "").lower() in ("1", "true", "yes"):
                 kwargs["pool_size"] = int(os.getenv("DB_POOL_SIZE", "1"))
                 kwargs["max_overflow"] = int(os.getenv("DB_MAX_OVERFLOW", "2"))
                 kwargs["pool_pre_ping"] = True
                 kwargs["pool_recycle"] = int(os.getenv("DB_POOL_RECYCLE", "280"))
+            else:
+                kwargs["poolclass"] = NullPool
         else:
             kwargs["pool_pre_ping"] = True
             # Local/dev: default pool is larger than Supabase serverless caps.

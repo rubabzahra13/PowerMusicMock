@@ -13,13 +13,16 @@ from app.pilot2 import scheduler
 
 _is_production = bool(os.getenv("VERCEL")) or os.getenv("ENVIRONMENT", "").lower() == "production"
 
-# Best-effort: creates missing tables in dev. Must not crash the app at
-# import time (e.g. cold start with a briefly unreachable DB) — the tables
-# already exist in production and /health reports connectivity problems.
-try:
-    models.Base.metadata.create_all(bind=engine)
-except Exception as exc:  # noqa: BLE001
-    print(f"WARNING: skipping create_all — database not reachable at startup: {exc}")
+# Best-effort: creates missing tables in dev. Skipped on Vercel — the tables
+# already exist in production (managed by Alembic), and running create_all on
+# every serverless cold start opens an extra DB connection that competes for
+# Supabase's session-pooler client budget, contributing to exhaustion under a
+# burst of cold starts. Must never crash the app at import time.
+if not os.getenv("VERCEL"):
+    try:
+        models.Base.metadata.create_all(bind=engine)
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: skipping create_all — database not reachable at startup: {exc}")
 
 app = FastAPI(
     title="Power Music MVP API",
@@ -84,6 +87,13 @@ def start_background_jobs():
     scheduler.start()
     # Recover backfills interrupted by a restart; a stuck "running" status
     # would otherwise block history sync (new mail) for that inbox forever.
+    #
+    # Skipped on Vercel: serverless has no long-lived process to own backfills
+    # (the scheduler is disabled there), and running this on every cold start
+    # opens an extra DB connection that competes for Supabase's session-pooler
+    # client budget. Backfill recovery on serverless is driven by the poll cron.
+    if os.getenv("VERCEL"):
+        return
     try:
         from app.pilot2 import sync
 
