@@ -202,13 +202,15 @@ def _service_from_credentials(credentials):
 def _service_for_account(account: models.EmailAccount):
     from google.oauth2.credentials import Credentials
 
+    from app.pilot2 import token_crypto
+
     # scopes=None → refresh with whatever scopes the token was granted.
     # Pinning GMAIL_SCOPES here breaks tokens issued under the older, narrower
     # scope (invalid_scope on refresh); permanent-delete simply degrades to
     # trash until the inbox is reconnected with the full scope.
     credentials = Credentials(
         token=None,
-        refresh_token=account.oauth_refresh_token,
+        refresh_token=token_crypto.decrypt_token(account.oauth_refresh_token),
         token_uri="https://oauth2.googleapis.com/token",
         client_id=config.GOOGLE_CLIENT_ID,
         client_secret=config.GOOGLE_CLIENT_SECRET,

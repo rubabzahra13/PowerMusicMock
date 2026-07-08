@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.api.auth import require_admin
 from app.api.dependencies import get_db
-from app.pilot2 import config, diffing, gmail, oauth_pages, pipeline, sync
+from app.pilot2 import config, diffing, gmail, oauth_pages, pipeline, sync, token_crypto
 from app.pilot2 import schemas
 from app.pilot2.ai.distiller import run_distillation
 
@@ -150,7 +150,7 @@ def oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
             ),
             status_code=400,
         )
-    account.oauth_refresh_token = refresh_token
+    account.oauth_refresh_token = token_crypto.encrypt_token(refresh_token)
     account.status = "Connected"
     account.connected_at = datetime.now(timezone.utc)
     try:
