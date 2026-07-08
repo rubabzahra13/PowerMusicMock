@@ -42,6 +42,10 @@
     {
       "path": "/api/pilot2/learning/distill",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/pilot2/gmail/watch/renew",
+      "schedule": "0 3 * * *"
     }
   ]
 }

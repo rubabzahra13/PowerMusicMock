@@ -11,6 +11,7 @@ import {
   Loader2,
   ChevronUp,
   X,
+  Ban,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../ui/useToast';
@@ -132,6 +133,10 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }) {
             <NavLink to="/email-accounts" className={navItemClass} onClick={handleNavClick}>
               <Settings className="w-4 h-4 shrink-0" />
               <span>Email accounts</span>
+            </NavLink>
+            <NavLink to="/ignore-list" className={navItemClass} onClick={handleNavClick}>
+              <Ban className="w-4 h-4 shrink-0" />
+              <span>Ignore list</span>
             </NavLink>
           </div>
 

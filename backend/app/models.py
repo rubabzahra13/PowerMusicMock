@@ -126,6 +126,18 @@ class EmailAccount(Base):
     backfill_error = Column(Text, nullable=True)
 
 
+class EmailIgnoreRule(Base):
+    """Sender blocklist entry — email or whole domain hidden from Email responses."""
+
+    __tablename__ = "email_ignore_rules"
+
+    id = Column(String, primary_key=True)
+    account_email = Column(String, nullable=False, index=True)
+    kind = Column(String, nullable=False)  # email | domain
+    pattern = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class Email(Base):
     """An inbound email plus the AI-generated draft attached to it."""
 
@@ -328,6 +340,8 @@ class TemplateSuggestion(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     kind = Column(String, nullable=False)  # revision | new
     template_id = Column(String, nullable=True)
+    source_email_id = Column(String, nullable=True, index=True)
+    account_email = Column(String, nullable=True, index=True)
     intent = Column(String, nullable=True)
     suggested_name = Column(String, nullable=False)
     suggested_subject = Column(String, nullable=False)

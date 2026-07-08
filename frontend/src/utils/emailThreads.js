@@ -5,6 +5,8 @@
 // detail views can behave Gmail-style — one row per conversation, one detail
 // pane per conversation with all its messages stacked chronologically.
 
+import { stripQuotedReply } from './emailQuotes';
+
 export const THREAD_STATUS = {
   READY: 'ready', // has at least one inbound message with an AI draft to send
   PENDING: 'pending', // has an inbound whose draft is still being generated
@@ -23,9 +25,74 @@ function toTimestamp(iso) {
   return Number.isNaN(t) ? 0 : t;
 }
 
-/** True when this row represents Andrea's own outbound reply, not a customer message. */
+/** True when this row is Andrea's own outbound message (compose or Gmail echo). */
 function isOutbound(email) {
-  return Boolean(email.gmailIsOutbound) || email.draftStatus === 'Sent';
+  return Boolean(email.gmailIsOutbound);
+}
+
+/**
+ * Expand DB rows into a chronological transcript. A replied-to inbound row
+ * stores the customer message in `body` and Andrea's send in `sentBody` — we
+ * surface those as separate lines so the thread reads like Gmail.
+ */
+export function buildThreadTranscript(messages, { outboundLabel = 'You' } = {}) {
+  const entries = [];
+  let sawPriorMessage = false;
+
+  for (const msg of messages) {
+    if (isOutbound(msg)) {
+      entries.push({
+        key: `${msg.id}:out`,
+        messageId: msg.id,
+        source: msg,
+        direction: 'outbound',
+        labelPrefix: sawPriorMessage ? 'RE' : null,
+        sender: outboundLabel,
+        body: msg.sentBody || msg.body || '',
+        htmlBody: null,
+        receivedAt: msg.sentAt || msg.receivedAt,
+        showAttachments: false,
+      });
+      sawPriorMessage = true;
+      continue;
+    }
+
+    const inboundBody =
+      stripQuotedReply(msg.body || msg.snippet || '') || msg.body || msg.snippet || '';
+
+    const inboundPrefix = msg.isForward ? 'FWD' : sawPriorMessage ? 'RE' : null;
+
+    entries.push({
+      key: `${msg.id}:in`,
+      messageId: msg.id,
+      source: msg,
+      direction: 'inbound',
+      labelPrefix: inboundPrefix,
+      sender: msg.from || msg.fromEmail || 'Unknown sender',
+      body: inboundBody,
+      htmlBody: null,
+      receivedAt: msg.receivedAt,
+      showAttachments: true,
+    });
+    sawPriorMessage = true;
+
+    if (msg.sentBody && msg.draftStatus === 'Sent') {
+      entries.push({
+        key: `${msg.id}:reply`,
+        messageId: msg.id,
+        source: msg,
+        direction: 'outbound',
+        labelPrefix: 'RE',
+        sender: outboundLabel,
+        body: msg.sentBody,
+        htmlBody: null,
+        receivedAt: msg.sentAt || msg.receivedAt,
+        showAttachments: false,
+      });
+      sawPriorMessage = true;
+    }
+  }
+  return entries;
 }
 
 /** True when this inbound is still awaiting a reply Andrea can act on. */

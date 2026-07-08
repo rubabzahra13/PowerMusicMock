@@ -148,6 +148,16 @@ export const updateInbox = (id, title) =>
 export const deleteInbox = (id) =>
   request(`/api/pilot2/inboxes/${id}`, { method: 'DELETE' });
 
+// Ignore list
+export const getIgnoreList = (inbox) => {
+  const query = inbox ? `?inbox=${encodeURIComponent(inbox)}` : '';
+  return request(`/api/pilot2/ignore-list${query}`);
+};
+export const createIgnoreRule = (inbox, pattern) =>
+  request('/api/pilot2/ignore-list', { method: 'POST', body: JSON.stringify({ inbox, pattern }) });
+export const deleteIgnoreRule = (id) =>
+  request(`/api/pilot2/ignore-list/${id}`, { method: 'DELETE' });
+
 // Emails
 export const getEmails = () => request('/api/pilot2/emails');
 export const patchEmail = (id, patch) =>
@@ -156,20 +166,20 @@ export const updateDraft = (id, draftBody) =>
   request(`/api/pilot2/emails/${id}/draft`, { method: 'PUT', body: JSON.stringify({ draftBody }) });
 export const sendEmail = (id, finalBody) =>
   request(`/api/pilot2/emails/${id}/send`, { method: 'POST', body: JSON.stringify({ finalBody }) });
-export const sendReplyAll = (id, finalBody, extraCc = []) =>
+export const sendReplyAll = (id, finalBody, toEmails, ccEmails = []) =>
   request(`/api/pilot2/emails/${id}/reply-all`, {
     method: 'POST',
-    body: JSON.stringify({ finalBody, extraCc }),
+    body: JSON.stringify({ finalBody, toEmails, ccEmails }),
   });
 export const sendForward = (id, finalBody, toEmails, ccEmails = []) =>
   request(`/api/pilot2/emails/${id}/forward`, {
     method: 'POST',
     body: JSON.stringify({ finalBody, toEmails, ccEmails }),
   });
-export const composeMessage = ({ inbox, toEmails, ccEmails = [], subject, finalBody }) =>
+export const composeMessage = ({ inbox, toEmails, ccEmails = [], bccEmails = [], subject, finalBody }) =>
   request('/api/pilot2/compose', {
     method: 'POST',
-    body: JSON.stringify({ inbox, toEmails, ccEmails, subject, finalBody }),
+    body: JSON.stringify({ inbox, toEmails, ccEmails, bccEmails, subject, finalBody }),
   });
 
 // Attachment bytes need the auth header, so we can't use a plain <a href>.
@@ -219,3 +229,14 @@ export const restoreTemplate = (id) =>
   request(`/api/pilot2/templates/${id}/restore`, { method: 'POST' });
 export const deleteTemplateForever = (id) =>
   request(`/api/pilot2/templates/${id}/forever`, { method: 'DELETE' });
+
+// Template suggestions (AI learning)
+export const getTemplateSuggestions = (inbox) => {
+  const params = new URLSearchParams({ status: 'pending' });
+  if (inbox) params.set('inbox', inbox);
+  return request(`/api/pilot2/suggestions?${params.toString()}`);
+};
+export const approveTemplateSuggestion = (id) =>
+  request(`/api/pilot2/suggestions/${id}/approve`, { method: 'POST' });
+export const rejectTemplateSuggestion = (id) =>
+  request(`/api/pilot2/suggestions/${id}/reject`, { method: 'POST' });

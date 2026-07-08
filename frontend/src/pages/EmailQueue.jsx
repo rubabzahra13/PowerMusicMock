@@ -18,8 +18,9 @@ import RecipientField from '../components/email/RecipientField';
 import ComposeModal from '../components/email/ComposeModal';
 import AttachmentChips from '../components/email/AttachmentChips';
 import SafeHtml from '../components/email/SafeHtml';
-import { groupIntoThreads, threadKeyFor } from '../utils/emailThreads';
-import { buildAddressBook, parseRecipientList, isValidEmail } from '../utils/emailAddressBook';
+import { buildThreadTranscript, groupIntoThreads, threadKeyFor } from '../utils/emailThreads';
+import { buildAddressBook, parseRecipientList, isValidEmail, seedReplyAllRecipients } from '../utils/emailAddressBook';
+import { resolveSelectedInbox, writeSelectedInbox } from '../utils/selectedInbox';
 import { buildEmailSignature, normalizeDraftSignature, resolveInboxTitle } from '../utils/emailSignature';
 import { getSupabase } from '../supabaseClient';
 
@@ -368,18 +369,18 @@ export default function EmailQueue() {
   // switches which inbound she's replying to so a mid-forward doesn't leak
   // into the next message.
   const [composerMode, setComposerMode] = useState('reply');
-  // Reply-all Cc field per source message so switching threads doesn't
-  // wipe the addresses she was adding.
-  const [replyAllCcEdits, setReplyAllCcEdits] = useState({});
+  // Reply-all To/Cc per source message so switching threads preserves edits.
+  const [replyAllEdits, setReplyAllEdits] = useState({});
   // Forward fields per source message so switching threads preserves the
   // in-progress forward the same way replies do (user's explicit UX ask).
   const [forwardEdits, setForwardEdits] = useState({});
   // Gmail-style Compose window for a brand-new message (no AI, no thread).
   const [composeOpen, setComposeOpen] = useState(false);
-  // True while subscribed to the Supabase Realtime channel (drives the "Live"
-  // indicator and means new mail arrives instantly rather than on the poll).
-  const [realtimeLive, setRealtimeLive] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+
+  useEffect(() => {
+    if (composerMode === 'forward') setComposerMode('reply');
+  }, [composerMode]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [checkedIds, setCheckedIds] = useState(new Set());
@@ -428,8 +429,7 @@ export default function EmailQueue() {
     setInboxes(inboxRows);
     setInboxFilter((prev) => {
       if (prev && inboxRows.some((i) => i.email === prev)) return prev;
-      const connected = inboxRows.filter((i) => i.status === 'Connected');
-      return (connected[0] ?? inboxRows[0])?.email || '';
+      return resolveSelectedInbox(inboxRows);
     });
   }, []);
 
@@ -505,12 +505,9 @@ export default function EmailQueue() {
         // Skip while a local save is in flight (track() re-syncs afterwards).
         if (pendingRef.current === 0) revalidate();
       })
-      .subscribe((status) => {
-        setRealtimeLive(status === 'SUBSCRIBED');
-      });
+      .subscribe();
 
     return () => {
-      setRealtimeLive(false);
       sb.removeChannel(channel);
     };
   }, [revalidate]);
@@ -1022,8 +1019,21 @@ export default function EmailQueue() {
     });
   };
 
+  const getReplyAllDraft = useCallback((email) => {
+    if (!email) return { to: '', cc: '' };
+    return replyAllEdits[email.id] ?? seedReplyAllRecipients(email);
+  }, [replyAllEdits]);
+
+  const updateReplyAllDraft = (email, patch) => {
+    setReplyAllEdits((prev) => {
+      const existing = prev[email.id] ?? seedReplyAllRecipients(email);
+      return { ...prev, [email.id]: { ...existing, ...patch } };
+    });
+  };
+
   // Toggling into forward mode seeds the draft up-front so the textarea
-  // renders with the quoted original on the very first paint.
+  // renders with the quoted original on the very first paint. Reply-all
+  // seeds To/Cc with everyone on the original thread.
   const setComposerModeSafe = (mode) => {
     setComposerMode(mode);
     setIsEditingDraft(false);
@@ -1031,6 +1041,12 @@ export default function EmailQueue() {
       setForwardEdits((prev) => ({
         ...prev,
         [selectedEmail.id]: { to: '', cc: '', body: buildForwardDraft(selectedEmail) },
+      }));
+    }
+    if (mode === 'reply-all' && selectedEmail && !replyAllEdits[selectedEmail.id]) {
+      setReplyAllEdits((prev) => ({
+        ...prev,
+        [selectedEmail.id]: seedReplyAllRecipients(selectedEmail),
       }));
     }
   };
@@ -1049,14 +1065,26 @@ export default function EmailQueue() {
     try {
       let updated;
       if (composerMode === 'reply-all') {
-        const extraCc = parseRecipientList(replyAllCcEdits[selectedEmail.id] ?? '');
-        const bad = extraCc.find((addr) => !isValidEmail(addr));
-        if (bad) {
-          showToast(`Invalid Cc address: ${bad}`, 'error');
+        const { to, cc } = getReplyAllDraft(selectedEmail);
+        const toList = parseRecipientList(to);
+        const ccList = parseRecipientList(cc);
+        if (toList.length === 0) {
+          showToast('Add at least one recipient in To.', 'error');
           return;
         }
-        updated = await track(sendReplyAll(selectedEmail.id, body, extraCc));
-        showToast(`Reply-all sent to ${selectedEmail.fromEmail} via Gmail.`, 'success');
+        const badTo = toList.find((addr) => !isValidEmail(addr));
+        if (badTo) {
+          showToast(`Invalid To address: ${badTo}`, 'error');
+          return;
+        }
+        const badCc = ccList.find((addr) => !isValidEmail(addr));
+        if (badCc) {
+          showToast(`Invalid Cc address: ${badCc}`, 'error');
+          return;
+        }
+        updated = await track(sendReplyAll(selectedEmail.id, body, toList, ccList));
+        const ccNote = ccList.length ? ` (Cc: ${ccList.join(', ')})` : '';
+        showToast(`Reply-all sent to ${toList.join(', ')}${ccNote} via Gmail.`, 'success');
       } else {
         // Backend sends via Gmail and records the draft-vs-sent diff (the
         // learning signal) in the same call.
@@ -1143,18 +1171,6 @@ export default function EmailQueue() {
         className="shrink-0"
         actions={
           <div className="flex items-center gap-2">
-            {realtimeLive && (
-              <span
-                className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-emerald-200 bg-emerald-50 text-[11px] font-semibold text-emerald-700"
-                title="Real-time updates are on — new mail appears instantly"
-              >
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                </span>
-                Live
-              </span>
-            )}
             <div
               className="flex items-center gap-1.5 h-9 rounded-lg border border-[var(--color-brand-primary)]/25 bg-gradient-to-r from-[#f4f7fd] via-[#e9eff9] to-[#eef3fb] pl-2.5 pr-1 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
               title={inboxFilter}
@@ -1162,7 +1178,10 @@ export default function EmailQueue() {
               <Mail className="w-3.5 h-3.5 text-[var(--color-brand-primary)] shrink-0" aria-hidden="true" />
               <SelectDropdown
                 value={inboxFilter}
-                onChange={setInboxFilter}
+                onChange={(email) => {
+                  writeSelectedInbox(email);
+                  setInboxFilter(email);
+                }}
                 options={accountOptions}
                 size="xs"
                 variant="soft"
@@ -1929,7 +1948,6 @@ export default function EmailQueue() {
                             {[
                               { id: 'reply', label: 'Reply' },
                               { id: 'reply-all', label: 'Reply all' },
-                              { id: 'forward', label: 'Forward' },
                             ].map((mode) => (
                               <button
                                 key={mode.id}
@@ -1974,11 +1992,19 @@ export default function EmailQueue() {
                     {/* Reply-all Cc field. Kept between the tab strip and the
                         AI draft so it reads top-to-bottom like Gmail. */}
                     {composerMode === 'reply-all' && selectedEmail.draftStatus !== 'Sent' && !selectedDraftPending && (
-                      <div className="px-4 pt-3">
+                      <div className="px-4 pt-3 space-y-3">
+                        <RecipientField
+                          label="To"
+                          required
+                          value={getReplyAllDraft(selectedEmail).to}
+                          onChange={(next) => updateReplyAllDraft(selectedEmail, { to: next })}
+                          book={addressBook}
+                          placeholder="recipient@example.com"
+                        />
                         <RecipientField
                           label="Cc"
-                          value={replyAllCcEdits[selectedEmail.id] ?? (selectedEmail.ccEmails || []).filter((a) => a && a.toLowerCase() !== (selectedEmail.inbox || '').toLowerCase()).join(', ')}
-                          onChange={(next) => setReplyAllCcEdits((prev) => ({ ...prev, [selectedEmail.id]: next }))}
+                          value={getReplyAllDraft(selectedEmail).cc}
+                          onChange={(next) => updateReplyAllDraft(selectedEmail, { cc: next })}
                           book={addressBook}
                           placeholder="cc@example.com, another@example.com"
                         />
@@ -2067,10 +2093,7 @@ export default function EmailQueue() {
 
                 <hr className="border-[var(--color-border-default)]" />
 
-                {/* The message Andrea is currently replying to. Bare in Gmail
-                    this would be "Original email"; on threads that's still
-                    the one you're active on, so we label it clearly and
-                    surface the forwarded-in banner when applicable. */}
+                {/* The message Andrea is currently replying to. */}
                 <section className="space-y-2">
                   <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
                     Replying to
@@ -2106,11 +2129,8 @@ export default function EmailQueue() {
                   )}
                 </section>
 
-                {/* Every other message in the thread, chronological. Prior
-                    messages start collapsed; Andrea clicks to expand any
-                    one. This is the Gmail thread view — one row for the
-                    conversation, all messages stacked when opened. */}
-                {selectedThread && selectedThread.messages.length > 1 && (
+                {selectedThread &&
+                  buildThreadTranscript(selectedThread.messages).length > 1 && (
                   <ThreadHistory
                     thread={selectedThread}
                     activeMessageId={selectedEmail.id}

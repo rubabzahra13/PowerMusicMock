@@ -37,6 +37,21 @@ class InboxUpdateIn(BaseModel):
     title: str
 
 
+class IgnoreRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: str
+    accountEmail: str = Field(validation_alias="account_email")
+    kind: str
+    pattern: str
+    createdAt: datetime = Field(validation_alias="created_at")
+
+
+class IgnoreRuleCreateIn(BaseModel):
+    inbox: str
+    pattern: str
+
+
 class InboxSyncStatusOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -78,6 +93,7 @@ class EmailOut(BaseModel):
     # Thread + RFC 5322 headers so the frontend can group / display / chain.
     gmailThreadId: Optional[str] = Field(default=None, validation_alias="gmail_thread_id")
     gmailMessageId: Optional[str] = Field(default=None, validation_alias="gmail_message_id")
+    gmailIsOutbound: bool = Field(default=False, validation_alias="gmail_is_outbound")
     messageIdHeader: Optional[str] = Field(default=None, validation_alias="message_id_header")
     inReplyToHeader: Optional[str] = Field(default=None, validation_alias="in_reply_to_header")
     referencesHeader: Optional[str] = Field(default=None, validation_alias="references_header")
@@ -221,22 +237,26 @@ def _clean_email_list(values, *, field_name: str, max_len: int) -> List[str]:
 
 
 class ReplyAllIn(BaseModel):
-    """Reply-all mirrors Send but lets the admin add explicit extra Cc
-    addresses (Gmail exposes the same field). The primary To recipient is
-    derived server-side from the message being replied to."""
+    """Reply-all carries the To/Cc lists Andrea confirmed in the composer."""
 
     finalBody: str = Field(max_length=100_000)
-    extraCc: List[str] = Field(default_factory=list)
+    toEmails: List[str] = Field(default_factory=list)
+    ccEmails: List[str] = Field(default_factory=list)
 
     @field_validator("finalBody", mode="before")
     @classmethod
     def clean_body(cls, value):
         return normalize_text(value, max_length=100_000, field_name="finalBody")
 
-    @field_validator("extraCc", mode="before")
+    @field_validator("toEmails", mode="before")
     @classmethod
-    def clean_extra_cc(cls, value):
-        return _clean_email_list(value, field_name="extraCc", max_len=50)
+    def clean_to_emails(cls, value):
+        return _clean_email_list(value, field_name="toEmails", max_len=50)
+
+    @field_validator("ccEmails", mode="before")
+    @classmethod
+    def clean_cc_emails(cls, value):
+        return _clean_email_list(value, field_name="ccEmails", max_len=50)
 
 
 class ForwardIn(BaseModel):
@@ -272,6 +292,7 @@ class ComposeIn(BaseModel):
     inbox: str = Field(max_length=254)
     toEmails: List[str] = Field(min_length=1)
     ccEmails: List[str] = Field(default_factory=list)
+    bccEmails: List[str] = Field(default_factory=list)
     subject: str = Field(max_length=500)
     finalBody: str = Field(max_length=100_000)
 
@@ -294,6 +315,11 @@ class ComposeIn(BaseModel):
     @classmethod
     def clean_cc(cls, value):
         return _clean_email_list(value, field_name="ccEmails", max_len=50)
+
+    @field_validator("bccEmails", mode="before")
+    @classmethod
+    def clean_bcc(cls, value):
+        return _clean_email_list(value, field_name="bccEmails", max_len=50)
 
 
 class TemplateOut(BaseModel):
@@ -387,6 +413,8 @@ class TemplateSuggestionOut(BaseModel):
     id: int
     kind: str
     templateId: Optional[str] = Field(default=None, validation_alias="template_id")
+    sourceEmailId: Optional[str] = Field(default=None, validation_alias="source_email_id")
+    accountEmail: Optional[str] = Field(default=None, validation_alias="account_email")
     intent: Optional[str] = None
     suggestedName: str = Field(validation_alias="suggested_name")
     suggestedSubject: str = Field(validation_alias="suggested_subject")

@@ -3,13 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search, FileText, Trash2, Save, X, ChevronDown, Plus, Pencil,
   SlidersHorizontal, SortAsc, Mail, RotateCcw, Eye, Clock,
-  ChevronLeft, ChevronRight, Link2, Unlink,
+  ChevronLeft, ChevronRight, Link2, Unlink, Sparkles, Check, Loader2,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import {
   getTemplates, createTemplate, updateTemplate, deleteTemplate,
   restoreTemplate, deleteTemplateForever, getInboxes, loadWithCache, refreshCache, writeCache,
+  getTemplateSuggestions, approveTemplateSuggestion, rejectTemplateSuggestion,
 } from '../utils/pilot2Api';
+import { resolveSelectedInbox, writeSelectedInbox } from '../utils/selectedInbox';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClass } from '../utils/responsiveLayout';
 import { Toast, useToast, SelectDropdown, CardListSkeleton, Modal, EMPTY_CELL } from '../components/ui';
@@ -77,6 +79,99 @@ const TEMPLATE_PAGE_SIZE = 12;
 
 function templateCreatedAt(template) {
   return template?.createdAt || template?.lastUpdated;
+}
+
+function templateWasEdited(template) {
+  const created = template?.createdAt;
+  const updated = template?.lastUpdated;
+  if (!created || !updated) return false;
+  try {
+    const createdMs = parseISO(created).getTime();
+    const updatedMs = parseISO(updated).getTime();
+    if (Number.isNaN(createdMs) || Number.isNaN(updatedMs)) return false;
+    return updatedMs - createdMs > 2000;
+  } catch {
+    return false;
+  }
+}
+
+function TemplateSuggestionPanel({
+  suggestions,
+  templates,
+  busyId,
+  onApprove,
+  onReject,
+}) {
+  if (!suggestions.length) return null;
+
+  const templateName = (templateId) =>
+    templates.find((row) => row.id === templateId)?.name || 'template';
+
+  return (
+    <div className="shrink-0 space-y-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-3">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+        <Sparkles className="h-3.5 w-3.5 text-[var(--color-brand-primary)]" aria-hidden="true" />
+        AI suggestions
+      </div>
+      {suggestions.map((item) => {
+        const isNew = item.kind === 'new';
+        const title = isNew
+          ? `Add template: ${item.suggestedName}`
+          : `Edit ${templateName(item.templateId)}`;
+        return (
+          <div
+            key={item.id}
+            className="rounded-xl border border-[var(--color-brand-primary)]/20 bg-white px-3.5 py-3 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</p>
+                <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+                  {isNew
+                    ? 'Based on a reply you sent when no template matched this email.'
+                    : 'Based on how you edited drafts before sending — suggested fix for next time.'}
+                </p>
+                {item.rationale && (
+                  <p className="mt-1.5 text-xs text-[var(--color-text-muted)] line-clamp-2">{item.rationale}</p>
+                )}
+                <p className="mt-2 text-[11px] font-medium text-[var(--color-text-muted)] truncate">
+                  Subject: {item.suggestedSubject}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onReject(item)}
+                  disabled={busyId === item.id}
+                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-[var(--color-border-default)] px-2.5 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-highlight)] disabled:opacity-50"
+                >
+                  {busyId === item.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onApprove(item)}
+                  disabled={busyId === item.id}
+                  className="inline-flex h-8 items-center gap-1 rounded-lg bg-[var(--color-brand-primary)] px-2.5 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50"
+                >
+                  {busyId === item.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  {isNew ? 'Add' : 'Apply edit'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function templateMatchesDateRange(template, dateFrom, dateTo) {
@@ -482,8 +577,12 @@ function TemplateListItem({
           </span>
           <span className="block text-[10px] text-[var(--color-text-muted)] tabular-nums leading-tight pt-0.5">
             Created {fmtListDate(templateCreatedAt(template))}
-            <span className="px-1 text-[var(--color-border-default)]" aria-hidden="true">·</span>
-            Updated {fmtListDate(template.lastUpdated)}
+            {templateWasEdited(template) && (
+              <>
+                <span className="px-1 text-[var(--color-border-default)]" aria-hidden="true">·</span>
+                Updated {fmtListDate(template.lastUpdated)}
+              </>
+            )}
           </span>
           {tab !== 'templates' && (
             <span className="flex items-center gap-1.5 pt-1 flex-wrap">
@@ -525,6 +624,8 @@ export default function TemplateManagement() {
   const [inboxes, setInboxes] = useState([]);
   const [inboxFilter, setInboxFilter] = useState('');
   const [libraryTab, setLibraryTab] = useState('templates');
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionBusyId, setSuggestionBusyId] = useState(null);
 
   const templatesRef = useRef([]);
   const pendingTemplateOpsRef = useRef(new Set());
@@ -574,7 +675,10 @@ export default function TemplateManagement() {
     loadWithCache('inboxes', getInboxes, (rows) => {
       setInboxes(rows);
       // Drop the selection if that inbox was deleted meanwhile.
-      setInboxFilter((prev) => (prev && rows.some((r) => r.email === prev) ? prev : rows[0]?.email || ''));
+      setInboxFilter((prev) => {
+        if (prev && rows.some((r) => r.email === prev)) return prev;
+        return resolveSelectedInbox(rows);
+      });
     }).catch((err) => {
       showToast(`Could not load inboxes: ${err.message}`, 'error');
     });
@@ -614,6 +718,29 @@ export default function TemplateManagement() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inboxFilter, reconcileTemplatesFromServer]);
 
+  const refreshSuggestions = useCallback(() => {
+    if (!inboxFilter) {
+      setSuggestions([]);
+      return Promise.resolve([]);
+    }
+    return getTemplateSuggestions(inboxFilter)
+      .then((rows) => {
+        setSuggestions(rows);
+        return rows;
+      })
+      .catch((err) => {
+        showToast(`Could not load AI suggestions: ${err.message}`, 'error');
+        return [];
+      });
+  }, [inboxFilter, showToast]);
+
+  useEffect(() => {
+    refreshSuggestions();
+    const onFocus = () => { refreshSuggestions(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refreshSuggestions]);
+
   // Left pane controls
   const [search, setSearch] = useState('');
   const [sortMode, setSortMode] = useState('created-desc');
@@ -652,6 +779,38 @@ export default function TemplateManagement() {
   isDirtyRef.current = isDirty;
   selectedIdRef.current = selectedId;
   inboxFilterRef.current = inboxFilter;
+
+  const handleApproveSuggestion = async (item) => {
+    setSuggestionBusyId(item.id);
+    try {
+      const saved = await approveTemplateSuggestion(item.id);
+      setSuggestions((prev) => prev.filter((row) => row.id !== item.id));
+      commitTemplates((prev) => {
+        const without = prev.filter((t) => t.id !== saved.id);
+        return [saved, ...without];
+      });
+      setLibraryTab(saved.status === 'Draft' ? 'drafts' : 'templates');
+      setSelectedId(saved.id);
+      showToast(item.kind === 'new' ? 'Template added.' : 'Template updated.', 'success');
+    } catch (err) {
+      showToast(`Could not apply suggestion: ${err.message}`, 'error');
+    } finally {
+      setSuggestionBusyId(null);
+    }
+  };
+
+  const handleRejectSuggestion = async (item) => {
+    setSuggestionBusyId(item.id);
+    try {
+      await rejectTemplateSuggestion(item.id);
+      setSuggestions((prev) => prev.filter((row) => row.id !== item.id));
+      showToast('Suggestion discarded.', 'info');
+    } catch (err) {
+      showToast(`Could not reject suggestion: ${err.message}`, 'error');
+    } finally {
+      setSuggestionBusyId(null);
+    }
+  };
 
   const isPendingDraftId = (id) => typeof id === 'string' && id.startsWith('draft-pending-');
 
@@ -1037,6 +1196,7 @@ export default function TemplateManagement() {
 
   const handleInboxChange = (email) => {
     if (email === inboxFilter) return;
+    writeSelectedInbox(email);
     void autoSaveEditsIfNeeded({ leaveSession: 'background' });
     setInboxFilter(email);
   };
@@ -1563,6 +1723,15 @@ export default function TemplateManagement() {
       />
 
       <div className="flex flex-1 min-h-0 flex-col rounded-xl border border-[var(--color-border-default)] overflow-hidden shadow-sm bg-white">
+        {!inboxDisconnected && (
+          <TemplateSuggestionPanel
+            suggestions={suggestions}
+            templates={templates}
+            busyId={suggestionBusyId}
+            onApprove={handleApproveSuggestion}
+            onReject={handleRejectSuggestion}
+          />
+        )}
         {inboxDisconnected ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-8 py-12">
             <span className="flex items-center justify-center h-14 w-14 rounded-full bg-[var(--color-surface-highlight)] mb-5" aria-hidden="true">
@@ -1899,8 +2068,12 @@ export default function TemplateManagement() {
                     ) : (
                       <>
                         <span>Created {fmtUpdated(templateCreatedAt(selectedTemplate))}</span>
-                        <span className="text-[var(--color-border-default)]" aria-hidden="true">·</span>
-                        <span>Updated {fmtUpdated(selectedTemplate.lastUpdated)}</span>
+                        {templateWasEdited(selectedTemplate) && (
+                          <>
+                            <span className="text-[var(--color-border-default)]" aria-hidden="true">·</span>
+                            <span>Updated {fmtUpdated(selectedTemplate.lastUpdated)}</span>
+                          </>
+                        )}
                       </>
                     )}
                     {!isCreatingNew && selectedTemplate?.category && (

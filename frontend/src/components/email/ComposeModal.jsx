@@ -25,7 +25,9 @@ export default function ComposeModal({
   const [inbox, setInbox] = useState(defaultInbox || connected[0]?.email || '');
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
+  const [bcc, setBcc] = useState('');
   const [showCc, setShowCc] = useState(false);
+  const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
@@ -33,6 +35,7 @@ export default function ComposeModal({
   const handleSend = async () => {
     const toList = parseRecipientList(to);
     const ccList = parseRecipientList(cc);
+    const bccList = parseRecipientList(bcc);
     if (!inbox) {
       onError?.('Choose which inbox to send from.');
       return;
@@ -51,9 +54,21 @@ export default function ComposeModal({
       onError?.(`Invalid Cc: ${badCc}`);
       return;
     }
+    const badBcc = bccList.find((a) => !isValidEmail(a));
+    if (badBcc) {
+      onError?.(`Invalid Bcc: ${badBcc}`);
+      return;
+    }
     setSending(true);
     try {
-      await onSend({ inbox, toEmails: toList, ccEmails: ccList, subject, finalBody: body });
+      await onSend({
+        inbox,
+        toEmails: toList,
+        ccEmails: ccList,
+        bccEmails: bccList,
+        subject,
+        finalBody: body,
+      });
       onClose();
     } catch (err) {
       onError?.(err.message || 'Could not send message.');
@@ -107,14 +122,27 @@ export default function ComposeModal({
             book={addressBook}
             placeholder="recipient@example.com"
           />
-          {!showCc && (
-            <button
-              type="button"
-              onClick={() => setShowCc(true)}
-              className="absolute right-0 top-0 text-[11px] font-semibold text-[var(--color-brand-primary)] hover:underline cursor-pointer"
-            >
-              Add Cc
-            </button>
+          {(!showCc || !showBcc) && (
+            <div className="absolute right-0 top-0 flex items-center gap-2 text-[11px] font-semibold">
+              {!showCc && (
+                <button
+                  type="button"
+                  onClick={() => setShowCc(true)}
+                  className="text-[var(--color-brand-primary)] hover:underline cursor-pointer"
+                >
+                  Cc
+                </button>
+              )}
+              {!showBcc && (
+                <button
+                  type="button"
+                  onClick={() => setShowBcc(true)}
+                  className="text-[var(--color-brand-primary)] hover:underline cursor-pointer"
+                >
+                  Bcc
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -125,6 +153,16 @@ export default function ComposeModal({
             onChange={setCc}
             book={addressBook}
             placeholder="cc@example.com"
+          />
+        )}
+
+        {showBcc && (
+          <RecipientField
+            label="Bcc"
+            value={bcc}
+            onChange={setBcc}
+            book={addressBook}
+            placeholder="bcc@example.com"
           />
         )}
 

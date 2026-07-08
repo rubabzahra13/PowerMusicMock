@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.api.auth import require_admin
 from app.api.dependencies import get_db
-from app.pilot2 import config, diffing, gmail, oauth_pages, pipeline, sync, token_crypto
+from app.pilot2 import config, diffing, gmail, ignore_list, oauth_pages, pipeline, sync, template_suggestions, token_crypto
 from app.pilot2 import schemas
 from app.pilot2.ai.distiller import run_distillation
 
@@ -89,6 +89,8 @@ def get_workspace(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         .order_by(models.Email.received_at.desc())
         .all()
     )
+    rules_by_inbox = ignore_list.load_rules_grouped(db)
+    emails = ignore_list.filter_emails_by_ignore_list(emails, rules_by_inbox)
     pending_ai = (
         db.query(models.Email)
         .filter(models.Email.draft_status.in_(["Imported", "Processing"]))
@@ -283,6 +285,81 @@ def delete_inbox(inbox_id: str, db: Session = Depends(get_db), _admin=Depends(re
     return {"deleted": inbox_id}
 
 
+# ── Ignore list ──────────────────────────────────────────────
+
+
+@router.get("/ignore-list", response_model=List[schemas.IgnoreRuleOut])
+def list_ignore_rules(
+    inbox: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    query = db.query(models.EmailIgnoreRule).order_by(models.EmailIgnoreRule.created_at.desc())
+    if inbox:
+        query = query.filter(models.EmailIgnoreRule.account_email == inbox)
+    return query.all()
+
+
+@router.post("/ignore-list", response_model=schemas.IgnoreRuleOut)
+def create_ignore_rule(
+    payload: schemas.IgnoreRuleCreateIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    account = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.email == payload.inbox)
+        .first()
+    )
+    if account is None:
+        raise HTTPException(status_code=404, detail="Inbox not found")
+
+    try:
+        kind, pattern = ignore_list.parse_ignore_pattern(payload.pattern)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    existing = (
+        db.query(models.EmailIgnoreRule)
+        .filter(
+            models.EmailIgnoreRule.account_email == payload.inbox,
+            models.EmailIgnoreRule.kind == kind,
+            models.EmailIgnoreRule.pattern == pattern,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="That sender is already on the ignore list.")
+
+    rule = models.EmailIgnoreRule(
+        id=pipeline.next_id(db, models.EmailIgnoreRule, "ignore"),
+        account_email=payload.inbox,
+        kind=kind,
+        pattern=pattern,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(rule)
+    pipeline.log(db, "ignore_rule_added", f"Ignored {kind} {pattern} for {payload.inbox}.")
+    db.commit()
+    db.refresh(rule)
+    return rule
+
+
+@router.delete("/ignore-list/{rule_id}")
+def delete_ignore_rule(
+    rule_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    rule = db.query(models.EmailIgnoreRule).filter(models.EmailIgnoreRule.id == rule_id).first()
+    if rule is None:
+        raise HTTPException(status_code=404, detail="Ignore rule not found")
+    db.delete(rule)
+    pipeline.log(db, "ignore_rule_removed", f"Removed ignore rule {rule_id}.")
+    db.commit()
+    return {"deleted": rule_id}
+
+
 # ── Emails ───────────────────────────────────────────────────
 
 
@@ -291,13 +368,18 @@ def list_emails(inbox: Optional[str] = None, db: Session = Depends(get_db), _adm
     query = db.query(models.Email).filter(models.Email.draft_status != "Ignored")
     if inbox:
         query = query.filter(models.Email.account_email == inbox)
-    return query.order_by(models.Email.received_at.desc()).all()
+    emails = query.order_by(models.Email.received_at.desc()).all()
+    rules_by_inbox = ignore_list.load_rules_grouped(db)
+    return ignore_list.filter_emails_by_ignore_list(emails, rules_by_inbox)
 
 
 @router.get("/emails/{email_id}", response_model=schemas.EmailOut)
 def get_email(email_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     email = db.query(models.Email).filter(models.Email.id == email_id).first()
     if email is None:
+        raise HTTPException(status_code=404, detail="Email not found")
+    rules = ignore_list.load_rules_for_inbox(db, email.account_email)
+    if ignore_list.is_email_ignored(email, rules):
         raise HTTPException(status_code=404, detail="Email not found")
     return email
 
@@ -539,6 +621,7 @@ def send_email(email_id: str, payload: schemas.SendIn, db: Session = Depends(get
         edit_ratio=diffing.edit_ratio(ai_draft, final_body),
         created_at=datetime.now(timezone.utc),
     ))
+    template_suggestions.maybe_suggest_new_template(db, email, final_body)
 
     email.sent_at = datetime.now(timezone.utc)
     email.sent_body = final_body
@@ -586,7 +669,13 @@ def reply_all_email(
         raise HTTPException(status_code=400, detail="Reply already sent.")
 
     final_body = payload.finalBody
-    result = gmail.send_reply_all(account, email, final_body, extra_cc=payload.extraCc)
+    result = gmail.send_reply_all(
+        account,
+        email,
+        final_body,
+        to_emails=payload.toEmails,
+        cc_emails=payload.ccEmails,
+    )
 
     # Same learning signal we record for a plain reply — the diff between the
     # AI draft and Andrea's final body is the training feedback, and it is
@@ -603,6 +692,7 @@ def reply_all_email(
         edit_ratio=diffing.edit_ratio(ai_draft, final_body),
         created_at=datetime.now(timezone.utc),
     ))
+    template_suggestions.maybe_suggest_new_template(db, email, final_body)
 
     email.sent_at = datetime.now(timezone.utc)
     email.sent_body = final_body
@@ -614,11 +704,12 @@ def reply_all_email(
     email.flag_reason = None
     email.read = True
 
-    cc_summary = ", ".join(payload.extraCc) if payload.extraCc else "no extra Cc"
+    cc_summary = ", ".join(payload.ccEmails) if payload.ccEmails else "no Cc"
+    to_summary = ", ".join(payload.toEmails) if payload.toEmails else email.from_email
     pipeline.log(
         db,
         "reply_sent",
-        f"Reply-all sent to {email.from_email} ({cc_summary}).",
+        f"Reply-all sent to {to_summary} ({cc_summary}).",
         email.id,
     )
     db.commit()
@@ -701,7 +792,7 @@ def compose_email(
         raise HTTPException(status_code=400, detail=f"Inbox {payload.inbox} is not connected.")
 
     self_email = (account.email or "").lower()
-    if any(addr.lower() == self_email for addr in payload.toEmails + payload.ccEmails):
+    if any(addr.lower() == self_email for addr in payload.toEmails + payload.ccEmails + payload.bccEmails):
         raise HTTPException(
             status_code=400,
             detail="Cannot send a new message to the sending inbox itself.",
@@ -711,6 +802,7 @@ def compose_email(
         account,
         to_emails=payload.toEmails,
         cc_emails=payload.ccEmails,
+        bcc_emails=payload.bccEmails,
         subject=payload.subject,
         body=payload.finalBody,
     )
@@ -876,13 +968,20 @@ def list_guidance(db: Session = Depends(get_db), _admin=Depends(require_admin)):
 
 
 @router.get("/suggestions", response_model=List[schemas.TemplateSuggestionOut])
-def list_suggestions(status: str = "pending", db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    return (
+def list_suggestions(
+    status: str = "pending",
+    inbox: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    query = (
         db.query(models.TemplateSuggestion)
         .filter(models.TemplateSuggestion.status == status)
         .order_by(models.TemplateSuggestion.created_at.desc())
-        .all()
     )
+    if inbox:
+        query = query.filter(models.TemplateSuggestion.account_email == inbox)
+    return query.all()
 
 
 @router.post("/suggestions/{suggestion_id}/approve", response_model=schemas.TemplateOut)
@@ -910,14 +1009,37 @@ def approve_suggestion(suggestion_id: int, db: Session = Depends(get_db), _admin
         template.body = suggestion.suggested_body
         template.last_updated = now
     else:
-        account = db.query(models.EmailAccount).order_by(models.EmailAccount.id).first()
+        inbox_email = suggestion.account_email
+        if not inbox_email and suggestion.source_email_id:
+            source = (
+                db.query(models.Email)
+                .filter(models.Email.id == suggestion.source_email_id)
+                .first()
+            )
+            inbox_email = source.account_email if source else None
+        account = None
+        if inbox_email:
+            account = (
+                db.query(models.EmailAccount)
+                .filter(models.EmailAccount.email == inbox_email)
+                .first()
+            )
+        if account is None:
+            account = db.query(models.EmailAccount).order_by(models.EmailAccount.id).first()
         if account is None:
             raise HTTPException(status_code=400, detail="No inbox configured for new template")
+        category = "General Enquiries"
+        if suggestion.intent == "Membership":
+            category = "Membership"
+        elif suggestion.intent == "Payments":
+            category = "Payments"
+        elif suggestion.intent == "Events":
+            category = "Events"
         template = models.EmailTemplate(
             id=pipeline.next_id(db, models.EmailTemplate, "tmpl"),
             account_email=account.email,
             name=suggestion.suggested_name,
-            category="General Enquiries",
+            category=category,
             intent=suggestion.intent,
             status="Active",
             subject=suggestion.suggested_subject,

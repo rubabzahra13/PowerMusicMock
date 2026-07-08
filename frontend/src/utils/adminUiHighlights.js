@@ -14,9 +14,9 @@ const MANAGER_PENDING_UNSEEN_KEY = 'pm_manager_pending_unseen_request_ids';
 const MANAGER_KNOWN_PENDING_KEY = 'pm_manager_known_pending_request_ids';
 const MANAGER_PENDING_BOOTSTRAPPED_KEY = 'pm_manager_pending_bootstrapped';
 
-/** LinkedIn-style unseen row highlight (admin + manager). */
+/** LinkedIn-style unseen row highlight (admin + manager) — background only, no left bar. */
 export const ADMIN_NEW_ROW_HIGHLIGHT_CLASS =
-  'bg-[var(--color-surface-highlight)] hover:bg-[var(--color-surface-highlight-strong)] shadow-[inset_3px_0_0_0_var(--color-brand-primary)]';
+  'bg-[var(--color-surface-highlight)] hover:bg-[var(--color-surface-highlight-strong)]';
 
 const SCOPES = {
   adminNewRequests: {

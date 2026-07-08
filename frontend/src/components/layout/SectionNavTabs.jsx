@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 export const CUSTOMER_SERVICE_TABS = [
   { to: '/email-responses', label: 'Email Responses' },
   { to: '/templates', label: 'Templates' },
+  { to: '/ignore-list', label: 'Ignore List' },
   { to: '/email-accounts', label: 'Settings' }
 ];
 

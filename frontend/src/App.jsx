@@ -10,6 +10,7 @@ import Directory from './pages/Directory';
 import TemplateManagement from './pages/TemplateLibrary';
 import EmailAccounts from './pages/EmailAccounts';
 import EmailQueue from './pages/EmailQueue';
+import IgnoreList from './pages/IgnoreList';
 import AdminLogin from './pages/AdminLogin';
 import Signup from './pages/Signup';
 import AuthCallback from './pages/AuthCallback';
@@ -81,6 +82,14 @@ export default function App() {
               element={
                 <AppLayout>
                   <EmailAccounts />
+                </AppLayout>
+              }
+            />
+            <Route
+              path="/ignore-list"
+              element={
+                <AppLayout>
+                  <IgnoreList />
                 </AppLayout>
               }
             />

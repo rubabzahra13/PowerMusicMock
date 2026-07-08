@@ -25,6 +25,49 @@ export function parseRecipientList(text) {
   return out;
 }
 
+/** Primary To recipient for a reply / reply-all (mirrors backend send_reply). */
+export function getReplyAllPrimaryTo(email) {
+  if (!email) return '';
+  if (email.isForward && email.originalFromEmail) {
+    return email.originalFromEmail.trim();
+  }
+  return (email.fromEmail || '').trim();
+}
+
+/**
+ * Everyone who gets a reply-all in Cc — original To/Cc minus Andrea's inbox
+ * and the primary recipient. Mirrors gmail.send_reply_all.
+ */
+export function buildReplyAllCcList(email) {
+  if (!email) return [];
+  const selfEmail = (email.inbox || '').toLowerCase();
+  const primaryLower = getReplyAllPrimaryTo(email).toLowerCase();
+  const seen = new Set();
+  const out = [];
+
+  for (const addr of [...(email.toEmails || []), ...(email.ccEmails || [])]) {
+    if (!addr) continue;
+    const trimmed = addr.trim();
+    const low = trimmed.toLowerCase();
+    if (low === selfEmail || low === primaryLower) continue;
+    if (seen.has(low)) continue;
+    seen.add(low);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+export function formatReplyAllCc(email) {
+  return buildReplyAllCcList(email).join(', ');
+}
+
+export function seedReplyAllRecipients(email) {
+  return {
+    to: getReplyAllPrimaryTo(email),
+    cc: formatReplyAllCc(email),
+  };
+}
+
 /** Build address book entries { email, name } from the loaded email set. */
 export function buildAddressBook(emails, { excludeInboxes = [] } = {}) {
   const excluded = new Set(excludeInboxes.map((e) => (e || '').toLowerCase()));

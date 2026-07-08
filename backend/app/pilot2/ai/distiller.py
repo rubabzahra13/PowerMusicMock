@@ -50,13 +50,17 @@ tone, structure, and content. Requirements:
 - Only include rules supported by the edits; ignore one-off idiosyncrasies.
 
 Also: if several edits change the SAME template in the same way, that lesson
-belongs in the template itself, not in a rule. Propose a template revision
-instead (full corrected body, keeping {{{{placeholders}}}} intact).
+belongs in the template itself, not in a rule. Propose a template REVISION
+instead (full corrected body, keeping {{{{placeholders}}}} intact). Only
+propose revisions for template_ids that appear in the edits — never propose
+brand-new templates here (those are created when Andrea sends a reply without
+a matching template).
 
 Return ONLY a JSON object:
 - rules: array of strings
-- template_suggestions: array of objects with keys template_id, name,
-  subject, body, rationale (empty array if none)"""
+- template_suggestions: array of revision objects with keys template_id, name,
+  subject, body, rationale (empty array if none). Every template_id MUST
+  refer to an existing template from the edits."""
 
 
 def run_distillation(db: Session) -> DistillResult:
@@ -171,6 +175,7 @@ def run_distillation(db: Session) -> DistillResult:
             db.add(models.TemplateSuggestion(
                 kind="revision",
                 template_id=template_id,
+                account_email=template.account_email,
                 intent=intent,
                 suggested_name=suggestion.get("name") or template.name,
                 suggested_subject=suggestion.get("subject") or template.subject,

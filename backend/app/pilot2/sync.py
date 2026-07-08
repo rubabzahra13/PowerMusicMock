@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.database import SessionLocal
 from app.automated_person_intake import intake_puregym_roster_message, is_puregym_roster_notification
-from app.pilot2 import config, gmail, gmail_labels, pipeline
+from app.pilot2 import config, gmail, gmail_labels, ignore_list, pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,15 @@ def import_message(
         return None
 
     if _should_skip_import(account, message):
+        return None
+
+    rules = ignore_list.load_rules_for_inbox(db, account.email)
+    if ignore_list.is_message_ignored(
+        message.from_email,
+        account.email,
+        rules,
+        original_from_email=message.original_from_email,
+    ):
         return None
 
     flags = gmail_labels.derive_label_flags(

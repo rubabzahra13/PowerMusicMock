@@ -708,6 +708,7 @@ def _send_and_record(
     *,
     to_emails: Sequence[str],
     cc_emails: Sequence[str],
+    bcc_emails: Sequence[str] = (),
     subject: str,
     body: str,
     in_reply_to: Optional[str],
@@ -722,6 +723,7 @@ def _send_and_record(
     message_id_header = _generate_message_id(account.email)
     to_line = _addresses_string(to_emails)
     cc_line = _addresses_string(cc_emails)
+    bcc_line = _addresses_string(bcc_emails)
 
     if not is_live():
         logger.info("[mock gmail] send from %s to %s (thread=%s)",
@@ -742,6 +744,8 @@ def _send_and_record(
     message["To"] = to_line
     if cc_line:
         message["Cc"] = cc_line
+    if bcc_line:
+        message["Bcc"] = bcc_line
     message["From"] = account.email
     message["Subject"] = subject
     message["Message-Id"] = message_id_header
@@ -795,35 +799,38 @@ def send_reply_all(
     email_row: models.Email,
     body: str,
     *,
-    extra_cc: Iterable[str] = (),
+    to_emails: Iterable[str] = (),
+    cc_emails: Iterable[str] = (),
 ) -> SendResult:
-    """Reply to every participant in the original thread except Andrea herself.
-
-    Recipient rules mirror Gmail: primary To is the inbound sender (or the
-    original sender when this is a forwarded-in message); Cc is the union of
-    the inbound To + Cc minus (Andrea's own address) and minus the primary
-    recipient — plus any extra addresses the caller passed in.
-    """
-    if email_row.is_forward and email_row.original_from_email:
-        primary_to = email_row.original_from_email
-    else:
-        primary_to = email_row.from_email
+    """Reply-all with explicit To/Cc from the composer (Gmail parity)."""
     self_email = (account.email or "").lower()
-    primary_lower = (primary_to or "").lower()
 
+    if email_row.is_forward and email_row.original_from_email:
+        default_to = email_row.original_from_email
+    else:
+        default_to = email_row.from_email
+
+    to = [addr.strip() for addr in to_emails if addr and addr.strip()]
+    if not to:
+        to = [default_to]
+
+    to_lower = {addr.lower() for addr in to}
+    cc: list[str] = []
     seen: dict[str, None] = {}
-    for addr in list(email_row.to_emails or []) + list(email_row.cc_emails or []) + list(extra_cc):
+    for addr in cc_emails:
         if not addr:
             continue
         low = addr.strip().lower()
-        if low in {self_email, primary_lower}:
+        if low == self_email or low in to_lower:
             continue
-        seen.setdefault(low, None)
-    cc = list(seen.keys())
+        if low in seen:
+            continue
+        seen[low] = None
+        cc.append(addr.strip())
 
     return _send_and_record(
         account,
-        to_emails=[primary_to],
+        to_emails=to,
         cc_emails=cc,
         subject=_reply_subject(email_row.subject),
         body=body,
@@ -892,6 +899,7 @@ def send_new_message(
     subject: str,
     body: str,
     cc_emails: Sequence[str] = (),
+    bcc_emails: Sequence[str] = (),
 ) -> SendResult:
     """Send a brand-new message that starts its own thread.
 
@@ -906,6 +914,7 @@ def send_new_message(
         account,
         to_emails=list(to_emails),
         cc_emails=list(cc_emails),
+        bcc_emails=list(bcc_emails),
         subject=subject,
         body=body,
         in_reply_to=None,
