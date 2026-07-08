@@ -297,8 +297,28 @@ def resume_interrupted_backfills() -> None:
 
 def sync_account_history(db: Session, account: models.EmailAccount) -> int:
     """Apply Gmail History API deltas for one connected inbox."""
-    if not gmail.is_live() or account.backfill_status == "running":
+    if not gmail.is_live():
         return 0
+
+    # A backfill in progress defers history sync to avoid double-importing the
+    # same messages. But on serverless the backfill runs in a background thread
+    # Vercel may freeze/kill before it marks itself "done", leaving the status
+    # stuck at "running" forever — which would permanently disable push sync for
+    # that inbox. So only defer when a backfill is genuinely active *in this
+    # process* (_backfill_running); a persisted "running" with no live thread is
+    # stale, so we clear it and proceed. Import is idempotent, so this is safe.
+    if account.backfill_status == "running":
+        with _backfill_lock:
+            actively_running = account.id in _backfill_running
+        if actively_running:
+            return 0
+        logger.warning(
+            "Clearing stale backfill 'running' for %s (no live backfill thread); "
+            "resuming history sync.",
+            account.email,
+        )
+        account.backfill_status = "done"
+        db.commit()
 
     if not account.gmail_history_id:
         profile = gmail.get_profile(account)
