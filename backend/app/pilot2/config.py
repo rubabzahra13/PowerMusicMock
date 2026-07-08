@@ -17,8 +17,11 @@ CLASSIFIER_MODEL = os.getenv("PILOT2_CLASSIFIER_MODEL", "gemini-2.5-flash-lite")
 COMPOSER_MODEL = os.getenv("PILOT2_COMPOSER_MODEL", "gemini-2.5-flash")
 # Distiller runs once a day on a batch, so a stronger model is affordable.
 DISTILLER_MODEL = os.getenv("PILOT2_DISTILLER_MODEL", "gemini-2.5-flash")
-# Tried when the primary model is overloaded or rate-limited.
-BACKUP_MODEL = os.getenv("PILOT2_BACKUP_MODEL", "gemini-2.5-flash-lite")
+# Tried when the primary model is overloaded or rate-limited. Must be a
+# DIFFERENT model from the primaries: quotas are per-model, so falling back
+# to the same model just re-hits the same 429 (production logs showed
+# flash-lite rate-limited while flash succeeded in the same second).
+BACKUP_MODEL = os.getenv("PILOT2_BACKUP_MODEL", "gemini-2.5-flash")
 
 # Learning loop bounds — these guarantee a flat context size forever.
 MAX_RULES_PER_INTENT = int(os.getenv("PILOT2_MAX_RULES_PER_INTENT", "10"))
