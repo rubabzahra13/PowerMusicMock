@@ -44,6 +44,20 @@ def _ai_job():
         db.close()
 
 
+def _watch_renew_job():
+    db = SessionLocal()
+    try:
+        from app.pilot2 import sync
+
+        renewed = sync.renew_expiring_watches(db)
+        if renewed:
+            logger.info("Re-armed Gmail push for %d inbox(es)", renewed)
+    except Exception:
+        logger.exception("Gmail watch renew job failed")
+    finally:
+        db.close()
+
+
 def _distill_job():
     db = SessionLocal()
     try:
@@ -70,6 +84,11 @@ def start() -> None:
             "interval",
             seconds=config.AI_JOB_INTERVAL_SECONDS,
         )
+        # Keep Gmail push alive: watches expire after 7 days, so re-arm daily.
+        if config.gmail_push_enabled():
+            _scheduler.add_job(
+                _watch_renew_job, "cron", hour=config.WATCH_RENEW_HOUR_UTC, minute=0
+            )
     _scheduler.add_job(_distill_job, "cron", hour=config.DISTILL_HOUR_UTC, minute=0)
     _scheduler.start()
 

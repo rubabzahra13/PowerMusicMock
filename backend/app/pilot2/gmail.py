@@ -14,6 +14,8 @@ installed.
 import base64
 import logging
 import os
+import re
+import socket
 
 # Google may return MORE scopes than requested (it merges previously granted
 # ones). oauthlib treats that as an error by default; relax it — extra scopes
@@ -22,8 +24,8 @@ os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.message import EmailMessage
-from email.utils import parseaddr, parsedate_to_datetime
-from typing import List, Optional, Tuple
+from email.utils import getaddresses, make_msgid, parseaddr, parsedate_to_datetime
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 from app import models
 from app.pilot2 import config
@@ -51,6 +53,23 @@ NO_PROMOTIONS = "-category:promotions -category:social -category:forums"
 
 
 @dataclass
+class InboundAttachment:
+    """Metadata for one attachment part parsed off a Gmail message.
+
+    `gmail_attachment_id` fetches the bytes on demand (live). `content_base64`
+    is only set when the bytes were already inline in the payload (small parts
+    Gmail returns directly, and mock-mode test fixtures)."""
+
+    filename: str
+    mime_type: str
+    size_bytes: int = 0
+    gmail_attachment_id: Optional[str] = None
+    content_base64: Optional[str] = None
+    is_inline: bool = False
+    content_id: Optional[str] = None
+
+
+@dataclass
 class InboundMessage:
     gmail_message_id: str
     gmail_thread_id: str
@@ -60,9 +79,33 @@ class InboundMessage:
     body: str
     received_at: datetime
     label_ids: List[str] = field(default_factory=list)
+    attachments: List[InboundAttachment] = field(default_factory=list)
     # True when bulk/automated-mail headers are present (List-Unsubscribe,
     # Precedence: bulk/list, Auto-Submitted). Real customers never set these.
     is_automated: bool = False
+
+    # Envelope recipients (unique email addresses only; display names dropped).
+    to_emails: List[str] = field(default_factory=list)
+    cc_emails: List[str] = field(default_factory=list)
+
+    # RFC 5322 threading headers as they appeared on the wire (with `<>`).
+    message_id_header: Optional[str] = None
+    in_reply_to_header: Optional[str] = None
+    references_header: Optional[str] = None  # space-separated list
+
+    # HTML body (only when Gmail supplied a text/html part) + Gmail snippet.
+    html_body: Optional[str] = None
+    snippet: Optional[str] = None
+
+    # Forward pivot. When a colleague forwards a customer email to Andrea, the
+    # top-level From is the colleague, but she wants to reply to the original
+    # customer. We surface the pivot on the message so the composer + UI can
+    # address the right person automatically.
+    is_forward: bool = False
+    forwarded_by_name: Optional[str] = None
+    forwarded_by_email: Optional[str] = None
+    original_from_name: Optional[str] = None
+    original_from_email: Optional[str] = None
 
 
 def is_no_reply_address(address: str) -> bool:
@@ -177,14 +220,122 @@ def _service_for_account(account: models.EmailAccount):
 # ── Reading ──────────────────────────────────────────────────
 
 
-def _decode_part(payload) -> str:
-    if payload.get("mimeType") == "text/plain" and payload.get("body", {}).get("data"):
+def _decode_body_part(payload, mime_type: str) -> str:
+    """Return the first payload part whose mimeType matches, decoded to text."""
+    if payload.get("mimeType") == mime_type and payload.get("body", {}).get("data"):
         return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", "replace")
     for part in payload.get("parts", []) or []:
-        text = _decode_part(part)
+        text = _decode_body_part(part, mime_type)
         if text:
             return text
     return ""
+
+
+def _decode_part(payload) -> str:
+    """Plain-text body (legacy helper). Kept for backward compat in callers."""
+    return _decode_body_part(payload, "text/plain")
+
+
+def _strip_angles(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return value.strip().strip("<>").strip() or None
+
+
+def _collect_attachments(payload, out: List["InboundAttachment"]) -> None:
+    """Walk the MIME tree collecting attachment parts.
+
+    A part is an attachment when it carries a filename, or when it's an inline
+    part (Content-Id) that isn't the message body itself. The body text/plain
+    and text/html parts (which have no filename) are skipped.
+    """
+    filename = payload.get("filename") or ""
+    headers = {h["name"].lower(): h["value"] for h in payload.get("headers", []) or []}
+    content_id = _strip_angles(headers.get("content-id"))
+    disposition = (headers.get("content-disposition") or "").lower()
+    body = payload.get("body", {}) or {}
+
+    is_inline = "inline" in disposition or bool(content_id)
+    looks_like_attachment = bool(filename) or (is_inline and payload.get("mimeType", "").split("/")[0] in {"image", "application"})
+
+    if looks_like_attachment and (body.get("attachmentId") or body.get("data")):
+        out.append(
+            InboundAttachment(
+                filename=filename or (content_id or "attachment"),
+                mime_type=payload.get("mimeType") or "application/octet-stream",
+                size_bytes=int(body.get("size") or 0),
+                gmail_attachment_id=body.get("attachmentId"),
+                content_base64=body.get("data"),
+                is_inline=is_inline and not (disposition.startswith("attachment")),
+                content_id=content_id,
+            )
+        )
+        return
+
+    for part in payload.get("parts", []) or []:
+        _collect_attachments(part, out)
+
+
+def _unique_emails(header_value: Optional[str]) -> List[str]:
+    """Parse an address-list header into unique, lowercased email addresses."""
+    if not header_value:
+        return []
+    seen: dict[str, None] = {}
+    for _, addr in getaddresses([header_value]):
+        if not addr:
+            continue
+        lowered = addr.strip().lower()
+        if lowered:
+            seen.setdefault(lowered, None)
+    return list(seen.keys())
+
+
+# Subject-line markers used by every major mail client for forwards. We check
+# the localised prefixes (`Fwd:`, `FW:`, `TR:` fr, `WG:` de, `RV:` es, `転送:` ja)
+# because they're stable across clients — body-quote markers are the fallback.
+_FWD_SUBJECT_RE = re.compile(
+    r"^\s*(fwd?|fw|tr|wg|rv|転送)\s*:\s*",
+    re.IGNORECASE,
+)
+_FWD_BODY_MARKER_RE = re.compile(
+    r"^-{5,}\s*(forwarded message|original message)\s*-{5,}\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+# Header line that follows a Gmail-style forward marker: "From: name <addr>".
+_FWD_FROM_LINE_RE = re.compile(
+    r"^\s*From:\s*(.+)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _detect_forward(
+    subject: str,
+    body: str,
+    from_name: str,
+    from_email: str,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """Best-effort detection of a client-forward wrapping a prior sender.
+
+    Returns (is_forward, original_from_name, original_from_email). A subject
+    prefix alone is enough to flag the message; extracting the original sender
+    requires the Gmail-style body marker + a following "From:" line.
+    """
+    subject_hit = bool(_FWD_SUBJECT_RE.match(subject or ""))
+    marker = _FWD_BODY_MARKER_RE.search(body or "") if body else None
+    if not subject_hit and marker is None:
+        return False, None, None
+
+    original_name, original_email = None, None
+    if marker is not None:
+        tail = body[marker.end() :]
+        from_line = _FWD_FROM_LINE_RE.search(tail)
+        if from_line:
+            name, addr = parseaddr(from_line.group(1))
+            if addr and addr.lower() != (from_email or "").lower():
+                original_name = name or None
+                original_email = addr
+
+    return True, original_name, original_email
 
 
 def _parse_full_message(full: dict) -> InboundMessage:
@@ -194,16 +345,41 @@ def _parse_full_message(full: dict) -> InboundMessage:
         received_at = parsedate_to_datetime(headers.get("date", ""))
     except (TypeError, ValueError):
         received_at = datetime.now(timezone.utc)
+
+    body_plain = _decode_body_part(full["payload"], "text/plain")
+    body_html = _decode_body_part(full["payload"], "text/html")
+
+    attachments: List[InboundAttachment] = []
+    _collect_attachments(full["payload"], attachments)
+
+    subject = headers.get("subject", "(no subject)")
+    is_forward, original_from_name, original_from_email = _detect_forward(
+        subject, body_plain, from_name, from_email
+    )
+
     return InboundMessage(
         gmail_message_id=full["id"],
         gmail_thread_id=full.get("threadId", full["id"]),
         from_name=from_name or from_email or "Unknown Sender",
         from_email=from_email or "unknown@unknown",
-        subject=headers.get("subject", "(no subject)"),
-        body=_decode_part(full["payload"]),
+        subject=subject,
+        body=body_plain,
         received_at=received_at,
         label_ids=list(full.get("labelIds") or []),
+        attachments=attachments,
         is_automated=_is_automated_headers(headers),
+        to_emails=_unique_emails(headers.get("to")),
+        cc_emails=_unique_emails(headers.get("cc")),
+        message_id_header=headers.get("message-id"),
+        in_reply_to_header=headers.get("in-reply-to"),
+        references_header=headers.get("references"),
+        html_body=body_html or None,
+        snippet=full.get("snippet"),
+        is_forward=is_forward,
+        forwarded_by_name=(from_name or None) if is_forward else None,
+        forwarded_by_email=(from_email or None) if is_forward else None,
+        original_from_name=original_from_name,
+        original_from_email=original_from_email,
     )
 
 
@@ -316,6 +492,42 @@ def list_history(
     )
 
 
+def start_watch(account: models.EmailAccount) -> dict:
+    """Arm Gmail push notifications for this inbox to the configured Pub/Sub
+    topic. Returns Gmail's response ({'historyId', 'expiration'} in ms) or {}
+    when push is not configured / mock mode.
+
+    Scoped to the INBOX label so we're only pinged for mail Andrea would see,
+    not every label churn across the mailbox.
+    """
+    if not is_live() or not config.GMAIL_PUBSUB_TOPIC:
+        return {}
+    service = _service_for_account(account)
+    return (
+        service.users()
+        .watch(
+            userId="me",
+            body={
+                "topicName": config.GMAIL_PUBSUB_TOPIC,
+                "labelIds": [LABEL_INBOX],
+                "labelFilterBehavior": "INCLUDE",
+            },
+        )
+        .execute()
+    )
+
+
+def stop_watch(account: models.EmailAccount) -> None:
+    """Disarm Gmail push for this inbox (best-effort; used on disconnect)."""
+    if not is_live():
+        return
+    service = _service_for_account(account)
+    try:
+        service.users().stop(userId="me").execute()
+    except Exception:
+        logger.exception("Gmail watch stop failed for %s", account.email)
+
+
 def thread_has_sent(account: models.EmailAccount, thread_id: str) -> bool:
     """True when this Gmail thread already contains a message sent by the account."""
     if not is_live() or not thread_id:
@@ -419,24 +631,282 @@ def delete_message_forever(account: models.EmailAccount, message_id: str) -> Non
 # ── Sending ──────────────────────────────────────────────────
 
 
-def send_reply(account: models.EmailAccount, email_row: models.Email, body: str) -> Optional[str]:
-    """Send the reply inside the original Gmail thread. Returns the Gmail
-    message id, or None in mock mode (send is recorded locally only)."""
+@dataclass
+class SendResult:
+    """Everything the send path returns to callers so they can persist an
+    outbound row that Gmail's history sync will later dedupe against."""
+
+    gmail_message_id: Optional[str]
+    gmail_thread_id: Optional[str]
+    message_id_header: str
+    in_reply_to_header: Optional[str]
+    references_header: Optional[str]
+    to_emails: List[str]
+    cc_emails: List[str]
+    subject: str
+    body: str
+
+
+def _domain_for_message_id(account_email: str) -> str:
+    """Domain used for our locally-generated Message-Id when we cannot read
+    Gmail's post-send one back. Prefer the account's own domain."""
+    if "@" in (account_email or ""):
+        return account_email.split("@", 1)[1] or socket.getfqdn() or "local"
+    return socket.getfqdn() or "local"
+
+
+def _reply_subject(subject: Optional[str]) -> str:
+    subject = subject or ""
+    return subject if subject.lower().startswith("re:") else f"Re: {subject}"
+
+
+def _forward_subject(subject: Optional[str]) -> str:
+    subject = subject or ""
+    return subject if subject.lower().startswith(("fwd:", "fw:")) else f"Fwd: {subject}"
+
+
+def _build_references_header(email_row: models.Email) -> Optional[str]:
+    """Chain the inbound message's own Message-Id onto its References so the
+    outbound reply threads correctly in RFC-strict clients (Outlook, Apple Mail).
+    """
+    existing = (email_row.references_header or "").strip()
+    parent = (email_row.message_id_header or "").strip()
+    parts: list[str] = []
+    if existing:
+        parts.extend(existing.split())
+    if parent and parent not in parts:
+        parts.append(parent)
+    return " ".join(parts) if parts else None
+
+
+def _addresses_string(addresses: Sequence[str]) -> str:
+    return ", ".join(addr for addr in addresses if addr)
+
+
+def _apply_threading_headers(
+    message: EmailMessage,
+    *,
+    in_reply_to: Optional[str],
+    references: Optional[str],
+) -> None:
+    if in_reply_to:
+        message["In-Reply-To"] = in_reply_to
+    if references:
+        message["References"] = references
+
+
+def _generate_message_id(account_email: str) -> str:
+    """RFC 5322 Message-Id. Uses stdlib helper; deterministic enough per send
+    (make_msgid uses time + os.getpid + a random token)."""
+    return make_msgid(domain=_domain_for_message_id(account_email))
+
+
+def _send_and_record(
+    account: models.EmailAccount,
+    *,
+    to_emails: Sequence[str],
+    cc_emails: Sequence[str],
+    subject: str,
+    body: str,
+    in_reply_to: Optional[str],
+    references: Optional[str],
+    gmail_thread_id: Optional[str],
+) -> SendResult:
+    """Common send path shared by reply / reply-all / forward.
+
+    In mock mode nothing hits Gmail; we still return a filled SendResult so
+    the local outbound row can be persisted with realistic threading headers.
+    """
+    message_id_header = _generate_message_id(account.email)
+    to_line = _addresses_string(to_emails)
+    cc_line = _addresses_string(cc_emails)
+
     if not is_live():
-        logger.info("[mock gmail] send from %s to %s", account.email, email_row.from_email)
-        return None
+        logger.info("[mock gmail] send from %s to %s (thread=%s)",
+                    account.email, to_line or "?", gmail_thread_id)
+        return SendResult(
+            gmail_message_id=None,
+            gmail_thread_id=gmail_thread_id,
+            message_id_header=message_id_header,
+            in_reply_to_header=in_reply_to,
+            references_header=references,
+            to_emails=list(to_emails),
+            cc_emails=list(cc_emails),
+            subject=subject,
+            body=body,
+        )
 
     message = EmailMessage()
-    message["To"] = f"{email_row.from_name} <{email_row.from_email}>"
+    message["To"] = to_line
+    if cc_line:
+        message["Cc"] = cc_line
     message["From"] = account.email
-    subject = email_row.subject or ""
-    message["Subject"] = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+    message["Subject"] = subject
+    message["Message-Id"] = message_id_header
+    _apply_threading_headers(message, in_reply_to=in_reply_to, references=references)
     message.set_content(body)
 
     payload = {"raw": base64.urlsafe_b64encode(message.as_bytes()).decode()}
-    if email_row.gmail_thread_id:
-        payload["threadId"] = email_row.gmail_thread_id
+    if gmail_thread_id:
+        payload["threadId"] = gmail_thread_id
 
     service = _service_for_account(account)
     sent = service.users().messages().send(userId="me", body=payload).execute()
-    return sent.get("id")
+
+    return SendResult(
+        gmail_message_id=sent.get("id"),
+        gmail_thread_id=sent.get("threadId") or gmail_thread_id,
+        message_id_header=message_id_header,
+        in_reply_to_header=in_reply_to,
+        references_header=references,
+        to_emails=list(to_emails),
+        cc_emails=list(cc_emails),
+        subject=subject,
+        body=body,
+    )
+
+
+def send_reply(account: models.EmailAccount, email_row: models.Email, body: str) -> SendResult:
+    """Send the reply inside the original Gmail thread, with RFC-correct
+    Message-Id / In-Reply-To / References so it threads outside Gmail too."""
+    # When Andrea is replying to a forwarded email the intended recipient is
+    # the *original* customer, not the colleague who forwarded it in.
+    if email_row.is_forward and email_row.original_from_email:
+        primary_to = email_row.original_from_email
+    else:
+        primary_to = email_row.from_email
+
+    return _send_and_record(
+        account,
+        to_emails=[primary_to],
+        cc_emails=[],
+        subject=_reply_subject(email_row.subject),
+        body=body,
+        in_reply_to=email_row.message_id_header,
+        references=_build_references_header(email_row),
+        gmail_thread_id=email_row.gmail_thread_id,
+    )
+
+
+def send_reply_all(
+    account: models.EmailAccount,
+    email_row: models.Email,
+    body: str,
+    *,
+    extra_cc: Iterable[str] = (),
+) -> SendResult:
+    """Reply to every participant in the original thread except Andrea herself.
+
+    Recipient rules mirror Gmail: primary To is the inbound sender (or the
+    original sender when this is a forwarded-in message); Cc is the union of
+    the inbound To + Cc minus (Andrea's own address) and minus the primary
+    recipient — plus any extra addresses the caller passed in.
+    """
+    if email_row.is_forward and email_row.original_from_email:
+        primary_to = email_row.original_from_email
+    else:
+        primary_to = email_row.from_email
+    self_email = (account.email or "").lower()
+    primary_lower = (primary_to or "").lower()
+
+    seen: dict[str, None] = {}
+    for addr in list(email_row.to_emails or []) + list(email_row.cc_emails or []) + list(extra_cc):
+        if not addr:
+            continue
+        low = addr.strip().lower()
+        if low in {self_email, primary_lower}:
+            continue
+        seen.setdefault(low, None)
+    cc = list(seen.keys())
+
+    return _send_and_record(
+        account,
+        to_emails=[primary_to],
+        cc_emails=cc,
+        subject=_reply_subject(email_row.subject),
+        body=body,
+        in_reply_to=email_row.message_id_header,
+        references=_build_references_header(email_row),
+        gmail_thread_id=email_row.gmail_thread_id,
+    )
+
+
+def send_forward(
+    account: models.EmailAccount,
+    email_row: models.Email,
+    body: str,
+    *,
+    to_emails: Sequence[str],
+    cc_emails: Sequence[str] = (),
+) -> SendResult:
+    """Forward the message to a new set of recipients on the same Gmail thread.
+
+    Forwards on the SAME thread is a Gmail-specific convenience: RFC-wise a
+    forward is a new message referencing the original, and we preserve that
+    via In-Reply-To / References so cross-client threading still works.
+    """
+    if not to_emails:
+        raise ValueError("send_forward requires at least one recipient")
+
+    return _send_and_record(
+        account,
+        to_emails=list(to_emails),
+        cc_emails=list(cc_emails),
+        subject=_forward_subject(email_row.subject),
+        body=body,
+        in_reply_to=email_row.message_id_header,
+        references=_build_references_header(email_row),
+        gmail_thread_id=email_row.gmail_thread_id,
+    )
+
+
+def fetch_attachment(
+    account: models.EmailAccount,
+    gmail_message_id: str,
+    attachment_id: str,
+) -> bytes:
+    """Fetch one attachment's raw bytes from Gmail on demand (live only).
+
+    Gmail delivers attachment bodies behind a separate handle rather than
+    inline, so downloads are fetched lazily here at click time.
+    """
+    if not is_live():
+        raise RuntimeError("Attachment fetch requires a live Gmail connection.")
+    service = _service_for_account(account)
+    part = (
+        service.users()
+        .messages()
+        .attachments()
+        .get(userId="me", messageId=gmail_message_id, id=attachment_id)
+        .execute()
+    )
+    return base64.urlsafe_b64decode(part["data"])
+
+
+def send_new_message(
+    account: models.EmailAccount,
+    *,
+    to_emails: Sequence[str],
+    subject: str,
+    body: str,
+    cc_emails: Sequence[str] = (),
+) -> SendResult:
+    """Send a brand-new message that starts its own thread.
+
+    Unlike reply / reply-all / forward there is no parent message, so we set
+    no In-Reply-To / References and pass no threadId — Gmail assigns a fresh
+    thread. This backs Andrea's Gmail-style "Compose" button.
+    """
+    if not to_emails:
+        raise ValueError("send_new_message requires at least one recipient")
+
+    return _send_and_record(
+        account,
+        to_emails=list(to_emails),
+        cc_emails=list(cc_emails),
+        subject=subject,
+        body=body,
+        in_reply_to=None,
+        references=None,
+        gmail_thread_id=None,
+    )

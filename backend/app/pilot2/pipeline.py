@@ -38,6 +38,46 @@ def log(db: Session, type_: str, description: str, email_id: Optional[str] = Non
     ))
 
 
+def persist_attachments(db: Session, email_id: str, attachments) -> None:
+    """Store attachment metadata rows for an email.
+
+    Accepts gmail.InboundAttachment instances (from live/import parsing) or
+    plain dicts (manual ingest for testing). Bytes are only stored inline when
+    already present; live Gmail bytes are fetched on demand at download time.
+    """
+    if not attachments:
+        return
+    for index, att in enumerate(attachments):
+        if isinstance(att, dict):
+            filename = att.get("filename")
+            mime_type = att.get("mimeType") or att.get("mime_type")
+            size_bytes = att.get("sizeBytes") or att.get("size_bytes") or 0
+            gmail_attachment_id = att.get("gmailAttachmentId") or att.get("gmail_attachment_id")
+            content_base64 = att.get("contentBase64") or att.get("content_base64")
+            is_inline = bool(att.get("isInline") or att.get("is_inline") or False)
+            content_id = att.get("contentId") or att.get("content_id")
+        else:
+            filename = att.filename
+            mime_type = att.mime_type
+            size_bytes = att.size_bytes
+            gmail_attachment_id = att.gmail_attachment_id
+            content_base64 = att.content_base64
+            is_inline = att.is_inline
+            content_id = att.content_id
+
+        db.add(models.EmailAttachment(
+            id=f"{email_id}-att-{index + 1:02d}",
+            email_id=email_id,
+            filename=filename or "attachment",
+            mime_type=mime_type or "application/octet-stream",
+            size_bytes=int(size_bytes or 0),
+            gmail_attachment_id=gmail_attachment_id,
+            content_base64=content_base64,
+            is_inline=is_inline,
+            content_id=content_id,
+        ))
+
+
 def process_incoming(
     db: Session,
     *,
@@ -50,6 +90,19 @@ def process_incoming(
     gmail_message_id: Optional[str] = None,
     gmail_thread_id: Optional[str] = None,
     label_ids: Optional[list] = None,
+    to_emails: Optional[list] = None,
+    cc_emails: Optional[list] = None,
+    html_body: Optional[str] = None,
+    snippet: Optional[str] = None,
+    message_id_header: Optional[str] = None,
+    in_reply_to_header: Optional[str] = None,
+    references_header: Optional[str] = None,
+    is_forward: bool = False,
+    forwarded_by_name: Optional[str] = None,
+    forwarded_by_email: Optional[str] = None,
+    original_from_name: Optional[str] = None,
+    original_from_email: Optional[str] = None,
+    attachments: Optional[list] = None,
 ) -> models.Email:
     """Run one inbound email through the full pipeline and persist it.
 
@@ -119,9 +172,21 @@ def process_incoming(
         gmail_thread_id=gmail_thread_id,
         from_name=from_name,
         from_email=from_email,
+        to_emails=list(to_emails or []),
+        cc_emails=list(cc_emails or []),
         subject=subject,
         body=body,
+        html_body=html_body,
+        snippet=snippet,
         received_at=received_at or datetime.now(timezone.utc),
+        message_id_header=message_id_header,
+        in_reply_to_header=in_reply_to_header,
+        references_header=references_header,
+        is_forward=is_forward,
+        forwarded_by_name=forwarded_by_name,
+        forwarded_by_email=forwarded_by_email,
+        original_from_name=original_from_name,
+        original_from_email=original_from_email,
         draft_status="Processing",
     )
     if label_ids is not None:
@@ -135,6 +200,7 @@ def process_incoming(
         gmail_labels.apply_label_flags(email, flags)
     db.add(email)
     db.flush()
+    persist_attachments(db, email.id, attachments)
 
     return run_ai_for_email(db, email)
 
@@ -432,5 +498,11 @@ def poll_all_accounts(db: Session) -> int:
     except Exception:
         logger.exception("AI batch failed during poll")
         db.rollback()
+
+    if changes:
+        # Push the fresh state to any open dashboard immediately.
+        from app.pilot2 import realtime
+
+        realtime.workspace_changed("poll", changes)
 
     return changes

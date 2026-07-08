@@ -25,17 +25,26 @@ from app.pilot2.signature import build_signature
 
 _LEGACY_SIG_RE = re.compile(r"\n*Kind regards,?\s*\n\s*Power Music Team\s*$", re.IGNORECASE)
 _GRATITUDE_LINE_RE = re.compile(r"^\s*(thanks|thank you)\b", re.IGNORECASE)
+# Every 3-line "Andrea Petty / <inbox> / Power Music Inc." block the model may
+# have repeated inside the body. Matched globally, not just at the tail, so a
+# stored draft never carries duplicate signatures — the presentation layer owns
+# the single canonical closing.
+_EMBEDDED_SIG_BLOCK_RE = re.compile(
+    r"Andrea Petty[ \t]*\n[^\n]*\n[ \t]*Power Music(?:\s*Inc\.?)?[ \t]*",
+    re.IGNORECASE,
+)
 
 
 def _polish_draft_body(body: str, signature: str) -> str:
-    """Drop body thank-yous and legacy sign-offs; ensure the inbox signature closes the draft."""
+    """Strip greetings/sign-offs the model duplicated, then close with exactly one canonical signature."""
     text = body.replace("\r\n", "\n").strip()
-    text = _LEGACY_SIG_RE.sub("", text).strip()
+    text = _LEGACY_SIG_RE.sub("", text)
+    text = _EMBEDDED_SIG_BLOCK_RE.sub("", text)
     lines = [line for line in text.split("\n") if not _GRATITUDE_LINE_RE.match(line)]
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-    if signature not in text:
-        text = f"{text}\n\n{signature}" if text else signature
-    return text
+    if not text:
+        return signature
+    return f"{text}\n\n{signature}"
 
 
 @dataclass

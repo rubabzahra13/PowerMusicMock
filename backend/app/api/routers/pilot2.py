@@ -1,5 +1,9 @@
 """Pilot 2 · Inbound Email Management API."""
 
+import base64
+import binascii
+import json
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -15,6 +19,7 @@ from app.pilot2 import schemas
 from app.pilot2.ai.distiller import run_distillation
 
 router = APIRouter(prefix="/api/pilot2", tags=["pilot2"])
+logger = logging.getLogger(__name__)
 
 
 # ── Connected inboxes ────────────────────────────────────────
@@ -156,6 +161,12 @@ def oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
     pipeline.log(db, "inbox_connected", f"Inbox {account.email} connected via Google OAuth.")
     db.commit()
     sync.start_backfill(account.id)
+    # Arm Gmail push so new mail is delivered in ~1s (no-op unless a Pub/Sub
+    # topic is configured). Best-effort: connection must succeed regardless.
+    try:
+        sync.arm_watch(db, account)
+    except Exception:
+        logger.exception("Arming Gmail push failed for %s", account.email)
     return HTMLResponse(
         oauth_pages.oauth_success_page(email=account.email, title=account.title)
     )
@@ -174,10 +185,34 @@ def disconnect_inbox(inbox_id: str, db: Session = Depends(get_db), _admin=Depend
     account = db.query(models.EmailAccount).filter(models.EmailAccount.id == inbox_id).first()
     if account is None:
         raise HTTPException(status_code=404, detail="Inbox not found")
+    # Stop Gmail push before we drop the token (best-effort).
+    try:
+        gmail.stop_watch(account)
+    except Exception:
+        logger.exception("Stopping Gmail push failed for %s", account.email)
     account.status = "Disconnected"
     account.oauth_refresh_token = None
+    account.watch_expiration = None
     pipeline.log(db, "inbox_disconnected", f"Inbox {account.email} disconnected.")
     db.commit()
+    db.refresh(account)
+    return account
+
+
+@router.post("/inboxes/{inbox_id}/watch", response_model=schemas.InboxOut)
+def arm_inbox_watch(inbox_id: str, db: Session = Depends(get_db), _admin=Depends(require_admin)):
+    """Manually (re-)arm Gmail push for one inbox — ops/debugging helper."""
+    account = db.query(models.EmailAccount).filter(models.EmailAccount.id == inbox_id).first()
+    if account is None:
+        raise HTTPException(status_code=404, detail="Inbox not found")
+    if account.status != "Connected":
+        raise HTTPException(status_code=400, detail="Inbox is not connected.")
+    if not config.gmail_push_enabled():
+        raise HTTPException(
+            status_code=400,
+            detail="Gmail push is not configured (set PILOT2_GMAIL_MODE=live and PILOT2_GMAIL_PUBSUB_TOPIC).",
+        )
+    sync.arm_watch(db, account)
     db.refresh(account)
     return account
 
@@ -204,8 +239,13 @@ def delete_inbox(inbox_id: str, db: Session = Depends(get_db), _admin=Depends(re
         raise HTTPException(status_code=404, detail="Inbox not found")
     email = account.email
     if account.status == "Connected":
+        try:
+            gmail.stop_watch(account)
+        except Exception:
+            logger.exception("Stopping Gmail push failed for %s", account.email)
         account.status = "Disconnected"
         account.oauth_refresh_token = None
+        account.watch_expiration = None
     db.query(models.EmailTemplate).filter(
         models.EmailTemplate.account_email == email
     ).delete(synchronize_session=False)
@@ -239,6 +279,74 @@ def get_email(email_id: str, db: Session = Depends(get_db), _admin=Depends(requi
     return email
 
 
+def _decode_attachment_bytes(data: str) -> bytes:
+    """Decode base64 that may be either URL-safe (Gmail) or standard (ingest)."""
+    import base64
+
+    padded = data + "=" * (-len(data) % 4)
+    try:
+        return base64.urlsafe_b64decode(padded)
+    except Exception:
+        return base64.b64decode(padded)
+
+
+@router.get("/emails/{email_id}/attachments/{attachment_id}")
+def download_attachment(
+    email_id: str,
+    attachment_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    """Stream one attachment's bytes.
+
+    Bytes come from the stored inline payload when present (mock / small
+    inline parts), otherwise they're fetched from Gmail on demand (live).
+    """
+    from fastapi.responses import Response
+
+    attachment = (
+        db.query(models.EmailAttachment)
+        .filter(
+            models.EmailAttachment.id == attachment_id,
+            models.EmailAttachment.email_id == email_id,
+        )
+        .first()
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    content: Optional[bytes] = None
+    if attachment.content_base64:
+        content = _decode_attachment_bytes(attachment.content_base64)
+    elif attachment.gmail_attachment_id:
+        email = db.query(models.Email).filter(models.Email.id == email_id).first()
+        account = (
+            db.query(models.EmailAccount)
+            .filter(models.EmailAccount.email == email.account_email)
+            .first()
+            if email
+            else None
+        )
+        if account is None or not email or not email.gmail_message_id:
+            raise HTTPException(status_code=404, detail="Attachment source unavailable.")
+        try:
+            content = gmail.fetch_attachment(
+                account, email.gmail_message_id, attachment.gmail_attachment_id
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Could not fetch attachment: {exc}")
+
+    if content is None:
+        raise HTTPException(status_code=404, detail="Attachment has no downloadable content.")
+
+    safe_name = (attachment.filename or "attachment").replace('"', "")
+    return Response(
+        content=content,
+        media_type=attachment.mime_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
 @router.post("/emails/ingest", response_model=schemas.EmailOut)
 def ingest_email(payload: schemas.EmailIngestIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     """Feed one inbound email through the pipeline. Used for dev/testing in
@@ -260,6 +368,19 @@ def ingest_email(payload: schemas.EmailIngestIn, db: Session = Depends(get_db), 
         received_at=payload.receivedAt,
         gmail_message_id=payload.gmailMessageId,
         gmail_thread_id=payload.gmailThreadId,
+        to_emails=payload.toEmails,
+        cc_emails=payload.ccEmails,
+        html_body=payload.htmlBody,
+        snippet=payload.snippet,
+        message_id_header=payload.messageIdHeader,
+        in_reply_to_header=payload.inReplyToHeader,
+        references_header=payload.referencesHeader,
+        is_forward=payload.isForward,
+        forwarded_by_name=payload.forwardedByName,
+        forwarded_by_email=payload.forwardedByEmail,
+        original_from_name=payload.originalFromName,
+        original_from_email=payload.originalFromEmail,
+        attachments=[a.model_dump() for a in payload.attachments] if payload.attachments else None,
     )
 
 
@@ -378,7 +499,7 @@ def send_email(email_id: str, payload: schemas.SendIn, db: Session = Depends(get
         raise HTTPException(status_code=400, detail="Inbox is not connected.")
 
     final_body = payload.finalBody
-    gmail.send_reply(account, email, final_body)
+    result = gmail.send_reply(account, email, final_body)
 
     # Learning signal: deterministic diff between what the AI drafted and what
     # the admin actually sent. Raw rows accumulate here; the nightly distiller
@@ -398,12 +519,209 @@ def send_email(email_id: str, payload: schemas.SendIn, db: Session = Depends(get
 
     email.sent_at = datetime.now(timezone.utc)
     email.sent_body = final_body
+    email.sent_gmail_message_id = result.gmail_message_id
+    email.sent_message_id_header = result.message_id_header
+    # Extend the thread's RFC References chain now that we've added a link, so
+    # any *future* reply/forward on this thread (Phase 3) chains from Andrea's
+    # send instead of the customer's last message.
+    email.references_header = result.references_header
     email.draft_status = "Sent"
     email.flagged = False
     email.flag_reason = None
     email.read = True
 
     pipeline.log(db, "reply_sent", f"Reply sent to {email.from_email}.", email.id)
+    db.commit()
+    db.refresh(email)
+    return email
+
+
+def _load_sendable_email(db: Session, email_id: str) -> tuple[models.Email, models.EmailAccount]:
+    """Shared preflight for the reply / reply-all / forward endpoints."""
+    email = db.query(models.Email).filter(models.Email.id == email_id).first()
+    if email is None:
+        raise HTTPException(status_code=404, detail="Email not found")
+    account = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.email == email.account_email)
+        .first()
+    )
+    if account is None or account.status != "Connected":
+        raise HTTPException(status_code=400, detail="Inbox is not connected.")
+    return email, account
+
+
+@router.post("/emails/{email_id}/reply-all", response_model=schemas.EmailOut)
+def reply_all_email(
+    email_id: str,
+    payload: schemas.ReplyAllIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    email, account = _load_sendable_email(db, email_id)
+    if email.draft_status == "Sent":
+        raise HTTPException(status_code=400, detail="Reply already sent.")
+
+    final_body = payload.finalBody
+    result = gmail.send_reply_all(account, email, final_body, extra_cc=payload.extraCc)
+
+    # Same learning signal we record for a plain reply — the diff between the
+    # AI draft and Andrea's final body is the training feedback, and it is
+    # meaningful regardless of whether the send was reply or reply-all.
+    ai_draft = email.draft_body or ""
+    db.add(models.DraftEdit(
+        email_id=email.id,
+        intent=email.intent,
+        template_id=email.template_ids[0] if email.template_ids else None,
+        language=email.language,
+        draft_body=ai_draft,
+        final_body=final_body,
+        diff=diffing.unified_diff(ai_draft, final_body),
+        edit_ratio=diffing.edit_ratio(ai_draft, final_body),
+        created_at=datetime.now(timezone.utc),
+    ))
+
+    email.sent_at = datetime.now(timezone.utc)
+    email.sent_body = final_body
+    email.sent_gmail_message_id = result.gmail_message_id
+    email.sent_message_id_header = result.message_id_header
+    email.references_header = result.references_header
+    email.draft_status = "Sent"
+    email.flagged = False
+    email.flag_reason = None
+    email.read = True
+
+    cc_summary = ", ".join(payload.extraCc) if payload.extraCc else "no extra Cc"
+    pipeline.log(
+        db,
+        "reply_sent",
+        f"Reply-all sent to {email.from_email} ({cc_summary}).",
+        email.id,
+    )
+    db.commit()
+    db.refresh(email)
+    return email
+
+
+@router.post("/emails/{email_id}/forward", response_model=schemas.EmailOut)
+def forward_email(
+    email_id: str,
+    payload: schemas.ForwardIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    """Forward the message to a new set of recipients on the SAME Gmail thread.
+
+    A forward is *not* the same as a reply — the original inbound still lives
+    on the thread and may still get replied to. We record the outbound Gmail
+    identifiers on the source row (so history sync dedupes Andrea's own echo)
+    but leave `draft_status` alone unless the row had been sitting on the
+    inbox awaiting a reply, in which case forwarding it *is* Andrea acting on
+    it, so we mark it Reviewed instead of Sent.
+    """
+    email, account = _load_sendable_email(db, email_id)
+
+    self_email = (account.email or "").lower()
+    for addr in payload.toEmails + payload.ccEmails:
+        if addr.lower() == self_email:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot forward to the same inbox that owns the message.",
+            )
+
+    final_body = payload.finalBody
+    result = gmail.send_forward(
+        account,
+        email,
+        final_body,
+        to_emails=payload.toEmails,
+        cc_emails=payload.ccEmails,
+    )
+
+    email.sent_at = datetime.now(timezone.utc)
+    email.sent_body = final_body
+    email.sent_gmail_message_id = result.gmail_message_id
+    email.sent_message_id_header = result.message_id_header
+    email.references_header = result.references_header
+    if email.draft_status not in {"Sent"}:
+        # Forwarding *is* Andrea handling the message, so it leaves the
+        # pending queue. But we don't call it "Sent" because a real reply may
+        # still be needed — "Reviewed" is our existing state for that.
+        email.draft_status = "Reviewed"
+    email.read = True
+
+    recipients = ", ".join(payload.toEmails)
+    pipeline.log(db, "reply_sent", f"Forwarded to {recipients}.", email.id)
+    db.commit()
+    db.refresh(email)
+    return email
+
+
+@router.post("/compose", response_model=schemas.EmailOut)
+def compose_email(
+    payload: schemas.ComposeIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    """Send a brand-new message Andrea wrote herself (Gmail-style Compose).
+
+    No AI is involved and there is no parent message — this starts a fresh
+    thread. The sent message is persisted as an outbound Email row so it
+    appears in the Sent mailbox and history sync can dedupe Gmail's echo.
+    """
+    account = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.email == payload.inbox)
+        .first()
+    )
+    if account is None or account.status != "Connected":
+        raise HTTPException(status_code=400, detail=f"Inbox {payload.inbox} is not connected.")
+
+    self_email = (account.email or "").lower()
+    if any(addr.lower() == self_email for addr in payload.toEmails + payload.ccEmails):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot send a new message to the sending inbox itself.",
+        )
+
+    result = gmail.send_new_message(
+        account,
+        to_emails=payload.toEmails,
+        cc_emails=payload.ccEmails,
+        subject=payload.subject,
+        body=payload.finalBody,
+    )
+
+    now = datetime.now(timezone.utc)
+    email = models.Email(
+        id=pipeline.next_id(db, models.Email, "email"),
+        account_email=account.email,
+        gmail_message_id=result.gmail_message_id,
+        gmail_thread_id=result.gmail_thread_id,
+        gmail_is_outbound=True,
+        from_name=account.title or account.email,
+        from_email=account.email,
+        to_emails=list(payload.toEmails),
+        cc_emails=list(payload.ccEmails),
+        subject=payload.subject or "(no subject)",
+        body=payload.finalBody,
+        received_at=now,
+        message_id_header=result.message_id_header,
+        references_header=result.references_header,
+        draft_status="Sent",
+        read=True,
+        sent_at=now,
+        sent_body=payload.finalBody,
+        sent_gmail_message_id=result.gmail_message_id,
+        sent_message_id_header=result.message_id_header,
+    )
+    db.add(email)
+    pipeline.log(
+        db,
+        "reply_sent",
+        f"New message sent to {', '.join(payload.toEmails)}.",
+        email.id,
+    )
     db.commit()
     db.refresh(email)
     return email
@@ -647,6 +965,65 @@ def trigger_poll(request: Request, secret: Optional[str] = None, db: Session = D
         result["warning"] = "PILOT2_GMAIL_MODE is not 'live' — poll is a no-op until set on Vercel."
     elif not connected:
         result["warning"] = "No connected inboxes — connect Gmail on Email accounts in the admin dashboard."
+    return result
+
+
+@router.post("/gmail/push")
+async def gmail_push(request: Request, token: Optional[str] = None, db: Session = Depends(get_db)):
+    """Gmail push webhook (Google Pub/Sub → here).
+
+    Pub/Sub delivers `{"message": {"data": base64(JSON)}}` where the JSON is
+    `{"emailAddress", "historyId"}`. We authenticate with a shared secret in
+    the URL (?token=), then delta-sync that inbox immediately.
+
+    We always ACK with 200 (even on internal errors) so Pub/Sub doesn't retry
+    a poison message forever — the daily poll + next notification converge any
+    missed change. Only a bad/absent token is rejected.
+    """
+    if config.GMAIL_PUSH_TOKEN and token != config.GMAIL_PUSH_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid push token.")
+
+    try:
+        envelope = await request.json()
+    except Exception:
+        return {"status": "ignored", "reason": "invalid JSON"}
+
+    message = (envelope or {}).get("message") or {}
+    data = message.get("data")
+    if not data:
+        return {"status": "ignored", "reason": "no data"}
+
+    try:
+        decoded = json.loads(base64.b64decode(data).decode("utf-8"))
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return {"status": "ignored", "reason": "undecodable data"}
+
+    email_address = decoded.get("emailAddress")
+    history_id = decoded.get("historyId")
+    try:
+        changes = sync.handle_push_notification(db, email_address, history_id)
+    except Exception:
+        logger.exception("Gmail push handling failed for %s", email_address)
+        db.rollback()
+        return {"status": "error-acked", "changes": 0}
+
+    return {"status": "ok", "inbox": email_address, "changes": changes}
+
+
+@router.api_route("/gmail/watch/renew", methods=["GET", "POST"])
+def renew_watches(request: Request, secret: Optional[str] = None, db: Session = Depends(get_db)):
+    """Re-arm Gmail push watches nearing their 7-day expiry.
+
+    Runs on a schedule (APScheduler in-process, or an external cron hitting
+    this endpoint on serverless). Cron-secret protected like /poll."""
+    require_cron_secret(request, secret)
+    renewed = sync.renew_expiring_watches(db)
+    result = {"renewed": renewed, "pushEnabled": config.gmail_push_enabled()}
+    if not config.gmail_push_enabled():
+        result["warning"] = (
+            "Gmail push not configured — set PILOT2_GMAIL_MODE=live and "
+            "PILOT2_GMAIL_PUBSUB_TOPIC."
+        )
     return result
 
 

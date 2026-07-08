@@ -48,6 +48,39 @@ DISTILL_HOUR_UTC = int(os.getenv("PILOT2_DISTILL_HOUR_UTC", "2"))
 _default_scheduler = "false" if os.getenv("VERCEL") else "true"
 SCHEDULER_ENABLED = os.getenv("PILOT2_SCHEDULER_ENABLED", _default_scheduler).lower() == "true"
 
+# Gmail push notifications (Pub/Sub). When a topic is configured and mode is
+# live, connecting an inbox arms a Gmail `watch` that publishes change
+# notifications to this topic; Google forwards them to the /gmail/push webhook,
+# which syncs that inbox in ~1s instead of waiting for the next poll.
+#   PILOT2_GMAIL_PUBSUB_TOPIC: projects/<project>/topics/<topic>
+#   PILOT2_GMAIL_PUSH_TOKEN:  shared secret appended to the push URL (?token=)
+# A Gmail watch lasts 7 days, so it is re-armed daily by the scheduler / cron.
+GMAIL_PUBSUB_TOPIC = os.getenv("PILOT2_GMAIL_PUBSUB_TOPIC", "")
+GMAIL_PUSH_TOKEN = os.getenv("PILOT2_GMAIL_PUSH_TOKEN", "")
+WATCH_RENEW_HOUR_UTC = int(os.getenv("PILOT2_WATCH_RENEW_HOUR_UTC", "3"))
+
+
+def gmail_push_enabled() -> bool:
+    """Push is active only in live mode with a configured Pub/Sub topic."""
+    return GMAIL_MODE == "live" and bool(GMAIL_PUBSUB_TOPIC)
+
+
+# Supabase Realtime — when new mail lands server-side we broadcast a tiny
+# "workspace changed" nudge on a channel; the dashboard listens and refetches
+# through the authed API instantly (instead of the 30s poll). No email content
+# ever travels over the channel — it's just a signal to refresh.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_SERVICE_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    or os.getenv("SUPABASE_SERVICE_KEY", "")
+)
+REALTIME_CHANNEL = os.getenv("PILOT2_REALTIME_CHANNEL", "pilot2-workspace")
+
+
+def realtime_enabled() -> bool:
+    """Realtime broadcasts are best-effort and only sent when configured."""
+    return bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)
+
 # Gmail sync — initial backfill window and pacing.
 BACKFILL_DAYS = int(os.getenv("PILOT2_BACKFILL_DAYS", "10"))
 BACKFILL_MAX_MESSAGES_PER_QUERY = int(os.getenv("PILOT2_BACKFILL_MAX_MESSAGES", "500"))

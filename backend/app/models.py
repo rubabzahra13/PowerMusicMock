@@ -1,5 +1,6 @@
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, String, Text, Integer
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -114,6 +115,10 @@ class EmailAccount(Base):
     # long-lived credential; access tokens are re-minted from it on demand.
     oauth_refresh_token = Column(Text, nullable=True)
     gmail_history_id = Column(String, nullable=True)
+    # When the Gmail push `watch` for this inbox expires (Gmail caps it at 7
+    # days). The renew job re-arms any watch within 24h of this time. Null =
+    # push not armed (mock mode, or no Pub/Sub topic configured).
+    watch_expiration = Column(DateTime(timezone=True), nullable=True)
 
     # Initial Gmail backfill (last N days on first connect).
     backfill_status = Column(String, nullable=False, default="idle")  # idle|running|done|failed
@@ -142,9 +147,37 @@ class Email(Base):
 
     from_name = Column(String, nullable=False)
     from_email = Column(String, nullable=False)
+    # Envelope recipients (RFC To/Cc headers). Needed for reply-all so we send
+    # to every original participant, and to render the recipients row in the
+    # thread UI when Andrea was CC'd.
+    to_emails = Column(ARRAY(String), nullable=False, server_default="{}")
+    cc_emails = Column(ARRAY(String), nullable=False, server_default="{}")
     subject = Column(String, nullable=False)
     body = Column(Text, nullable=False)
+    # Original HTML body when Gmail supplied one (sanitized before render).
+    # Preserves formatting for HTML-only marketing-style replies; body stays
+    # the plain-text fallback for classifier + preview.
+    html_body = Column(Text, nullable=True)
+    # Short preview text used in the list-row snippet without loading the body.
+    snippet = Column(String, nullable=True)
     received_at = Column(DateTime(timezone=True), nullable=False)
+
+    # RFC 5322 threading headers. Gmail's threadId is enough to thread inside
+    # Gmail's own UI; other clients (Outlook, Apple Mail) need Message-Id /
+    # In-Reply-To / References set on outbound too, so we persist them here.
+    message_id_header = Column(String, nullable=True, index=True)
+    in_reply_to_header = Column(String, nullable=True)
+    references_header = Column(Text, nullable=True)  # space-separated list
+
+    # Forward metadata. When a colleague forwards a customer email to Andrea
+    # the "from" is the colleague, but the reply should default to the
+    # original customer. These fields capture that pivot so the UI + composer
+    # can address the right person.
+    is_forward = Column(Boolean, nullable=False, default=False)
+    forwarded_by_name = Column(String, nullable=True)
+    forwarded_by_email = Column(String, nullable=True)
+    original_from_name = Column(String, nullable=True)
+    original_from_email = Column(String, nullable=True)
 
     # Classifier output
     intent = Column(String, nullable=True)
@@ -172,6 +205,49 @@ class Email(Base):
 
     sent_at = Column(DateTime(timezone=True), nullable=True)
     sent_body = Column(Text, nullable=True)
+    # Gmail message id + RFC Message-Id of Andrea's outbound send.
+    # Recorded on Send so history sync can dedupe when Gmail echoes our own
+    # message back through the INBOX/SENT label mirror, and so future replies
+    # in this thread can reference her prior send.
+    sent_gmail_message_id = Column(String, nullable=True, unique=True)
+    sent_message_id_header = Column(String, nullable=True)
+
+    # Eager (selectin) so listing the workspace loads all attachments in a
+    # single extra IN query rather than N per-row lazy loads.
+    attachments = relationship(
+        "EmailAttachment",
+        cascade="all, delete-orphan",
+        order_by="EmailAttachment.id",
+        lazy="selectin",
+    )
+
+
+class EmailAttachment(Base):
+    """A file attached to an inbound (or composed) email.
+
+    Attachment *bytes* are not stored inline for real Gmail messages — Gmail
+    delivers them behind a separate attachmentId that we fetch on demand at
+    download time. We persist only lightweight metadata here plus, for
+    mock-mode / testing, an optional inline base64 payload so downloads work
+    end-to-end without a live Gmail connection.
+    """
+
+    __tablename__ = "email_attachments"
+
+    id = Column(String, primary_key=True)
+    email_id = Column(String, ForeignKey("emails.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename = Column(String, nullable=False)
+    mime_type = Column(String, nullable=False, default="application/octet-stream")
+    size_bytes = Column(Integer, nullable=False, default=0)
+    # Gmail's per-message attachment handle used to fetch bytes on demand (live).
+    gmail_attachment_id = Column(Text, nullable=True)
+    # Inline bytes (base64) — populated in mock mode / small inline images so
+    # the download endpoint can serve without Gmail.
+    content_base64 = Column(Text, nullable=True)
+    # Inline (cid:) attachments referenced by the HTML body vs. real file
+    # attachments shown as chips.
+    is_inline = Column(Boolean, nullable=False, default=False)
+    content_id = Column(String, nullable=True)
 
 
 class EmailTemplate(Base):

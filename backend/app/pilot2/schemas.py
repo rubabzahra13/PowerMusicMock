@@ -24,6 +24,8 @@ class InboxOut(BaseModel):
     backfillStatus: str = Field(default="idle", validation_alias="backfill_status")
     backfillImportedCount: int = Field(default=0, validation_alias="backfill_imported_count")
     backfillError: Optional[str] = Field(default=None, validation_alias="backfill_error")
+    # Non-null when Gmail push is armed for this inbox (real-time delivery).
+    watchExpiration: Optional[datetime] = Field(default=None, validation_alias="watch_expiration")
 
 
 class InboxConnectIn(BaseModel):
@@ -47,16 +49,45 @@ class InboxSyncStatusOut(BaseModel):
     lastSyncedAt: Optional[datetime] = Field(default=None, validation_alias="last_synced_at")
 
 
+class AttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: str
+    filename: str
+    mimeType: str = Field(validation_alias="mime_type")
+    sizeBytes: int = Field(default=0, validation_alias="size_bytes")
+    isInline: bool = Field(default=False, validation_alias="is_inline")
+    contentId: Optional[str] = Field(default=None, validation_alias="content_id")
+
+
 class EmailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str
     from_: str = Field(validation_alias="from_name", serialization_alias="from")
     fromEmail: str = Field(validation_alias="from_email")
+    toEmails: List[str] = Field(default_factory=list, validation_alias="to_emails")
+    ccEmails: List[str] = Field(default_factory=list, validation_alias="cc_emails")
     subject: str
     inbox: str = Field(validation_alias="account_email")
     body: str
+    htmlBody: Optional[str] = Field(default=None, validation_alias="html_body")
+    snippet: Optional[str] = None
     receivedAt: datetime = Field(validation_alias="received_at")
+
+    # Thread + RFC 5322 headers so the frontend can group / display / chain.
+    gmailThreadId: Optional[str] = Field(default=None, validation_alias="gmail_thread_id")
+    gmailMessageId: Optional[str] = Field(default=None, validation_alias="gmail_message_id")
+    messageIdHeader: Optional[str] = Field(default=None, validation_alias="message_id_header")
+    inReplyToHeader: Optional[str] = Field(default=None, validation_alias="in_reply_to_header")
+    referencesHeader: Optional[str] = Field(default=None, validation_alias="references_header")
+
+    # Forward pivot (top-level From vs. original sender when applicable).
+    isForward: bool = Field(default=False, validation_alias="is_forward")
+    forwardedByName: Optional[str] = Field(default=None, validation_alias="forwarded_by_name")
+    forwardedByEmail: Optional[str] = Field(default=None, validation_alias="forwarded_by_email")
+    originalFromName: Optional[str] = Field(default=None, validation_alias="original_from_name")
+    originalFromEmail: Optional[str] = Field(default=None, validation_alias="original_from_email")
 
     intent: Optional[str] = None
     intentConfidence: Optional[int] = Field(default=None, validation_alias="intent_confidence")
@@ -73,6 +104,24 @@ class EmailOut(BaseModel):
     archived: bool = False
     deleted: bool = False
     sentAt: Optional[datetime] = Field(default=None, validation_alias="sent_at")
+    sentBody: Optional[str] = Field(default=None, validation_alias="sent_body")
+    sentGmailMessageId: Optional[str] = Field(
+        default=None, validation_alias="sent_gmail_message_id"
+    )
+    sentMessageIdHeader: Optional[str] = Field(
+        default=None, validation_alias="sent_message_id_header"
+    )
+
+    attachments: List[AttachmentOut] = Field(default_factory=list)
+
+
+class AttachmentIngestIn(BaseModel):
+    filename: str = Field(max_length=500)
+    mimeType: str = Field(default="application/octet-stream", max_length=255)
+    contentBase64: Optional[str] = None
+    sizeBytes: Optional[int] = None
+    isInline: bool = False
+    contentId: Optional[str] = None
 
 
 class EmailIngestIn(BaseModel):
@@ -87,6 +136,23 @@ class EmailIngestIn(BaseModel):
     receivedAt: Optional[datetime] = None
     gmailMessageId: Optional[str] = None
     gmailThreadId: Optional[str] = None
+    # Everything below is optional metadata that mirrors real Gmail parsing —
+    # tests can pass it in to exercise thread / forward flows deterministically.
+    toEmails: Optional[List[str]] = None
+    ccEmails: Optional[List[str]] = None
+    htmlBody: Optional[str] = None
+    snippet: Optional[str] = None
+    messageIdHeader: Optional[str] = None
+    inReplyToHeader: Optional[str] = None
+    referencesHeader: Optional[str] = None
+    isForward: bool = False
+    forwardedByName: Optional[str] = None
+    forwardedByEmail: Optional[str] = None
+    originalFromName: Optional[str] = None
+    originalFromEmail: Optional[str] = None
+    # Optional inline attachments (base64) so mock-mode ingest can exercise the
+    # attachment chip + download flow end-to-end without a live Gmail.
+    attachments: Optional[List[AttachmentIngestIn]] = None
 
 
 class EmailPatchIn(BaseModel):
@@ -122,6 +188,112 @@ class SendIn(BaseModel):
     @classmethod
     def clean_body(cls, value):
         return normalize_text(value, max_length=100_000, field_name="finalBody")
+
+
+def _clean_email_list(values, *, field_name: str, max_len: int) -> List[str]:
+    """Normalize a comma / whitespace separated list of email addresses into
+    a de-duplicated, case-preserved list. Raises on any obviously malformed
+    entry (missing '@'). Empty / whitespace inputs collapse to an empty list.
+    """
+    if values is None:
+        return []
+    if isinstance(values, str):
+        raw = [part.strip() for part in values.replace(";", ",").split(",")]
+    elif isinstance(values, (list, tuple)):
+        raw = [str(part).strip() for part in values]
+    else:
+        raise ValueError(f"{field_name} must be a string or list")
+    seen: set[str] = set()
+    result: List[str] = []
+    for addr in raw:
+        if not addr:
+            continue
+        if "@" not in addr or " " in addr:
+            raise ValueError(f"{field_name}: '{addr}' is not a valid email address")
+        low = addr.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        result.append(addr)
+    if len(result) > max_len:
+        raise ValueError(f"{field_name}: at most {max_len} recipients allowed")
+    return result
+
+
+class ReplyAllIn(BaseModel):
+    """Reply-all mirrors Send but lets the admin add explicit extra Cc
+    addresses (Gmail exposes the same field). The primary To recipient is
+    derived server-side from the message being replied to."""
+
+    finalBody: str = Field(max_length=100_000)
+    extraCc: List[str] = Field(default_factory=list)
+
+    @field_validator("finalBody", mode="before")
+    @classmethod
+    def clean_body(cls, value):
+        return normalize_text(value, max_length=100_000, field_name="finalBody")
+
+    @field_validator("extraCc", mode="before")
+    @classmethod
+    def clean_extra_cc(cls, value):
+        return _clean_email_list(value, field_name="extraCc", max_len=50)
+
+
+class ForwardIn(BaseModel):
+    """Forward the current message to a new set of recipients while staying
+    inside the same Gmail thread (Gmail parity)."""
+
+    finalBody: str = Field(max_length=100_000)
+    toEmails: List[str] = Field(min_length=1)
+    ccEmails: List[str] = Field(default_factory=list)
+
+    @field_validator("finalBody", mode="before")
+    @classmethod
+    def clean_body(cls, value):
+        return normalize_text(value, max_length=100_000, field_name="finalBody")
+
+    @field_validator("toEmails", mode="before")
+    @classmethod
+    def clean_to(cls, value):
+        return _clean_email_list(value, field_name="toEmails", max_len=50)
+
+    @field_validator("ccEmails", mode="before")
+    @classmethod
+    def clean_cc(cls, value):
+        return _clean_email_list(value, field_name="ccEmails", max_len=50)
+
+
+class ComposeIn(BaseModel):
+    """A brand-new outbound message Andrea writes herself (no AI, no thread).
+
+    `inbox` is the connected account she's sending from; the rest mirror a
+    Gmail compose window."""
+
+    inbox: str = Field(max_length=254)
+    toEmails: List[str] = Field(min_length=1)
+    ccEmails: List[str] = Field(default_factory=list)
+    subject: str = Field(max_length=500)
+    finalBody: str = Field(max_length=100_000)
+
+    @field_validator("subject", mode="before")
+    @classmethod
+    def clean_subject(cls, value):
+        return normalize_text(value, max_length=500, field_name="subject")
+
+    @field_validator("finalBody", mode="before")
+    @classmethod
+    def clean_body(cls, value):
+        return normalize_text(value, max_length=100_000, field_name="finalBody")
+
+    @field_validator("toEmails", mode="before")
+    @classmethod
+    def clean_to(cls, value):
+        return _clean_email_list(value, field_name="toEmails", max_len=50)
+
+    @field_validator("ccEmails", mode="before")
+    @classmethod
+    def clean_cc(cls, value):
+        return _clean_email_list(value, field_name="ccEmails", max_len=50)
 
 
 class TemplateOut(BaseModel):

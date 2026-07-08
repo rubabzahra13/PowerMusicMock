@@ -3,7 +3,7 @@
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Set
 
 from sqlalchemy.orm import Session
@@ -62,8 +62,13 @@ def _should_skip_import(
         return True
     if message.is_automated:
         return True
-    if gmail.thread_has_sent(account, message.gmail_thread_id):
-        return True
+    # NOTE: we intentionally do NOT skip messages on threads Andrea has
+    # already replied to. Gmail delivers customer follow-ups on those threads
+    # and Andrea needs to see them (the previous skip silently dropped every
+    # reply after her first send). Dedup against our own outbound copies
+    # happens above via `message.from_email == account.email` and, for the
+    # message she sent from this app, via `sent_gmail_message_id` on the
+    # thread's original row.
     return False
 
 
@@ -100,6 +105,18 @@ def import_message(
         gmail_labels.apply_label_flags(existing, flags)
         return existing
 
+    # Gmail also echoes back messages Andrea sent from this app (SENT label
+    # arrives via history sync). We record the outbound copy on the original
+    # inbound row's `sent_gmail_message_id` at send-time, so we can suppress
+    # the reimport here instead of creating a duplicate row for her own send.
+    sent_dupe = (
+        db.query(models.Email)
+        .filter(models.Email.sent_gmail_message_id == message.gmail_message_id)
+        .first()
+    )
+    if sent_dupe:
+        return sent_dupe
+
     if intake_puregym_roster_message(
         db,
         from_email=message.from_email,
@@ -129,15 +146,28 @@ def import_message(
         gmail_thread_id=message.gmail_thread_id,
         from_name=message.from_name,
         from_email=message.from_email,
+        to_emails=list(message.to_emails or []),
+        cc_emails=list(message.cc_emails or []),
         subject=message.subject,
         body=message.body,
+        html_body=message.html_body,
+        snippet=message.snippet,
         received_at=message.received_at,
+        message_id_header=message.message_id_header,
+        in_reply_to_header=message.in_reply_to_header,
+        references_header=message.references_header,
+        is_forward=message.is_forward,
+        forwarded_by_name=message.forwarded_by_name,
+        forwarded_by_email=message.forwarded_by_email,
+        original_from_name=message.original_from_name,
+        original_from_email=message.original_from_email,
         draft_status="Imported" if ai else "No Draft",
         **flags,
     )
     gmail_labels.apply_label_flags(email, flags)
     db.add(email)
     db.flush()
+    pipeline.persist_attachments(db, email.id, message.attachments)
 
     return email
 
@@ -450,3 +480,107 @@ def process_ai_batch(db: Session) -> int:
         return processed
     finally:
         _ai_batch_lock.release()
+
+
+# ── Gmail push (watch) lifecycle ─────────────────────────────
+
+# Re-arm a watch when it's within this window of expiring. Gmail watches last
+# 7 days; renewing daily with a 24h cushion means a missed renewal still has
+# slack before push goes silent.
+WATCH_RENEW_CUSHION = timedelta(hours=24)
+
+
+def arm_watch(db: Session, account: models.EmailAccount) -> bool:
+    """Arm (or re-arm) Gmail push for one inbox and persist the expiry.
+
+    No-op in mock mode or when no Pub/Sub topic is configured, so this is safe
+    to call unconditionally on connect. Returns True when a watch was armed.
+    """
+    if not config.gmail_push_enabled():
+        return False
+    try:
+        result = gmail.start_watch(account)
+    except Exception:
+        logger.exception("Gmail watch failed for %s", account.email)
+        return False
+    if not result:
+        return False
+
+    history_id = result.get("historyId")
+    if history_id:
+        account.gmail_history_id = str(history_id)
+    expiration = result.get("expiration")
+    if expiration:
+        account.watch_expiration = datetime.fromtimestamp(
+            int(expiration) / 1000, tz=timezone.utc
+        )
+    db.commit()
+    pipeline.log(
+        db,
+        "gmail_watch_armed",
+        f"Gmail push armed for {account.email} (expires {account.watch_expiration}).",
+    )
+    db.commit()
+    return True
+
+
+def renew_expiring_watches(db: Session) -> int:
+    """Re-arm every connected inbox whose watch is missing or near expiry.
+
+    Runs daily (scheduler) / via cron on serverless. Gmail requires a fresh
+    watch call at least weekly or push silently stops.
+    """
+    if not config.gmail_push_enabled():
+        return 0
+    cutoff = datetime.now(timezone.utc) + WATCH_RENEW_CUSHION
+    accounts = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.status == "Connected")
+        .all()
+    )
+    renewed = 0
+    for account in accounts:
+        if account.watch_expiration is None or account.watch_expiration <= cutoff:
+            if arm_watch(db, account):
+                renewed += 1
+    return renewed
+
+
+def handle_push_notification(
+    db: Session,
+    email_address: str,
+    history_id: Optional[str] = None,
+) -> int:
+    """Process one Gmail Pub/Sub push: delta-sync that inbox now, then draft.
+
+    Gmail's push payload only says "something changed in this mailbox" (plus a
+    historyId), so we run the same History API delta sync the poller uses —
+    it's idempotent, so duplicate/again-later notifications are harmless.
+    """
+    if not email_address:
+        return 0
+    account = (
+        db.query(models.EmailAccount)
+        .filter(
+            models.EmailAccount.email == email_address,
+            models.EmailAccount.status == "Connected",
+        )
+        .first()
+    )
+    if account is None:
+        logger.info("Push notification for unknown/disconnected inbox %s", email_address)
+        return 0
+
+    changes = sync_account_history(db, account)
+    # Draft replies right away so the new mail shows a ready draft, not a
+    # "composing" spinner, by the time Andrea looks.
+    try:
+        process_ai_batch(db)
+    except Exception:
+        logger.exception("AI batch after push failed for %s", email_address)
+
+    # Nudge the open dashboard to refetch now instead of on its next poll.
+    from app.pilot2 import realtime
+
+    realtime.workspace_changed("push", changes)
+    return changes
