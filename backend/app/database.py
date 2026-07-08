@@ -95,7 +95,16 @@ def create_db_engine():
         # exist on the next, raising "prepared statement does not exist". This is
         # the recommended setting for transaction pooling and is harmless (tiny
         # perf cost) on direct / session-mode connections, so we set it always.
-        kwargs["connect_args"] = {"prepare_threshold": None}
+        #
+        # connect_timeout caps how long a new connection may block. With NullPool
+        # (serverless) every request opens a fresh connection, so a pooler hiccup
+        # could otherwise hang the whole 60s function → 504. Fail fast instead so
+        # the request errors quickly and the dashboard's next poll/refetch
+        # succeeds rather than the user seeing a 60s stall.
+        kwargs["connect_args"] = {
+            "prepare_threshold": None,
+            "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "10")),
+        }
         if os.getenv("VERCEL"):
             # Serverless: default to NullPool so each request releases its DB
             # connection as soon as the session closes. Holding a warm
