@@ -81,6 +81,12 @@ def realtime_enabled() -> bool:
     """Realtime broadcasts are best-effort and only sent when configured."""
     return bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)
 
+# Serverless (Vercel) has no reliable long-lived process, so the initial
+# backfill runs synchronously within a time budget inside the OAuth callback
+# instead of a background thread that the platform would freeze/kill.
+SERVERLESS = bool(os.getenv("VERCEL"))
+BACKFILL_TIME_BUDGET_SECONDS = int(os.getenv("PILOT2_BACKFILL_TIME_BUDGET_SECONDS", "20"))
+
 # Gmail sync — initial backfill window and pacing.
 BACKFILL_DAYS = int(os.getenv("PILOT2_BACKFILL_DAYS", "10"))
 BACKFILL_MAX_MESSAGES_PER_QUERY = int(os.getenv("PILOT2_BACKFILL_MAX_MESSAGES", "500"))

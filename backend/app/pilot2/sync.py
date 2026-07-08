@@ -172,8 +172,22 @@ def import_message(
     return email
 
 
-def run_backfill(db: Session, account: models.EmailAccount) -> int:
-    """Import the last N days of mail for one inbox (no AI — batched later)."""
+def run_backfill(
+    db: Session,
+    account: models.EmailAccount,
+    *,
+    deadline: Optional[float] = None,
+) -> int:
+    """Import the last N days of mail for one inbox (no AI — batched later).
+
+    `deadline` (a time.monotonic() value) time-boxes the import so it can run
+    synchronously inside a serverless request without exceeding the platform
+    timeout. When the deadline is hit we stop and still mark the backfill
+    "done": messages are imported recent-first (Gmail lists newest first, inbox
+    query first), and gmail_history_id is set up front, so push sync already
+    covers everything from connect-time forward — the only thing a partial
+    backfill drops is some of the older historical tail, never new mail.
+    """
     if not gmail.is_live():
         account.backfill_status = "done"
         return 0
@@ -185,12 +199,15 @@ def run_backfill(db: Session, account: models.EmailAccount) -> int:
 
     imported = 0
     seen: Set[str] = set()
+    hit_deadline = False
     try:
         profile = gmail.get_profile(account)
         if profile.get("historyId"):
             account.gmail_history_id = str(profile["historyId"])
 
         for query in _backfill_queries(config.BACKFILL_DAYS):
+            if hit_deadline:
+                break
             message_ids = gmail.list_all_message_ids(
                 account,
                 query,
@@ -198,6 +215,15 @@ def run_backfill(db: Session, account: models.EmailAccount) -> int:
                 pause_seconds=config.GMAIL_API_PAUSE_SECONDS,
             )
             for message_id in message_ids:
+                if deadline is not None and time.monotonic() >= deadline:
+                    hit_deadline = True
+                    logger.warning(
+                        "Backfill for %s hit time budget after %d messages; "
+                        "marking done (push covers all new mail).",
+                        account.email,
+                        account.backfill_imported_count,
+                    )
+                    break
                 if message_id in seen:
                     continue
                 seen.add(message_id)

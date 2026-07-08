@@ -160,13 +160,36 @@ def oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
         pass
     pipeline.log(db, "inbox_connected", f"Inbox {account.email} connected via Google OAuth.")
     db.commit()
-    sync.start_backfill(account.id)
-    # Arm Gmail push so new mail is delivered in ~1s (no-op unless a Pub/Sub
-    # topic is configured). Best-effort: connection must succeed regardless.
+
+    # Arm Gmail push first so new mail is delivered in ~1s from now on (no-op
+    # unless a Pub/Sub topic is configured). Best-effort: connection must
+    # succeed regardless.
     try:
         sync.arm_watch(db, account)
     except Exception:
         logger.exception("Arming Gmail push failed for %s", account.email)
+
+    # Backfill recent history. On serverless there is no reliable background
+    # thread (Vercel freezes the function once the response is sent), so import
+    # synchronously within a time budget — it always completes and marks itself
+    # "done" inside the request. Push already covers every new message from now
+    # on (gmail_history_id is captured at the start of the backfill), so a
+    # time-boxed partial import only ever drops some older history, never new
+    # mail. Locally, keep the background thread so the success page is instant.
+    if config.SERVERLESS:
+        import time as _time
+
+        try:
+            sync.run_backfill(
+                db,
+                account,
+                deadline=_time.monotonic() + config.BACKFILL_TIME_BUDGET_SECONDS,
+            )
+        except Exception:
+            logger.exception("Backfill failed for %s", account.email)
+    else:
+        sync.start_backfill(account.id)
+
     return HTMLResponse(
         oauth_pages.oauth_success_page(email=account.email, title=account.title)
     )
