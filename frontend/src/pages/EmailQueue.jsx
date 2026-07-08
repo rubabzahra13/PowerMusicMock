@@ -3,17 +3,31 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Search, Flag, Send, AlertTriangle, Inbox,
   ChevronLeft, ChevronRight, Mail, MailOpen, Sparkles, SlidersHorizontal,
-  SortAsc, Archive, X, Pencil, Trash2, RotateCcw, Link2, Unlink
+  SortAsc, Archive, X, Pencil, Trash2, RotateCcw, Link2, Unlink, Forward, PenSquare
 } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
-import { patchEmail, sendEmail, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache, refreshCache, patchCache, getPilot2Workspace } from '../utils/pilot2Api';
+import { sendEmail, sendReplyAll, sendForward, composeMessage, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache, refreshCache, patchCache, getPilot2Workspace } from '../utils/pilot2Api';
 import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton, DraftCreatingPanel } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClass } from '../utils/responsiveLayout';
 import DraftBodyDisplay from '../components/email/DraftBodyDisplay';
+import ThreadListItem from '../components/email/ThreadListItem';
+import ThreadHistory, { ForwardedInBanner } from '../components/email/ThreadHistory';
+import ReplyTargetPicker from '../components/email/ReplyTargetPicker';
+import RecipientField from '../components/email/RecipientField';
+import ComposeModal from '../components/email/ComposeModal';
+import AttachmentChips from '../components/email/AttachmentChips';
+import SafeHtml from '../components/email/SafeHtml';
+import { groupIntoThreads, threadKeyFor } from '../utils/emailThreads';
+import { buildAddressBook, parseRecipientList, isValidEmail } from '../utils/emailAddressBook';
 import { buildEmailSignature, normalizeDraftSignature, resolveInboxTitle } from '../utils/emailSignature';
+import { getSupabase } from '../supabaseClient';
 
 const PAGE_SIZE = 20;
+
+// Must match the backend PILOT2_REALTIME_CHANNEL default. Overridable via env
+// if you ever run multiple environments against one Supabase project.
+const REALTIME_CHANNEL = import.meta.env.VITE_PILOT2_REALTIME_CHANNEL || 'pilot2-workspace';
 
 function normalizeEmail(email) {
   return {
@@ -128,22 +142,60 @@ function getFirstName(from) {
   return from.split(' ')[0];
 }
 
+// The name the reply is actually addressed to. On a forwarded-in message the
+// customer sits behind the colleague who forwarded it — the reply pivots to
+// the original sender (backend already handles this on send; the UI mirrors
+// it so Andrea's greeting matches what will actually go out).
+function getReplyRecipientName(email) {
+  if (!email) return 'there';
+  if (email.isForward) {
+    return email.originalFromName || email.originalFromEmail || email.from || 'there';
+  }
+  return email.from || 'there';
+}
+
 function buildDraft(email, inboxes) {
   const inboxTitle = resolveInboxTitle(inboxes, email.inbox);
   const signature = buildEmailSignature(inboxTitle);
   if (email.draftBody?.trim()) {
     return normalizeDraftSignature(email.draftBody, inboxTitle);
   }
-  return `Hi ${getFirstName(email.from)},\n\nWe've received your message. A member of our team will review your enquiry and respond shortly.\n\n${signature}`;
+  const recipientName = getFirstName(getReplyRecipientName(email));
+  return `Hi ${recipientName},\n\nWe've received your message. A member of our team will review your enquiry and respond shortly.\n\n${signature}`;
 }
 
-// Only Imported/Processing mean the AI is still working. Statuses like
+// Gmail-style forward body: two blank lines for Andrea to add commentary,
+// then a "---------- Forwarded message ---------" header, then the quoted
+// original. Kept as plain text so it round-trips cleanly through the send
+// pipeline and matches what real Gmail forwards look like on receive.
+function buildForwardDraft(email) {
+  const header = [
+    '---------- Forwarded message ---------',
+    `From: ${email.from} <${email.fromEmail}>`,
+    `Date: ${email.receivedAt}`,
+    `Subject: ${email.subject}`,
+    email.toEmails?.length ? `To: ${email.toEmails.join(', ')}` : null,
+    email.ccEmails?.length ? `Cc: ${email.ccEmails.join(', ')}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const original = (email.body || '').trimEnd();
+  return `\n\n${header}\n\n${original}\n`;
+}
+
+// Only Imported/Processing/Drafting mean the AI is still working. Statuses like
 // Flagged or No Draft must NOT show the composing panel (they never get a
 // draft automatically), otherwise flagging a stuck email looks like it did
 // nothing and "Composing your reply" spins forever.
+// "Drafting" = classified as a real enquiry and shown immediately (~2s), with
+// the reply still being composed — the row appears now and fills in shortly.
 function isDraftPending(email) {
   if (!email || email.deleted) return false;
-  return email.draftStatus === 'Imported' || email.draftStatus === 'Processing';
+  return (
+    email.draftStatus === 'Imported' ||
+    email.draftStatus === 'Processing' ||
+    email.draftStatus === 'Drafting'
+  );
 }
 
 function formatListTime(iso) {
@@ -168,25 +220,6 @@ function getDateGroupLabel(iso) {
   }
 }
 
-function groupEmailsByDateAndIntent(emails) {
-  const dateMap = new Map();
-  emails.forEach((email) => {
-    const dateLabel = getDateGroupLabel(email.receivedAt);
-    const intent = email.intent || 'Pending';
-    if (!dateMap.has(dateLabel)) dateMap.set(dateLabel, new Map());
-    const intentMap = dateMap.get(dateLabel);
-    if (!intentMap.has(intent)) intentMap.set(intent, []);
-    intentMap.get(intent).push(email);
-  });
-
-  return Array.from(dateMap.entries()).map(([dateLabel, intentMap]) => ({
-    dateLabel,
-    intentGroups: Array.from(intentMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([intent, items]) => ({ intent, items })),
-  }));
-}
-
 function formatDetailTime(iso) {
   try {
     return format(parseISO(iso), 'EEE, d MMM yyyy · HH:mm');
@@ -203,14 +236,6 @@ function matchesMailbox(email, mailbox) {
     case 'sent': return email.draftStatus === 'Sent';
     default: return true;
   }
-}
-
-function getPreviewLine(body) {
-  if (!body) return '';
-  const lines = body.split('\n').map((line) => line.trim()).filter(Boolean);
-  const meaningful = lines.find((line) => line.length > 8 && !/^(hi|hello)(\s+there)?,?$/i.test(line)) || lines.join(' ');
-  const trimmed = meaningful.length > 80 ? meaningful.slice(0, 80).trimEnd() : meaningful;
-  return trimmed ? `${trimmed}...` : '';
 }
 
 function emailMatchesDateRange(iso, dateFrom, dateTo) {
@@ -318,82 +343,6 @@ function BulkActionChip({ icon: Icon, label, onClick, variant = 'default', disab
   );
 }
 
-function EmailListItem({ email, selected, checked, onClick, onCheck }) {
-  const unread = !email.read;
-
-  const rowClass = selected
-    ? unread
-      ? 'bg-[#eef5ff] hover:bg-[#e3effc]'
-      : 'bg-[#f4f5f7] hover:bg-[#eceef2]'
-    : unread
-      ? 'bg-[#eef5ff] hover:bg-[#e3effc]'
-      : 'bg-white hover:bg-[var(--color-surface-panel)]/80';
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-current={selected || undefined}
-      onClick={onClick}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
-      className={`relative w-full text-left px-4 py-2 border-b border-[var(--color-border-default)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/40 ${rowClass} ${
-        selected ? 'shadow-[inset_3px_0_0_0_var(--color-brand-primary)]' : ''
-      }`}
-    >
-      <div className="flex items-start gap-2 min-w-0">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(e) => { e.stopPropagation(); onCheck(); }}
-          onClick={(e) => e.stopPropagation()}
-          className="mt-0.5 h-3.5 w-3.5 rounded border-[var(--color-brand-primary)]/35 text-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)] cursor-pointer shrink-0 accent-[var(--color-brand-primary)]"
-          aria-label={`Select ${email.from}`}
-        />
-
-        <div className="flex-1 min-w-0">
-          <p className={`text-sm truncate leading-snug ${
-            unread
-              ? 'font-bold text-[var(--color-text-primary)]'
-              : selected
-                ? 'font-normal text-[var(--color-brand-primary)]'
-                : 'font-normal text-[var(--color-text-secondary)]'
-          }`}>
-            {email.subject}
-          </p>
-          <p className={`text-xs mt-0.5 truncate ${
-            unread
-              ? 'font-semibold text-[var(--color-text-secondary)]'
-              : 'text-[var(--color-text-muted)]'
-          }`}>
-            {email.from}
-          </p>
-          <p className="text-[11px] mt-0.5 truncate leading-snug text-[var(--color-text-muted)]">
-            {getPreviewLine(email.body)}
-          </p>
-        </div>
-
-        <div className="flex flex-col items-end gap-1 shrink-0 min-w-[2.25rem]">
-          {unread && (
-            <span
-              className={`w-2 h-2 rounded-full bg-[var(--color-brand-primary)] ring-2 shrink-0 ${
-                selected ? 'ring-[#eef5ff]' : 'ring-[#eef5ff]'
-              }`}
-              aria-label="Unread"
-            />
-          )}
-          <span className={`text-[10px] tabular-nums ${
-            unread
-              ? 'font-bold text-[var(--color-brand-primary)]/75'
-              : 'text-[var(--color-text-muted)]'
-          }`}>
-            {formatListTime(email.receivedAt)}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function EmailQueue() {
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -414,6 +363,22 @@ export default function EmailQueue() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
   const [draftEdits, setDraftEdits] = useState({});
+  // Composer mode is a single global switch — 'reply' | 'reply-all' | 'forward'
+  // — because Andrea can only compose one outbound at a time. Reset when she
+  // switches which inbound she's replying to so a mid-forward doesn't leak
+  // into the next message.
+  const [composerMode, setComposerMode] = useState('reply');
+  // Reply-all Cc field per source message so switching threads doesn't
+  // wipe the addresses she was adding.
+  const [replyAllCcEdits, setReplyAllCcEdits] = useState({});
+  // Forward fields per source message so switching threads preserves the
+  // in-progress forward the same way replies do (user's explicit UX ask).
+  const [forwardEdits, setForwardEdits] = useState({});
+  // Gmail-style Compose window for a brand-new message (no AI, no thread).
+  const [composeOpen, setComposeOpen] = useState(false);
+  // True while subscribed to the Supabase Realtime channel (drives the "Live"
+  // indicator and means new mail arrives instantly rather than on the poll).
+  const [realtimeLive, setRealtimeLive] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -514,7 +479,8 @@ export default function EmailQueue() {
     });
 
     // Background revalidation — silent, keeps the page current (picks up
-    // changes made in Gmail or another tab).
+    // changes made in Gmail or another tab). This 30s poll is the fallback;
+    // Supabase Realtime (below) delivers most updates in ~1s.
     const refresh = () => { if (!document.hidden) revalidate(); };
     const interval = setInterval(refresh, 30000);
     window.addEventListener('focus', refresh);
@@ -525,6 +491,29 @@ export default function EmailQueue() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Realtime: the backend broadcasts a "workspace-changed" nudge whenever new
+  // mail is synced (Gmail push / poll). We refetch through the authed API on
+  // that signal, so the inbox updates instantly without content on the wire.
+  useEffect(() => {
+    const sb = getSupabase();
+    if (!sb) return undefined;
+
+    const channel = sb
+      .channel(REALTIME_CHANNEL)
+      .on('broadcast', { event: 'workspace-changed' }, () => {
+        // Skip while a local save is in flight (track() re-syncs afterwards).
+        if (pendingRef.current === 0) revalidate();
+      })
+      .subscribe((status) => {
+        setRealtimeLive(status === 'SUBSCRIBED');
+      });
+
+    return () => {
+      setRealtimeLive(false);
+      sb.removeChannel(channel);
+    };
+  }, [revalidate]);
 
   useEffect(() => {
     if (!sortOpen) return;
@@ -537,6 +526,25 @@ export default function EmailQueue() {
 
   const selectedEmail = emails.find((e) => e.id === selectedId) ?? null;
   const selectedDraftPending = selectedEmail ? isDraftPending(selectedEmail) : false;
+
+  // The thread the selected email belongs to (built from the full email set
+  // so the detail pane sees follow-ups even if they've been filtered out of
+  // the current mailbox view — Gmail also keeps the whole thread visible).
+  const selectedThread = useMemo(() => {
+    if (!selectedEmail) return null;
+    const key = threadKeyFor(selectedEmail);
+    const threadEmails = emails.filter((e) => threadKeyFor(e) === key);
+    const [thread] = groupIntoThreads(threadEmails, { accountEmail: inboxFilter });
+    return thread ?? null;
+  }, [selectedEmail, emails, inboxFilter]);
+
+  // Messages in the selected thread awaiting a reply — the picker offers
+  // Andrea a choice between them without destroying either draft.
+  const replyCandidates = useMemo(() => {
+    if (!selectedThread) return [];
+    const ids = new Set(selectedThread.awaitingReplyIds);
+    return selectedThread.messages.filter((m) => ids.has(m.id));
+  }, [selectedThread]);
 
   useEffect(() => {
     if (!selectedId || !selectedDraftPending) return undefined;
@@ -599,15 +607,38 @@ export default function EmailQueue() {
       });
   }, [emails, mailbox, inboxFilter, intentFilter, readFilter, search, dateFrom, dateTo, sortOrder, archivedIds]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE));
+  // Group the filtered messages into threads. The list, pagination, and
+  // detail pane all operate on threads from here on — one Gmail-style
+  // conversation per list row, all its messages stacked in the detail pane.
+  const filteredThreads = useMemo(
+    () => groupIntoThreads(filteredEmails, { sortOrder, accountEmail: inboxFilter }),
+    [filteredEmails, sortOrder, inboxFilter],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filteredThreads.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
 
-  const paginatedEmails = useMemo(() => {
+  const paginatedThreads = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
-    return filteredEmails.slice(start, start + PAGE_SIZE);
-  }, [filteredEmails, currentPage]);
+    return filteredThreads.slice(start, start + PAGE_SIZE);
+  }, [filteredThreads, currentPage]);
 
-  const listGroups = useMemo(() => groupEmailsByDateAndIntent(paginatedEmails), [paginatedEmails]);
+  // Kept for downstream code paths (bulk actions still operate on ids). All
+  // message ids currently visible in the paginated list, flattened.
+  const paginatedEmails = useMemo(
+    () => paginatedThreads.flatMap((t) => t.messages),
+    [paginatedThreads],
+  );
+
+  const listGroups = useMemo(() => {
+    const dateMap = new Map();
+    for (const thread of paginatedThreads) {
+      const label = getDateGroupLabel(thread.latestMessage?.receivedAt);
+      if (!dateMap.has(label)) dateMap.set(label, []);
+      dateMap.get(label).push(thread);
+    }
+    return Array.from(dateMap.entries()).map(([dateLabel, threads]) => ({ dateLabel, threads }));
+  }, [paginatedThreads]);
 
   const accountOptions = useMemo(
     () => inboxes.map((inbox) => ({
@@ -636,15 +667,6 @@ export default function EmailQueue() {
   const allPageChecked = paginatedEmails.length > 0 && paginatedEmails.every((e) => checkedIds.has(e.id));
   const somePageChecked = paginatedEmails.some((e) => checkedIds.has(e.id));
 
-  const toggleCheck = (id) => {
-    setCheckedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const toggleSelectAllPage = () => {
     if (allPageChecked) {
       setCheckedIds((prev) => {
@@ -672,9 +694,9 @@ export default function EmailQueue() {
   }, [mailbox, inboxFilter, intentFilter, readFilter, search, dateFrom, dateTo, sortOrder]);
 
   useLayoutEffect(() => {
-    const maxPage = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE));
+    const maxPage = Math.max(1, Math.ceil(filteredThreads.length / PAGE_SIZE));
     if (page > maxPage) setPage(maxPage);
-  }, [filteredEmails.length, page]);
+  }, [filteredThreads.length, page]);
 
   const hasActiveSearch = Boolean(search.trim());
   const hasActiveFilters = intentFilter !== 'All' || readFilter !== 'all' || dateFrom || dateTo;
@@ -691,23 +713,50 @@ export default function EmailQueue() {
     return buildDraft(email, inboxes);
   }, [draftEdits, inboxes]);
 
-  const handleSelect = (email) => {
-    const isNewSelection = selectedId !== email.id;
-    setSelectedId(email.id);
+  // Selecting a thread focuses the composer on its "active reply target" (the
+  // newest inbound that still needs a reply) and marks *every* unread message
+  // in the thread as read — Gmail behavior when you open a conversation.
+  const handleSelectThread = (thread) => {
+    const target = thread.activeReplyTarget || thread.latestMessage;
+    if (!target) return;
+    const isNewSelection = selectedId !== target.id;
+    setSelectedId(target.id);
     setIsEditingDraft(false);
-    // Only auto-mark read when opening a different email (not re-clicking the same row).
-    if (isNewSelection && !email.read) {
-      notePendingPatches([email.id], { read: true });
-      updateEmailsOptimistic((prev) =>
-        prev.map((e) => (e.id === email.id ? { ...e, read: true } : e))
-      );
-      track(patchEmail(email.id, { read: true }))
-        .then((updated) => mergeEmailPatches(updated))
-        .catch(() => clearPendingPatches([email.id], ['read']));
+    if (isNewSelection) setComposerMode('reply');
+
+    if (isNewSelection) {
+      const unreadIds = thread.messages
+        .filter((m) => !m.read && !m.gmailIsOutbound && m.draftStatus !== 'Sent')
+        .map((m) => m.id);
+      if (unreadIds.length > 0) {
+        notePendingPatches(unreadIds, { read: true });
+        updateEmailsOptimistic((prev) =>
+          prev.map((e) => (unreadIds.includes(e.id) ? { ...e, read: true } : e)),
+        );
+        track(bulkPatchEmails(unreadIds, { read: true }))
+          .then((updated) => mergeEmailPatches(updated))
+          .catch(() => clearPendingPatches(unreadIds, ['read']));
+      }
     }
-    if (draftEdits[email.id] == null && !isDraftPending(email)) {
-      setDraftEdits((prev) => ({ ...prev, [email.id]: buildDraft(email, inboxes) }));
-    }
+
+    // Seed the draft edit slot for every reply candidate so switching between
+    // pending messages via the picker never triggers a fresh compose that
+    // might overwrite what the AI already produced.
+    setDraftEdits((prev) => {
+      const next = { ...prev };
+      for (const msg of thread.messages) {
+        if (next[msg.id] == null && !isDraftPending(msg)) {
+          next[msg.id] = buildDraft(msg, inboxes);
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleSelectReplyTarget = (messageId) => {
+    setSelectedId(messageId);
+    setIsEditingDraft(false);
+    setComposerMode('reply');
   };
 
   const handleCancelDraft = () => {
@@ -949,28 +998,138 @@ export default function EmailQueue() {
 
   const clearSelection = () => setCheckedIds(new Set());
 
+  // Address book for the Forward / Reply-all pickers is built from every
+  // email currently loaded — that gives Andrea a "people she's already
+  // corresponded with" pool without a separate contacts API. Her own inboxes
+  // are excluded so she can never accidentally forward to herself.
+  const addressBook = useMemo(
+    () => buildAddressBook(emails, { excludeInboxes: inboxes.map((i) => i.email) }),
+    [emails, inboxes],
+  );
+
+  const getForwardDraft = (email) => {
+    const stored = forwardEdits[email.id];
+    if (stored) return stored;
+    return { to: '', cc: '', body: buildForwardDraft(email) };
+  };
+
+  // Functional update so patches to an unseeded entry don't lose the auto-
+  // quoted original — we build the seed on first write from the full email.
+  const updateForwardDraft = (email, patch) => {
+    setForwardEdits((prev) => {
+      const existing = prev[email.id] || { to: '', cc: '', body: buildForwardDraft(email) };
+      return { ...prev, [email.id]: { ...existing, ...patch } };
+    });
+  };
+
+  // Toggling into forward mode seeds the draft up-front so the textarea
+  // renders with the quoted original on the very first paint.
+  const setComposerModeSafe = (mode) => {
+    setComposerMode(mode);
+    setIsEditingDraft(false);
+    if (mode === 'forward' && selectedEmail && !forwardEdits[selectedEmail.id]) {
+      setForwardEdits((prev) => ({
+        ...prev,
+        [selectedEmail.id]: { to: '', cc: '', body: buildForwardDraft(selectedEmail) },
+      }));
+    }
+  };
+
   const handleSend = async () => {
     if (!selectedEmail) return;
+    if (composerMode === 'forward') {
+      await handleForwardSend();
+      return;
+    }
     if (selectedEmail.flagged && !selectedEmail.templateUsed) {
       showToast('Resolve the flag before sending this reply.', 'error');
       return;
     }
+    const body = getDraftForEmail(selectedEmail);
     try {
-      // The backend sends via Gmail and records the draft-vs-sent diff
-      // (the learning signal) in the same call.
-      const updated = await track(sendEmail(selectedEmail.id, getDraftForEmail(selectedEmail)));
+      let updated;
+      if (composerMode === 'reply-all') {
+        const extraCc = parseRecipientList(replyAllCcEdits[selectedEmail.id] ?? '');
+        const bad = extraCc.find((addr) => !isValidEmail(addr));
+        if (bad) {
+          showToast(`Invalid Cc address: ${bad}`, 'error');
+          return;
+        }
+        updated = await track(sendReplyAll(selectedEmail.id, body, extraCc));
+        showToast(`Reply-all sent to ${selectedEmail.fromEmail} via Gmail.`, 'success');
+      } else {
+        // Backend sends via Gmail and records the draft-vs-sent diff (the
+        // learning signal) in the same call.
+        updated = await track(sendEmail(selectedEmail.id, body));
+        showToast(`Reply sent to ${selectedEmail.fromEmail} via Gmail.`, 'success');
+      }
       notePendingPatches([updated.id], { draftStatus: updated.draftStatus });
       updateEmailsOptimistic((prev) => prev.map((e) => (e.id === updated.id ? normalizeEmail(updated) : e)));
-      showToast(`Reply sent to ${selectedEmail.fromEmail} via Gmail.`, 'success');
       setIsEditingDraft(false);
+      setComposerMode('reply');
       setMailbox('sent');
     } catch (err) {
       showToast(`Send failed: ${err.message}`, 'error');
     }
   };
 
-  const pageStart = filteredEmails.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredEmails.length);
+  const handleForwardSend = async () => {
+    if (!selectedEmail) return;
+    const forward = getForwardDraft(selectedEmail);
+    const to = parseRecipientList(forward.to);
+    const cc = parseRecipientList(forward.cc);
+    if (to.length === 0) {
+      showToast('Add at least one recipient to forward to.', 'error');
+      return;
+    }
+    const badTo = to.find((addr) => !isValidEmail(addr));
+    if (badTo) {
+      showToast(`Invalid recipient: ${badTo}`, 'error');
+      return;
+    }
+    const badCc = cc.find((addr) => !isValidEmail(addr));
+    if (badCc) {
+      showToast(`Invalid Cc: ${badCc}`, 'error');
+      return;
+    }
+    const selfHit = [...to, ...cc].find((addr) =>
+      addr.toLowerCase() === (selectedEmail.inbox || '').toLowerCase(),
+    );
+    if (selfHit) {
+      showToast('Cannot forward to the same inbox that owns the message.', 'error');
+      return;
+    }
+    try {
+      const updated = await track(sendForward(selectedEmail.id, forward.body, to, cc));
+      notePendingPatches([updated.id], { draftStatus: updated.draftStatus });
+      updateEmailsOptimistic((prev) => prev.map((e) => (e.id === updated.id ? normalizeEmail(updated) : e)));
+      // Drop the local forward draft since it's been sent.
+      setForwardEdits((prev) => {
+        const next = { ...prev };
+        delete next[selectedEmail.id];
+        return next;
+      });
+      showToast(`Forwarded to ${to.join(', ')} via Gmail.`, 'success');
+      setComposerMode('reply');
+      setMailbox('sent');
+    } catch (err) {
+      showToast(`Forward failed: ${err.message}`, 'error');
+    }
+  };
+
+  // Compose a brand-new message (no AI). The sent message returns as an
+  // outbound row; we merge it into local state and jump to Sent so Andrea
+  // sees it land, exactly like a reply.
+  const handleCompose = async (payload) => {
+    const created = await track(composeMessage(payload));
+    const normalized = normalizeEmail(created);
+    updateEmailsOptimistic((prev) => [normalized, ...prev.filter((e) => e.id !== normalized.id)]);
+    showToast(`Message sent to ${payload.toEmails.join(', ')} via Gmail.`, 'success');
+    setMailbox('sent');
+  };
+
+  const pageStart = filteredThreads.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredThreads.length);
 
   return (
     <div className={`${adminPageShellClass} select-none`}>
@@ -981,20 +1140,43 @@ export default function EmailQueue() {
         title="Email Responses"
         description="Review incoming mail, edit AI drafts, and send replies from connected inboxes."
         workspace
+        className="shrink-0"
         actions={
-          <div
-            className="flex items-center gap-1.5 h-9 rounded-lg border border-[var(--color-brand-primary)]/25 bg-gradient-to-r from-[#f4f7fd] via-[#e9eff9] to-[#eef3fb] pl-2.5 pr-1 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
-            title={inboxFilter}
-          >
-            <Mail className="w-3.5 h-3.5 text-[var(--color-brand-primary)] shrink-0" aria-hidden="true" />
-            <SelectDropdown
-              value={inboxFilter}
-              onChange={setInboxFilter}
-              options={accountOptions}
-              size="xs"
-              variant="soft"
-              className="w-32 sm:w-36"
-            />
+          <div className="flex items-center gap-2">
+            {realtimeLive && (
+              <span
+                className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg border border-emerald-200 bg-emerald-50 text-[11px] font-semibold text-emerald-700"
+                title="Real-time updates are on — new mail appears instantly"
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+                Live
+              </span>
+            )}
+            <div
+              className="flex items-center gap-1.5 h-9 rounded-lg border border-[var(--color-brand-primary)]/25 bg-gradient-to-r from-[#f4f7fd] via-[#e9eff9] to-[#eef3fb] pl-2.5 pr-1 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
+              title={inboxFilter}
+            >
+              <Mail className="w-3.5 h-3.5 text-[var(--color-brand-primary)] shrink-0" aria-hidden="true" />
+              <SelectDropdown
+                value={inboxFilter}
+                onChange={setInboxFilter}
+                options={accountOptions}
+                size="xs"
+                variant="soft"
+                className="w-32 sm:w-36"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setComposeOpen(true)}
+              className="inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer shrink-0"
+            >
+              <PenSquare className="w-4 h-4" aria-hidden="true" />
+              <span className="hidden sm:inline">Compose</span>
+            </button>
           </div>
         }
       />
@@ -1033,8 +1215,8 @@ export default function EmailQueue() {
             <p className="flex-1 min-w-0 text-[11px] leading-snug text-[var(--color-text-secondary)]">
               <span className="font-semibold text-[var(--color-text-primary)]">Importing and drafting emails.</span>{' '}
               {pendingAiCount > 0
-                ? `${pendingAiCount} email${pendingAiCount === 1 ? '' : 's'} being classified — they'll appear here once their drafts are ready.`
-                : 'New mail is being imported — emails appear here once their drafts are ready.'}
+                ? `${pendingAiCount} email${pendingAiCount === 1 ? '' : 's'} being classified. They'll appear here once their drafts are ready.`
+                : 'New mail is being imported. Emails appear here once their drafts are ready.'}
             </p>
           </div>
         )}
@@ -1244,7 +1426,7 @@ export default function EmailQueue() {
           )}
 
           {/* Select all + bulk actions */}
-          {filteredEmails.length > 0 && (
+          {filteredThreads.length > 0 && (
             <div
               className={`shrink-0 border-b border-[var(--color-border-default)] transition-colors ${
                 hasSelection ? 'bg-[var(--color-brand-primary)]/[0.04]' : 'bg-[var(--color-surface-highlight)]/25'
@@ -1392,7 +1574,7 @@ export default function EmailQueue() {
           <div className="flex-1 overflow-y-auto min-h-0">
             {listLoading ? (
               <EmailListSkeleton rows={10} />
-            ) : filteredEmails.length === 0 ? (
+            ) : filteredThreads.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full p-6 text-center">
                 {mailbox === 'bin' ? (
                   <>
@@ -1411,43 +1593,46 @@ export default function EmailQueue() {
                 )}
               </div>
             ) : (
-              listGroups.map(({ dateLabel, intentGroups }) => (
+              listGroups.map(({ dateLabel, threads }) => (
                 <section key={dateLabel}>
-                  <div className="sticky top-0 z-20 px-4 py-1.5 bg-white/95 backdrop-blur-sm border-b border-[var(--color-border-default)] shadow-[inset_0_-1px_0_0_var(--color-brand-primary)]/20">
+                  <div className="sticky top-0 z-20 flex items-center justify-between gap-2 px-4 py-1.5 bg-white/95 backdrop-blur-sm border-b border-[var(--color-border-default)] shadow-[inset_0_-1px_0_0_var(--color-brand-primary)]/20">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]/75">{dateLabel}</p>
+                    <span className="text-[10px] font-medium tabular-nums text-[var(--color-text-muted)]">
+                      {threads.length}
+                    </span>
                   </div>
-                  {intentGroups.map(({ intent, items }) => (
-                    <div key={`${dateLabel}-${intent}`}>
-                      <div className="sticky top-[26px] z-10 flex items-center justify-between gap-2 px-4 py-0.5 bg-white border-b border-[var(--color-border-default)]">
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-                          {intent}
-                        </p>
-                        <span className="text-[10px] font-medium tabular-nums text-[var(--color-text-muted)]">
-                          {items.length}
-                        </span>
-                      </div>
-                      {items.map((email) => (
-                        <EmailListItem
-                          key={email.id}
-                          email={email}
-                          selected={selectedId === email.id}
-                          checked={checkedIds.has(email.id)}
-                          onClick={() => handleSelect(email)}
-                          onCheck={() => toggleCheck(email.id)}
-                        />
-                      ))}
-                    </div>
-                  ))}
+                  {threads.map((thread) => {
+                    const threadIds = thread.messages.map((m) => m.id);
+                    const allChecked = threadIds.every((id) => checkedIds.has(id));
+                    return (
+                      <ThreadListItem
+                        key={thread.key}
+                        thread={thread}
+                        selected={selectedThread?.key === thread.key}
+                        checked={allChecked}
+                        // eslint-disable-next-line react-hooks/refs -- onClick handlers run outside render; the ref inside `track` is only touched on click.
+                        onClick={() => handleSelectThread(thread)}
+                        onCheck={() => {
+                          setCheckedIds((prev) => {
+                            const next = new Set(prev);
+                            if (allChecked) threadIds.forEach((id) => next.delete(id));
+                            else threadIds.forEach((id) => next.add(id));
+                            return next;
+                          });
+                        }}
+                      />
+                    );
+                  })}
                 </section>
               ))
             )}
           </div>
 
           {/* Pagination */}
-          {filteredEmails.length > 0 && (
+          {filteredThreads.length > 0 && (
             <div className="shrink-0 border-t border-[var(--color-border-default)] px-3 py-2 flex items-center justify-between bg-white">
               <span className="text-[11px] font-medium text-[var(--color-text-muted)]">
-                {pageStart}–{pageEnd} of {filteredEmails.length}
+                {pageStart}–{pageEnd} of {filteredThreads.length}
               </span>
               <div className="flex items-center gap-1">
                 <button
@@ -1696,29 +1881,75 @@ export default function EmailQueue() {
                   </div>
                 )}
 
+                {/* When Andrea has more than one message waiting for a reply
+                    on this thread, let her pick which one to work on first.
+                    Each pending message keeps its own AI draft, so switching
+                    between them never destroys her in-progress edit. */}
+                <ReplyTargetPicker
+                  candidates={replyCandidates}
+                  activeId={selectedEmail.id}
+                  onSelect={handleSelectReplyTarget}
+                />
+
                 {/* AI Generated Response */}
                 <section>
                   <div className={`rounded-xl border border-[var(--color-border-default)] bg-white shadow-sm overflow-hidden ${selectedEmail.deleted ? 'opacity-60 pointer-events-none' : ''}`}>
-                    <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--color-border-default)]/70">
+                    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--color-border-default)]/70">
                       <div className="flex items-center gap-2 min-w-0">
                         {selectedDraftPending ? (
                           <span className="inline-flex items-center gap-1.5 shrink-0 px-2 py-0.5 rounded-md bg-[#edf4fc] text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]">
                             <Sparkles className="w-3 h-3 animate-pulse" style={{ animationDuration: '1.6s' }} />
                             Creating reply draft
                           </span>
+                        ) : composerMode === 'forward' ? (
+                          <span className="inline-flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-md bg-amber-50 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                            <Forward className="w-3 h-3" />
+                            Forwarding
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-md bg-[var(--color-surface-highlight)] text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]">
                             <Sparkles className="w-3 h-3" />
-                            Reply draft ready
+                            {composerMode === 'reply-all' ? 'Reply-all draft ready' : 'Reply draft ready'}
                           </span>
                         )}
                         {selectedEmail.draftStatus === 'Sent' && (
                           <span className="text-[10px] font-medium text-[var(--color-text-muted)]">Sent</span>
                         )}
                       </div>
-                      {selectedEmail.draftStatus !== 'Sent' && !selectedDraftPending && (
-                        <div className="flex items-center gap-2 shrink-0">
-                          {!isEditingDraft ? (
+                      <div className="flex items-center gap-2 shrink-0">
+                        {/* Gmail-style Reply / Reply-all / Forward switch.
+                            Hidden once the message has been sent — a
+                            replied-to thread doesn't need the picker. */}
+                        {selectedEmail.draftStatus !== 'Sent' && !selectedDraftPending && (
+                          <div
+                            role="tablist"
+                            aria-label="Compose mode"
+                            className="inline-flex rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/60 p-0.5 text-[11px] font-semibold"
+                          >
+                            {[
+                              { id: 'reply', label: 'Reply' },
+                              { id: 'reply-all', label: 'Reply all' },
+                              { id: 'forward', label: 'Forward' },
+                            ].map((mode) => (
+                              <button
+                                key={mode.id}
+                                type="button"
+                                role="tab"
+                                aria-selected={composerMode === mode.id}
+                                onClick={() => setComposerModeSafe(mode.id)}
+                                className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                                  composerMode === mode.id
+                                    ? 'bg-white text-[var(--color-brand-primary)] shadow-sm'
+                                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                                }`}
+                              >
+                                {mode.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {composerMode !== 'forward' && selectedEmail.draftStatus !== 'Sent' && !selectedDraftPending && (
+                          !isEditingDraft ? (
                             <button
                               type="button"
                               onClick={() => setIsEditingDraft(true)}
@@ -1735,19 +1966,64 @@ export default function EmailQueue() {
                             >
                               Cancel
                             </button>
-                          )}
-                        </div>
-                      )}
+                          )
+                        )}
+                      </div>
                     </div>
+
+                    {/* Reply-all Cc field. Kept between the tab strip and the
+                        AI draft so it reads top-to-bottom like Gmail. */}
+                    {composerMode === 'reply-all' && selectedEmail.draftStatus !== 'Sent' && !selectedDraftPending && (
+                      <div className="px-4 pt-3">
+                        <RecipientField
+                          label="Cc"
+                          value={replyAllCcEdits[selectedEmail.id] ?? (selectedEmail.ccEmails || []).filter((a) => a && a.toLowerCase() !== (selectedEmail.inbox || '').toLowerCase()).join(', ')}
+                          onChange={(next) => setReplyAllCcEdits((prev) => ({ ...prev, [selectedEmail.id]: next }))}
+                          book={addressBook}
+                          placeholder="cc@example.com, another@example.com"
+                        />
+                      </div>
+                    )}
 
                     <div className="px-4 py-4 bg-[var(--color-surface-bg)]/40">
                       {selectedDraftPending ? (
                         <DraftCreatingPanel subject={selectedEmail.subject} />
+                      ) : composerMode === 'forward' ? (
+                        // Native forward compose: To (required) + Cc + plain
+                        // textarea prefilled with the quoted original. No AI
+                        // greeting/signature shell here — a forward carries
+                        // the source message verbatim and Andrea may add her
+                        // own note on top.
+                        <div className="space-y-3">
+                          <RecipientField
+                            label="To"
+                            required
+                            autoFocus
+                            value={getForwardDraft(selectedEmail).to}
+                            onChange={(next) => updateForwardDraft(selectedEmail, { to: next })}
+                            book={addressBook}
+                            placeholder="recipient@example.com"
+                          />
+                          <RecipientField
+                            label="Cc"
+                            value={getForwardDraft(selectedEmail).cc}
+                            onChange={(next) => updateForwardDraft(selectedEmail, { cc: next })}
+                            book={addressBook}
+                            placeholder="cc@example.com"
+                          />
+                          <textarea
+                            value={getForwardDraft(selectedEmail).body}
+                            onChange={(e) => updateForwardDraft(selectedEmail, { body: e.target.value })}
+                            rows={14}
+                            className="w-full rounded-lg border border-[var(--color-border-default)] bg-white px-4 py-3.5 text-sm text-[var(--color-text-primary)] leading-relaxed font-sans resize-y focus:outline-none focus:border-[var(--color-brand-primary)]/30 focus:ring-2 focus:ring-[var(--color-brand-primary)]/10 min-h-[240px]"
+                          />
+                        </div>
                       ) : selectedEmail.draftStatus === 'Sent' || !isEditingDraft ? (
                         <div className="rounded-lg bg-white px-4 py-3.5 text-sm text-[var(--color-text-primary)] min-h-[120px] border border-[var(--color-border-default)]/60">
                           <DraftBodyDisplay
                             body={getDraftForEmail(selectedEmail)}
                             inboxTitle={resolveInboxTitle(inboxes, selectedEmail.inbox)}
+                            firstName={getFirstName(getReplyRecipientName(selectedEmail))}
                           />
                         </div>
                       ) : (
@@ -1764,17 +2040,25 @@ export default function EmailQueue() {
                       <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-[var(--color-border-default)]/70 bg-white">
                         <p className="text-[11px] text-[var(--color-text-muted)] truncate min-w-0">
                           From <span className="font-medium text-[var(--color-text-secondary)]">{selectedEmail.inbox}</span>
-                          <span className="mx-1.5 text-[var(--color-border-default)]">·</span>
-                          Opens with Hi {getFirstName(selectedEmail.from)}
+                          {composerMode !== 'forward' && (
+                            <>
+                              <span className="mx-1.5 text-[var(--color-border-default)]">·</span>
+                              Opens with Hi {getFirstName(getReplyRecipientName(selectedEmail))}
+                            </>
+                          )}
                         </p>
                         <button
                           type="button"
                           onClick={handleSend}
-                          disabled={selectedEmail.flagged && !selectedEmail.templateUsed}
+                          disabled={composerMode !== 'forward' && selectedEmail.flagged && !selectedEmail.templateUsed}
                           className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                         >
                           <Send className="w-4 h-4" />
-                          Send
+                          {composerMode === 'forward'
+                            ? 'Forward'
+                            : composerMode === 'reply-all'
+                              ? 'Send reply-all'
+                              : 'Send'}
                         </button>
                       </div>
                     )}
@@ -1783,23 +2067,56 @@ export default function EmailQueue() {
 
                 <hr className="border-[var(--color-border-default)]" />
 
-                {/* Original email — below, per wireframe */}
-                <section>
-                  <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)] mb-2">Original email</h3>
-                  <div className="text-[11px] text-[var(--color-text-secondary)] space-y-0.5 mb-2">
+                {/* The message Andrea is currently replying to. Bare in Gmail
+                    this would be "Original email"; on threads that's still
+                    the one you're active on, so we label it clearly and
+                    surface the forwarded-in banner when applicable. */}
+                <section className="space-y-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
+                    Replying to
+                  </h3>
+                  {selectedEmail.isForward && <ForwardedInBanner message={selectedEmail} />}
+                  <div className="text-[11px] text-[var(--color-text-secondary)] space-y-0.5">
                     <p><span className="font-semibold text-[var(--color-text-primary)]">From:</span> {selectedEmail.from} &lt;{selectedEmail.fromEmail}&gt;</p>
                     <p><span className="font-semibold text-[var(--color-text-primary)]">To:</span> {selectedEmail.inbox}</p>
+                    {selectedEmail.ccEmails?.length ? (
+                      <p><span className="font-semibold text-[var(--color-text-primary)]">Cc:</span> {selectedEmail.ccEmails.join(', ')}</p>
+                    ) : null}
                     <p><span className="font-semibold text-[var(--color-text-primary)]">Received:</span> {formatDetailTime(selectedEmail.receivedAt)}</p>
                   </div>
-                  <div className="text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-wrap">
-                    {selectedEmail.body}
-                  </div>
+                  {selectedEmail.htmlBody ? (
+                    <SafeHtml html={selectedEmail.htmlBody} className="text-sm text-[var(--color-text-primary)] leading-relaxed" />
+                  ) : (
+                    <div className="text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-wrap">
+                      {selectedEmail.body}
+                    </div>
+                  )}
+                  {selectedEmail.attachments?.length ? (
+                    <AttachmentChips
+                      emailId={selectedEmail.id}
+                      attachments={selectedEmail.attachments}
+                      onError={(msg) => showToast(msg, 'error')}
+                      className="pt-1"
+                    />
+                  ) : null}
                   {selectedEmail.templateUsed && (
-                    <p className="mt-4 text-xs text-[var(--color-text-muted)]">
+                    <p className="mt-2 text-xs text-[var(--color-text-muted)]">
                       Matched template: <span className="font-semibold text-[var(--color-text-primary)]">{selectedEmail.templateUsed}</span>
                     </p>
                   )}
                 </section>
+
+                {/* Every other message in the thread, chronological. Prior
+                    messages start collapsed; Andrea clicks to expand any
+                    one. This is the Gmail thread view — one row for the
+                    conversation, all messages stacked when opened. */}
+                {selectedThread && selectedThread.messages.length > 1 && (
+                  <ThreadHistory
+                    thread={selectedThread}
+                    activeMessageId={selectedEmail.id}
+                    onAttachmentError={(msg) => showToast(msg, 'error')}
+                  />
+                )}
               </div>
             </div>
           )}
@@ -1844,6 +2161,20 @@ export default function EmailQueue() {
           </p>
         </div>
       </Modal>
+
+      {/* Gmail-style Compose — a brand-new message, no AI, no thread. Mounted
+          only while open so each session starts from a clean form. */}
+      {composeOpen && (
+        <ComposeModal
+          isOpen
+          onClose={() => setComposeOpen(false)}
+          inboxes={inboxes}
+          defaultInbox={inboxFilter}
+          addressBook={addressBook}
+          onSend={handleCompose}
+          onError={(msg) => showToast(msg, 'error')}
+        />
+      )}
     </div>
   );
 }

@@ -290,6 +290,20 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
     )
     signature = build_signature(account.title if account else email.account_email)
 
+    # Spam/noise was filtered out above (should_ignore), so this is a real
+    # enquiry. Surface it to the dashboard NOW — before the slower compose step
+    # — so it appears in ~2s with a "drafting…" state instead of only after the
+    # full reply is written (~several seconds later). The draft fills in when
+    # compose finishes and the batch broadcasts its own nudge.
+    email.draft_status = "Drafting"
+    db.commit()
+    try:
+        from app.pilot2 import realtime
+
+        realtime.workspace_changed("classified", 1)
+    except Exception:
+        logger.exception("Realtime nudge after classification failed for %s", email.id)
+
     draft = composer.compose(
         email.body,
         email.subject,

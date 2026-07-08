@@ -466,17 +466,17 @@ _ai_batch_lock = threading.Lock()
 def process_ai_batch(db: Session) -> int:
     """Run classifier + composer for imported messages (rate-limited batch).
 
-    Also reclaims rows stuck in "Processing": the lock guarantees only one
-    batch runs per process, so any committed Processing row seen here was
-    orphaned by an interrupted run (restart/crash) and must be retried —
-    otherwise it shows "composing" in the UI forever.
+    Also reclaims rows stuck in "Processing"/"Drafting": the lock guarantees
+    only one batch runs per process, so any committed Processing/Drafting row
+    seen here was orphaned by an interrupted run (restart/serverless freeze) and
+    must be retried — otherwise it shows "drafting" in the UI forever.
     """
     if not _ai_batch_lock.acquire(blocking=False):
         return 0
     try:
         rows = (
             db.query(models.Email)
-            .filter(models.Email.draft_status.in_(["Imported", "Processing"]))
+            .filter(models.Email.draft_status.in_(["Imported", "Processing", "Drafting"]))
             .order_by(models.Email.received_at.asc())
             .limit(config.AI_BATCH_SIZE)
             .all()
