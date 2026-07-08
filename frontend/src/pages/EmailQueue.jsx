@@ -22,13 +22,9 @@ import { buildThreadTranscript, groupIntoThreads, threadKeyFor } from '../utils/
 import { buildAddressBook, parseRecipientList, isValidEmail, seedReplyAllRecipients } from '../utils/emailAddressBook';
 import { resolveSelectedInbox, writeSelectedInbox } from '../utils/selectedInbox';
 import { buildEmailSignature, normalizeDraftSignature, resolveInboxTitle } from '../utils/emailSignature';
-import { getSupabase } from '../supabaseClient';
+import { useRealtimeBroadcast } from '../hooks/useRealtimeBroadcast';
 
 const PAGE_SIZE = 20;
-
-// Must match the backend PILOT2_REALTIME_CHANNEL default. Overridable via env
-// if you ever run multiple environments against one Supabase project.
-const REALTIME_CHANNEL = import.meta.env.VITE_PILOT2_REALTIME_CHANNEL || 'pilot2-workspace';
 
 function normalizeEmail(email) {
   return {
@@ -492,25 +488,10 @@ export default function EmailQueue() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Realtime: the backend broadcasts a "workspace-changed" nudge whenever new
-  // mail is synced (Gmail push / poll). We refetch through the authed API on
-  // that signal, so the inbox updates instantly without content on the wire.
-  useEffect(() => {
-    const sb = getSupabase();
-    if (!sb) return undefined;
-
-    const channel = sb
-      .channel(REALTIME_CHANNEL)
-      .on('broadcast', { event: 'workspace-changed' }, () => {
-        // Skip while a local save is in flight (track() re-syncs afterwards).
-        if (pendingRef.current === 0) revalidate();
-      })
-      .subscribe();
-
-    return () => {
-      sb.removeChannel(channel);
-    };
-  }, [revalidate]);
+  useRealtimeBroadcast('workspace-changed', () => {
+    // Skip while a local save is in flight (track() re-syncs afterwards).
+    if (pendingRef.current === 0) revalidate();
+  });
 
   useEffect(() => {
     if (!sortOpen) return;

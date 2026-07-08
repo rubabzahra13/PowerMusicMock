@@ -9,6 +9,7 @@ import ManagerRequestHistoryTabs, {
 } from './ManagerRequestHistoryTabs';
 import {
   countManagerHandledRequestUnseen,
+  countManagerPendingUnseen,
   dismissAllManagerHandledHighlights,
   dismissManagerPendingHighlights,
   markManagerHandledRequestViewed,
@@ -16,6 +17,34 @@ import {
 import { totalPages } from '../../utils/managerRequestHistory';
 import { paginateManagerRequests, sortManagerRequestsForTab } from '../../hooks/useManagerRequests';
 import { useAdaptiveListPageSize } from '../../hooks/useAdaptiveListPageSize';
+
+function latestHandledRequestId(requests) {
+  let latestId = null;
+  let latestTime = -1;
+  for (const request of requests) {
+    if (request.status !== 'handled') continue;
+    const time = request.handledAt ? new Date(request.handledAt).getTime() : 0;
+    if (time > latestTime) {
+      latestTime = time;
+      latestId = request.id;
+    }
+  }
+  return latestId;
+}
+
+function latestPendingRequestId(requests) {
+  let latestId = null;
+  let latestTime = -1;
+  for (const request of requests) {
+    if (request.status !== 'new') continue;
+    const time = request.receivedAt ? new Date(request.receivedAt).getTime() : 0;
+    if (time > latestTime) {
+      latestTime = time;
+      latestId = request.id;
+    }
+  }
+  return latestId;
+}
 
 export default function ManagerRequestHistoryModal({
   isOpen,
@@ -38,6 +67,11 @@ export default function ManagerRequestHistoryModal({
     return countManagerHandledRequestUnseen();
   }, [highlightVersion]);
 
+  const pendingUnseenInSession = useMemo(() => {
+    void highlightVersion;
+    return countManagerPendingUnseen();
+  }, [highlightVersion]);
+
   const tabbedRequests = useMemo(
     () => sortManagerRequestsForTab(requests, activeTab),
     [requests, activeTab],
@@ -56,6 +90,17 @@ export default function ManagerRequestHistoryModal({
     [paged.total, pageSize],
   );
 
+  const spotlightRequestId = useMemo(() => {
+    void highlightVersion;
+    if (unreadCount > 0 && (activeTab === 'handled' || activeTab === 'all')) {
+      return latestHandledRequestId(tabbedRequests);
+    }
+    if (pendingUnseenInSession > 0 && (activeTab === 'new' || activeTab === 'all')) {
+      return latestPendingRequestId(tabbedRequests);
+    }
+    return null;
+  }, [activeTab, highlightVersion, pendingUnseenInSession, tabbedRequests, unreadCount]);
+
   useEffect(() => {
     if (!isOpen) return;
     setPage(1);
@@ -67,7 +112,11 @@ export default function ManagerRequestHistoryModal({
 
   const handleOpenRequest = (request) => {
     if (request.status !== 'handled') return;
-    markManagerHandledRequestViewed(request.id);
+    if (request.id === spotlightRequestId) {
+      dismissAllManagerHandledHighlights();
+    } else {
+      markManagerHandledRequestViewed(request.id);
+    }
     onHighlightChange?.();
   };
 
@@ -79,6 +128,7 @@ export default function ManagerRequestHistoryModal({
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     dismissManagerPendingHighlights(requests);
+    dismissAllManagerHandledHighlights();
     onHighlightChange?.();
   };
 
@@ -187,7 +237,7 @@ export default function ManagerRequestHistoryModal({
                     request={request}
                     rowNumber={pageRangeStart + index}
                     onOpen={handleOpenRequest}
-                    highlightVersion={highlightVersion}
+                    showAsNew={request.id === spotlightRequestId}
                   />
                 ))}
               </ul>

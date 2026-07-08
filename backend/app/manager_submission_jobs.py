@@ -13,6 +13,7 @@ from app.manager_request_intake import intake_manager_submission, manager_id_for
 from app.request_display import allocate_request_ids, hydrate_request_display
 from app.manager_request_serialize import requests_to_api_dicts
 from app.manager_request_summary_cache import invalidate_manager_request_summary
+from app.partner_requests_realtime import notify_admin_requests_changed
 from app.manager_request_stats import increment_manager_request_stats
 
 JOB_PENDING = "pending"
@@ -131,7 +132,7 @@ def process_pending_manager_submission_jobs(db: Session, *, limit: int = 20) -> 
                 manager_user_id=manager_user_id,
             )
             job.status = JOB_DONE
-            job.result = {"items": items, "count": len(items)}
+            job.result = {"count": len(items)}
             job.error = None
             processed += 1
         except Exception as exc:
@@ -152,6 +153,7 @@ def process_pending_manager_submission_jobs(db: Session, *, limit: int = 20) -> 
                 db.commit()
                 if job.status == JOB_DONE and job.manager_id:
                     invalidate_manager_request_summary(str(job.manager_id))
+                    notify_admin_requests_changed("manager_batch")
 
     return {"claimed": len(claimed), "processed": processed, "failed": failed}
 
@@ -178,7 +180,7 @@ def process_manager_submission_job_by_id(db: Session, job_id: str) -> Optional[m
             manager_user_id=manager_user_id,
         )
         job.status = JOB_DONE
-        job.result = {"items": items, "count": len(items)}
+        job.result = {"count": len(items)}
         job.error = None
     except Exception as exc:
         db.rollback()
@@ -198,6 +200,7 @@ def process_manager_submission_job_by_id(db: Session, job_id: str) -> Optional[m
             db.refresh(job)
             if job.status == JOB_DONE and job.manager_id:
                 invalidate_manager_request_summary(str(job.manager_id))
+                notify_admin_requests_changed("manager_batch")
 
     return job
 

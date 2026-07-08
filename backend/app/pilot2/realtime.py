@@ -17,6 +17,7 @@ Design choices:
 
 import json
 import logging
+import urllib.parse
 import urllib.request
 
 from app.pilot2 import config
@@ -24,6 +25,7 @@ from app.pilot2 import config
 logger = logging.getLogger(__name__)
 
 WORKSPACE_CHANGED = "workspace-changed"
+REQUESTS_CHANGED = "requests-changed"
 
 
 def broadcast(event: str = WORKSPACE_CHANGED, payload: dict | None = None) -> None:
@@ -35,18 +37,13 @@ def broadcast(event: str = WORKSPACE_CHANGED, payload: dict | None = None) -> No
         )
         return
 
-    url = f"{config.SUPABASE_URL}/realtime/v1/api/broadcast"
-    body = json.dumps(
-        {
-            "messages": [
-                {
-                    "topic": config.REALTIME_CHANNEL,
-                    "event": event,
-                    "payload": payload or {},
-                }
-            ]
-        }
-    ).encode("utf-8")
+    topic = urllib.parse.quote(config.REALTIME_CHANNEL, safe="")
+    event_name = urllib.parse.quote(event, safe="")
+    url = (
+        f"{config.SUPABASE_URL}/realtime/v1/api/broadcast/"
+        f"{topic}/events/{event_name}?private=true"
+    )
+    body = json.dumps(payload or {}).encode("utf-8")
 
     request = urllib.request.Request(
         url,
@@ -75,3 +72,8 @@ def broadcast(event: str = WORKSPACE_CHANGED, payload: dict | None = None) -> No
 def workspace_changed(source: str, changes: int = 0) -> None:
     """Convenience: nudge the dashboard that the email workspace changed."""
     broadcast(WORKSPACE_CHANGED, {"source": source, "changes": changes})
+
+
+def requests_changed(source: str) -> None:
+    """Nudge the admin New Requests page that the queue changed."""
+    broadcast(REQUESTS_CHANGED, {"source": source})

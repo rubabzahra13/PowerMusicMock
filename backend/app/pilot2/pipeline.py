@@ -163,6 +163,9 @@ def process_incoming(
         )
         db.commit()
         db.refresh(email)
+        from app.partner_requests_realtime import notify_admin_requests_changed
+
+        notify_admin_requests_changed("auto_mail")
         return email
 
     email = models.Email(

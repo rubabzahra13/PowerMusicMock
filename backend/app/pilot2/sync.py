@@ -127,6 +127,9 @@ def import_message(
         gmail_message_id=message.gmail_message_id,
     ):
         db.commit()
+        from app.partner_requests_realtime import notify_admin_requests_changed
+
+        notify_admin_requests_changed("auto_mail")
         return None
 
     if _should_skip_import(account, message):

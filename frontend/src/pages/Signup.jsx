@@ -172,18 +172,8 @@ export default function Signup() {
       });
 
       if (exists) {
-        if (!assertNotRateLimited(validated.value.email)) return;
-
-        try {
-          const result = await resendManagerSignupConfirmation(validated.value.email, {
-            enforceDomain: appConfig.enforceDomainCheck,
-          });
-          showVerifyScreen(result.email, { resent: true });
-          return;
-        } catch (resendErr) {
-          setErrorMsg(resendErr.message || MANAGER_ACCOUNT_EXISTS_MESSAGE);
-          return;
-        }
+        setErrorMsg(MANAGER_ACCOUNT_EXISTS_MESSAGE);
+        return;
       }
 
       const result = await registerManager(formData, {

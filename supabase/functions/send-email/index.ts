@@ -80,9 +80,8 @@ function renderMagicLinkEmail(options: {
   appName: string;
   actionType: string;
   confirmationUrl: string;
-  otpCode?: string;
 }): string {
-  const { appName, actionType, confirmationUrl, otpCode } = options;
+  const { appName, actionType, confirmationUrl } = options;
   const isSignup = actionType === "signup";
   const isRecovery = actionType === "recovery";
   const heading = isSignup
@@ -96,11 +95,6 @@ function renderMagicLinkEmail(options: {
       ? "Click the button below to choose a new password. This link expires shortly and works once."
       : "Click the button below to sign in. This link expires shortly and works once.";
   const buttonLabel = isRecovery ? "Reset password" : "Continue";
-
-  const otpBlock =
-    otpCode && actionType !== "signup"
-      ? `<p style="margin:16px 0 0;color:#64748b;font-size:14px;">Or use this code: <strong style="color:#0f172a;letter-spacing:2px;">${escapeHtml(otpCode)}</strong></p>`
-      : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -119,7 +113,6 @@ function renderMagicLinkEmail(options: {
               <td style="padding:8px 28px 24px;">
                 <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">${lead}</p>
                 <a href="${confirmationUrl}" style="display:inline-block;background:#1a1a2e;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 20px;border-radius:10px;">${buttonLabel}</a>
-                ${otpBlock}
                 <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#94a3b8;">If you did not request this email, you can ignore it.</p>
               </td>
             </tr>
@@ -272,7 +265,6 @@ Deno.serve(async (req) => {
             actionType,
             emailData.redirect_to,
           ),
-          otpCode: emailData.token,
         }),
       );
     } else {
@@ -291,7 +283,6 @@ Deno.serve(async (req) => {
           appName,
           actionType,
           confirmationUrl,
-          otpCode: emailData.token,
         }),
       );
     }

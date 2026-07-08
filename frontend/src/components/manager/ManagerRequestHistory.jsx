@@ -5,6 +5,7 @@ import ManagerRequestHistoryModal from './ManagerRequestHistoryModal';
 import {
   countManagerHandledRequestUnseen,
   countManagerPendingUnseen,
+  dismissAllManagerHandledHighlights,
   dismissManagerPendingHighlights,
   registerManagerHandledPageVisit,
 } from '../../utils/managerUiHighlights';
@@ -80,6 +81,7 @@ export default function ManagerRequestHistory({ refreshToken = 0 }) {
 
   const handleCloseModal = () => {
     dismissManagerPendingHighlights(requests);
+    dismissAllManagerHandledHighlights();
     bumpHighlights();
     setShowAllModal(false);
     refreshSummary();

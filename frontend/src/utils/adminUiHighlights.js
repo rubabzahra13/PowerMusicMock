@@ -5,6 +5,10 @@ const DIRECTORY_VISIT_DEDUPE_KEY = 'pm_admin_directory_visit_dedupe';
 const UNSEEN_REQUESTS_KEY = 'pm_admin_unseen_request_ids';
 const VIEWED_REQUESTS_KEY = 'pm_admin_viewed_request_ids';
 const REQUESTS_VISIT_DEDUPE_KEY = 'pm_admin_requests_visit_dedupe';
+const ADMIN_NEW_REQUESTS_KNOWN_IDS_KEY = 'pm_admin_new_requests_known_ids';
+const ADMIN_NEW_REQUESTS_SYNC_BOOTSTRAPPED_KEY = 'pm_admin_new_requests_sync_bootstrapped';
+const ADMIN_NEW_REQUESTS_DEPARTED_AT_KEY = 'pm_admin_new_requests_departed_at';
+const ADMIN_SESSION_STARTED_AT_KEY = 'pm_admin_session_started_at';
 
 const MANAGER_HANDLED_UNSEEN_KEY = 'pm_manager_handled_unseen_request_ids';
 const MANAGER_HANDLED_VIEWED_KEY = 'pm_manager_handled_viewed_request_ids';
@@ -140,6 +144,81 @@ export function registerNewRequestsPageVisit(dedupeKey) {
   registerHighlightPageVisit(SCOPES.adminNewRequests, dedupeKey);
 }
 
+/** Drop highlight from requests the admin already opened (e.g. tab switch). */
+export function flushViewedRequestHighlights() {
+  const viewed = readSet(SCOPES.adminNewRequests.viewedKey);
+  if (viewed.size === 0) return;
+  const unseen = readSet(SCOPES.adminNewRequests.unseenKey);
+  viewed.forEach((id) => unseen.delete(id));
+  writeSet(SCOPES.adminNewRequests.unseenKey, unseen);
+  writeSet(SCOPES.adminNewRequests.viewedKey, new Set());
+}
+
+function adminSessionStartedAt() {
+  let started = readJson(ADMIN_SESSION_STARTED_AT_KEY, 0);
+  if (!started) {
+    started = Date.now();
+    writeJson(ADMIN_SESSION_STARTED_AT_KEY, started);
+  }
+  return started;
+}
+
+function newRequestHighlightBaseline() {
+  return Math.max(readJson(ADMIN_NEW_REQUESTS_DEPARTED_AT_KEY, 0), adminSessionStartedAt());
+}
+
+/** Remember when the admin left New Requests so arrivals while away can highlight. */
+export function recordNewRequestsPageDeparted() {
+  writeJson(ADMIN_NEW_REQUESTS_DEPARTED_AT_KEY, Date.now());
+}
+
+/**
+ * Detect new partner requests vs the last known queue snapshot (session-persisted).
+ * Returns true when at least one row was newly marked unseen.
+ */
+export function syncAdminNewRequestHighlights(
+  requests,
+  { isManualEntry = () => false } = {},
+) {
+  const eligible = (requests || []).filter((req) => !isManualEntry(req.submittedBy));
+  const currentIds = eligible
+    .map((req) => normalizeHighlightId(req.id))
+    .filter(Boolean);
+  const currentSet = new Set(currentIds);
+  let changed = false;
+
+  if (!readJson(ADMIN_NEW_REQUESTS_SYNC_BOOTSTRAPPED_KEY, false)) {
+    const baseline = newRequestHighlightBaseline();
+    eligible.forEach((req) => {
+      const id = normalizeHighlightId(req.id);
+      if (!id) return;
+      const receivedMs = req.receivedAt ? new Date(req.receivedAt).getTime() : 0;
+      if (receivedMs > baseline) {
+        markHighlightUnseen(SCOPES.adminNewRequests, id);
+        changed = true;
+      }
+    });
+    writeSet(ADMIN_NEW_REQUESTS_KNOWN_IDS_KEY, currentSet);
+    writeJson(ADMIN_NEW_REQUESTS_SYNC_BOOTSTRAPPED_KEY, true);
+    return changed;
+  }
+
+  const known = readSet(ADMIN_NEW_REQUESTS_KNOWN_IDS_KEY);
+  eligible.forEach((req) => {
+    const id = normalizeHighlightId(req.id);
+    if (!id || known.has(id)) return;
+    known.add(id);
+    markHighlightUnseen(SCOPES.adminNewRequests, id);
+    changed = true;
+  });
+
+  [...known].forEach((id) => {
+    if (!currentSet.has(id)) known.delete(id);
+  });
+  writeSet(ADMIN_NEW_REQUESTS_KNOWN_IDS_KEY, known);
+  return changed;
+}
+
 export function markRequestUnseen(requestId) {
   markHighlightUnseen(SCOPES.adminNewRequests, requestId);
 }
@@ -159,6 +238,12 @@ export function clearRequestHighlight(requestId) {
 
 export function removeRequestHighlight(requestId) {
   removeHighlight(SCOPES.adminNewRequests, requestId);
+  const id = normalizeHighlightId(requestId);
+  if (!id) return;
+  const known = readSet(ADMIN_NEW_REQUESTS_KNOWN_IDS_KEY);
+  if (known.delete(id)) {
+    writeSet(ADMIN_NEW_REQUESTS_KNOWN_IDS_KEY, known);
+  }
 }
 
 export function countUnseenRequests() {

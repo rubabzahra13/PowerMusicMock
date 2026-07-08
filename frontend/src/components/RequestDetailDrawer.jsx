@@ -6,6 +6,7 @@ import { hasComparisonContext } from '../utils/requestComparison';
 import { getManagerDisplayName, isManualEntry, AWAITING_MANAGER_HINT } from '../utils/manualEntry';
 import { TAG_ALREADY_EXISTS, visibleTableRequestTags, requestTagLabel, requestTagVariant, isAwaitingManagerSubmission } from '../utils/requestTags';
 import { formatRequestDisplayId, formatAdminDateTime, formatAdminDate } from '../utils/requestDisplayId';
+import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 
 function DetailSection({ icon: Icon, title, id, children }) {
   return (
@@ -79,7 +80,7 @@ export default function RequestDetailDrawer({
     : (request.createdBy || managerName);
   const isAdd = request.action === 'Add';
   const personActionLabel = isAdd ? 'Add' : 'Remove';
-  const notesText = request.notes?.trim();
+  const notesText = readManagerNotes(request);
 
   const handleNoteKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -243,7 +244,7 @@ export default function RequestDetailDrawer({
                 notesText ? 'line-clamp-3' : 'text-[var(--color-text-muted)]'
               }`}
             >
-              {notesText || 'No notes from manager.'}
+              {formatManagerNotes(request)}
             </p>
           </section>
 

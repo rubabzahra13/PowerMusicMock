@@ -15,6 +15,7 @@ import {
   ADMIN_NEW_ROW_HIGHLIGHT_CLASS,
 } from '../utils/adminUiHighlights';
 import { formatRequestDisplayId, formatAdminDateTime, formatAdminDate } from '../utils/requestDisplayId';
+import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 import { csvCell } from '../utils/csvSafe';
 
 const directoryHighlightClass = (row) =>
@@ -22,7 +23,6 @@ const directoryHighlightClass = (row) =>
 
 const personManagerName = (user) => user.managerName || '';
 const personHandledBy = (user) => user.handledBy || user.addedBy || 'Power Music Admin';
-const personManagerNotes = (user) => user.managerNotes || user.notes || '';
 const personAdminNotes = (user) => user.adminNotes || '';
 
 const SORT_PRESETS = [
@@ -259,7 +259,7 @@ function DirectoryMobileList({
         const extraClass = getRowClassName ? getRowClassName(row) : '';
         const name = `${row.firstName} ${row.lastName}`.trim();
         const managerName = personManagerName(row);
-        const managerNotes = personManagerNotes(row).trim();
+        const managerNotes = readManagerNotes(row);
         const adminNotes = personAdminNotes(row).trim();
 
         return (
@@ -308,7 +308,9 @@ function DirectoryMobileList({
                   <div className="space-y-1.5 border-t border-[var(--color-border-default)]/70 pt-2">
                     <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
                       <span className="font-semibold text-[var(--color-text-muted)]">Manager notes: </span>
-                      {managerNotes || EMPTY_CELL}
+                      <span className={managerNotes ? '' : 'text-[var(--color-text-muted)]'}>
+                        {formatManagerNotes(row)}
+                      </span>
                     </p>
                     <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
                       <span className="font-semibold text-[var(--color-text-muted)]">Admin notes: </span>
@@ -421,7 +423,7 @@ export default function UserLedger() {
         personManagerName(user).toLowerCase().includes(query) ||
         (user.managerEmail && user.managerEmail.toLowerCase().includes(query)) ||
         user.club.toLowerCase().includes(query) ||
-        (personManagerNotes(user) && personManagerNotes(user).toLowerCase().includes(query)) ||
+        (readManagerNotes(user) && readManagerNotes(user).toLowerCase().includes(query)) ||
         (personAdminNotes(user) && personAdminNotes(user).toLowerCase().includes(query));
       const matchesLocation = filterLocation === 'All' || user.location === filterLocation;
       const matchesClub = filterClub === 'All' || user.club === filterClub;
@@ -464,7 +466,7 @@ export default function UserLedger() {
         personManagerName(user),
         user.managerEmail || '',
         user.club,
-        personManagerNotes(user),
+        readManagerNotes(user),
         personAdminNotes(user),
       ].map(csvCell).join(',')
     );
@@ -573,11 +575,18 @@ export default function UserLedger() {
       label: 'Manager notes',
       width: '11%',
       cellClassName: 'align-middle max-w-0 overflow-hidden',
-      render: (_, row) => (
-        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {personManagerNotes(row).trim() || EMPTY_CELL}
-        </TruncateCell>
-      )
+      render: (_, row) => {
+        const notes = readManagerNotes(row);
+        return (
+          <TruncateCell
+            className={`text-xs leading-relaxed ${
+              notes ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'
+            }`}
+          >
+            {formatManagerNotes(row)}
+          </TruncateCell>
+        );
+      }
     },
     {
       key: 'adminNotes',
@@ -767,14 +776,26 @@ export default function UserLedger() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                Notes by manager
-              </span>
-              <p className="text-sm text-[var(--color-text-primary)] leading-normal whitespace-pre-wrap">
-                {personManagerNotes(selectedUser).trim() ? personManagerNotes(selectedUser) : EMPTY_CELL}
+            <section
+              aria-labelledby="directory-manager-notes-heading"
+              className="rounded-lg border border-[var(--color-border-default)] bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
+            >
+              <h3
+                id="directory-manager-notes-heading"
+                className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
+              >
+                Notes from manager
+              </h3>
+              <p
+                className={`mt-1.5 text-xs leading-relaxed ${
+                  readManagerNotes(selectedUser)
+                    ? 'whitespace-pre-wrap text-[var(--color-text-primary)]'
+                    : 'text-[var(--color-text-muted)]'
+                }`}
+              >
+                {formatManagerNotes(selectedUser)}
               </p>
-            </div>
+            </section>
 
             <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
               <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">

@@ -4,6 +4,8 @@ const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 const HTML_TAG = /<[^>]+>/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M}\s'.-]{0,99}$/u;
+const CLUB_LOCATION_RE = /^[\p{L}\p{M}]+(?: [\p{L}\p{M}]+)*$/u;
+const MIN_CLUB_LOCATION_LENGTH = 2;
 
 /** Allowed manager email domains — expand before production lock-down. */
 export const MANAGER_ALLOWED_EMAIL_DOMAINS = ['@puregym.com', '@gmail.com', '@googlemail.com'];
@@ -183,9 +185,8 @@ function getPasswordRuleChecks(value, { email } = {}) {
     special: HAS_SPECIAL.test(value),
     notCommon: value.length >= 8 && !isCommonOrWeakPassword(value),
     notEmail:
-      value.length >= 8 &&
-      hasEmail &&
-      !isPasswordSameAsEmail(value, emailResult.value),
+      !hasEmail ||
+      (value.length >= 8 && !isPasswordSameAsEmail(value, emailResult.value)),
   };
 }
 
@@ -297,11 +298,20 @@ export function validateClub(raw) {
   if (!cleaned) {
     return { ok: false, error: 'Club location is required.' };
   }
+  if (cleaned.length < MIN_CLUB_LOCATION_LENGTH) {
+    return { ok: false, error: `Club location must be at least ${MIN_CLUB_LOCATION_LENGTH} characters.` };
+  }
   if (cleaned.length > 200) {
     return { ok: false, error: 'Club location must be at most 200 characters.' };
   }
   const htmlError = rejectHtml(cleaned, 'Club location');
   if (htmlError) return { ok: false, error: htmlError };
+  if (!CLUB_LOCATION_RE.test(cleaned)) {
+    return {
+      ok: false,
+      error: 'Club location must contain letters and spaces only (no numbers or symbols).',
+    };
+  }
   return { ok: true, value: cleaned };
 }
 

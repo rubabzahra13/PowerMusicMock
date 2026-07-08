@@ -98,18 +98,13 @@ export default function DataTable({
                   isRowClickable ? 'cursor-pointer' : ''
                 } ${extraRowClass}`}
               >
-                {columns.map((column, colIndex) => {
+                {columns.map((column) => {
                   const rawValue = row[column.key];
                   const renderedValue = column.render
                     ? column.render(rawValue, row)
                     : rawValue;
 
-                  const cellStyle =
-                    colIndex === 0 && row.alreadyExists
-                      ? { borderLeft: '3px solid var(--color-already-exists-border)' }
-                      : undefined;
-
-                  const cellWidth = column.width ? { width: column.width } : {};
+                  const cellStyle = column.width ? { width: column.width } : undefined;
                   const defaultCellClass = compact
                     ? column.noShrink
                       ? 'align-middle whitespace-nowrap'
@@ -119,7 +114,7 @@ export default function DataTable({
                   return (
                     <td
                       key={column.key}
-                      style={{ ...cellStyle, ...cellWidth }}
+                      style={{ ...cellStyle }}
                       className={`px-3 py-2.5 text-sm text-[var(--color-text-primary)] ${
                         column.cellClassName ?? defaultCellClass
                       }`}

@@ -47,6 +47,7 @@ from app.manager_request_stats import (
     get_stored_manager_request_stats,
     increment_manager_request_stats,
 )
+from app.partner_requests_realtime import notify_admin_requests_changed
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
     TAG_AUTO_MAIL,
@@ -335,6 +336,7 @@ def create_request(
     hydrate_request_display([new_request])
     hydrate_request_users(db, [new_request])
     invalidate_manager_request_summary(manager.id)
+    notify_admin_requests_changed("manager_submit")
     return request_to_api_dict(new_request)
 
 
@@ -459,6 +461,8 @@ def mark_request_handled(
     hydrate_request_users(db, [req])
     if req.manager_id:
         invalidate_manager_request_summary(str(req.manager_id))
+    if was_new:
+        notify_admin_requests_changed("mark_handled")
     return request_to_api_dict(req)
 
 @router.post("/api/admin/requests/manual", response_model=List[schemas.RequestOut])
@@ -488,6 +492,7 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
     for req in new_requests:
         db.refresh(req)
     hydrate_request_display(new_requests)
+    notify_admin_requests_changed("admin_manual")
     return requests_to_api_dicts(db, new_requests)
 
 

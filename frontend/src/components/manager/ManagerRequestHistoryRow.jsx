@@ -6,20 +6,8 @@ import {
   personName,
   requestStatusMeta,
 } from '../../utils/managerRequestHistory';
-import { isManagerHandledRequestUnseen, isManagerPendingRequestUnseen } from '../../utils/managerUiHighlights';
-
 export const MANAGER_REQUEST_HISTORY_GRID =
   'grid-cols-[1.75rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)]';
-
-function isRequestHighlighted(request) {
-  if (request.status === 'handled') {
-    return isManagerHandledRequestUnseen(request.id);
-  }
-  if (request.status === 'new') {
-    return isManagerPendingRequestUnseen(request.id);
-  }
-  return false;
-}
 
 function highlightKind(request) {
   if (request.status === 'handled') return 'handled';
@@ -61,13 +49,12 @@ const rowInteractionClass =
   'w-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35';
 
 const ManagerRequestHistoryRow = forwardRef(function ManagerRequestHistoryRow(
-  { request, onOpen, highlightVersion = 0, rowNumber = 1 },
+  { request, onOpen, showAsNew = false, rowNumber = 1 },
   ref,
 ) {
-  void highlightVersion;
   const meta = requestStatusMeta(request);
   const kind = highlightKind(request);
-  const highlighted = isRequestHighlighted(request);
+  const highlighted = showAsNew;
   const isAdd = request.action === 'Add';
   const contactLine = [request.person?.email, request.person?.location].filter(Boolean).join(' · ');
   const highlightClass = highlighted

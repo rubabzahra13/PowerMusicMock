@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
@@ -12,17 +12,23 @@ import { adminPageScrollClass } from '../utils/responsiveLayout';
 import { getManagerColumnContent, getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 import { loadWithCache, patchCache, writeCache, refreshCache, getNewRequestsPage } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
+import { useRealtimeBroadcast } from '../hooks/useRealtimeBroadcast';
 import {
   markDirectoryPersonHighlight,
-  markRequestUnseen,
   isRequestUnseen,
   markRequestViewed,
   removeRequestHighlight,
   registerNewRequestsPageVisit,
+  flushViewedRequestHighlights,
+  recordNewRequestsPageDeparted,
+  syncAdminNewRequestHighlights,
   ADMIN_NEW_ROW_HIGHLIGHT_CLASS,
 } from '../utils/adminUiHighlights';
 import { useAuth } from '../context/AuthContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
+import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
+
+const REQUESTS_POLL_MS = 10000;
 import { TAG_ALREADY_EXISTS, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission } from '../utils/requestTags';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
 import { formGridClass } from '../utils/responsiveLayout';
@@ -30,6 +36,7 @@ import {
   PERSON_FIELD_LIMITS,
   sanitizePersonFieldInput,
   validatePersonForms,
+  firstInvalidPersonField,
 } from '../utils/managerFormValidation';
 
 const SORT_PRESETS = [
@@ -264,11 +271,7 @@ function NewRequestsMobileList({
 
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
-            <div
-              className={`px-4 py-3 ${extraClass} ${
-                row.alreadyExists ? 'border-l-[3px] border-l-[var(--color-already-exists-border)]' : ''
-              }`}
-            >
+            <div className={`px-4 py-3 ${extraClass}`}>
               <button
                 type="button"
                 onClick={() => onOpenRequest(row)}
@@ -320,6 +323,13 @@ function NewRequestsMobileList({
                         </p>
                       ) : null}
                     </div>
+
+                    <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                      <span className="font-semibold text-[var(--color-text-muted)]">Manager notes: </span>
+                      <span className={readManagerNotes(row) ? '' : 'text-[var(--color-text-muted)]'}>
+                        {formatManagerNotes(row)}
+                      </span>
+                    </p>
 
                     <div className="border-t border-[var(--color-border-default)]/70 pt-2">
                       <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
@@ -415,10 +425,14 @@ export default function Requests() {
   const [newRequests, setNewRequests] = useState([]);
   const [liveDirectory, setLiveDirectory] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
-  const knownRequestIdsRef = useRef(null);
-  const [, setHighlightVersion] = useState(0);
+  const [highlightVersion, setHighlightVersion] = useState(0);
 
   const bumpHighlights = () => setHighlightVersion((v) => v + 1);
+
+  const getRequestRowClassName = useCallback(
+    (row) => (isRequestUnseen(row.id) ? ADMIN_NEW_ROW_HIGHLIGHT_CLASS : ''),
+    [highlightVersion],
+  );
 
   const handleOpenRequest = (row) => {
     markRequestViewed(row.id);
@@ -431,37 +445,63 @@ export default function Requests() {
     bumpHighlights();
   }, [location.key]);
 
-  useEffect(() => {
-    const applyPage = (data, isStale) => {
-      if (!isStale && Array.isArray(data.requests)) {
-        const ids = data.requests.map((r) => r.id);
-        if (knownRequestIdsRef.current) {
-          let added = false;
-          data.requests.forEach((req) => {
-            if (!knownRequestIdsRef.current.has(req.id) && !isManualEntry(req.submittedBy)) {
-              markRequestUnseen(req.id);
-              added = true;
-            }
-          });
-          if (added) bumpHighlights();
-        }
-        knownRequestIdsRef.current = new Set(ids);
-      }
+  const applyRequestsPage = useCallback((data, isStale) => {
+    if (Array.isArray(data.requests)) {
       setNewRequests(data.requests);
       setLiveDirectory(data.persons);
       setTableLoading(false);
+      if (!isStale) {
+        const changed = syncAdminNewRequestHighlights(data.requests, { isManualEntry });
+        if (changed) bumpHighlights();
+      }
+    }
+  }, []);
+
+  const refreshRequestsPage = useCallback((options = {}) => {
+    const { networkOnly = false } = options;
+    const fetcher = getNewRequestsPage;
+    if (networkOnly) {
+      return refreshCache('requests_page', fetcher, applyRequestsPage).catch((err) => {
+        console.error(err);
+        setTableLoading(false);
+      });
+    }
+    return loadWithCache('requests_page', fetcher, applyRequestsPage).catch((err) => {
+      console.error(err);
+      setTableLoading(false);
+    });
+  }, [applyRequestsPage]);
+
+  useEffect(() => {
+    refreshRequestsPage();
+    const refresh = () => {
+      if (!document.hidden) refreshRequestsPage({ networkOnly: true });
     };
-    const load = () => {
-      loadWithCache('requests_page', getNewRequestsPage, applyPage)
-        .catch((err) => {
-          console.error(err);
-          setTableLoading(false);
-        });
-    };
-    load();
-    const refresh = () => { if (!document.hidden) load(); };
     window.addEventListener('focus', refresh);
-    return () => window.removeEventListener('focus', refresh);
+    const poll = window.setInterval(refresh, REQUESTS_POLL_MS);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.clearInterval(poll);
+    };
+  }, [refreshRequestsPage]);
+
+  useRealtimeBroadcast('requests-changed', () => {
+    refreshRequestsPage({ networkOnly: true });
+  });
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        recordNewRequestsPageDeparted();
+        flushViewedRequestHighlights();
+        bumpHighlights();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      recordNewRequestsPageDeparted();
+    };
   }, []);
 
   // ── Filter / Sort states ──
@@ -483,14 +523,19 @@ export default function Requests() {
   const [personForms, setPersonForms] = useState([emptyPersonForm()]);
   const [action, setAction] = useState('Add');
   const [manualSubmitAttempted, setManualSubmitAttempted] = useState(false);
+  const [manualTouchedFields, setManualTouchedFields] = useState({});
   const personRowRefs = useRef([]);
+  const manualPersonFieldRefs = useRef([]);
   const scrollToPersonIndexRef = useRef(null);
+
+  const manualTouchKey = (index, field) => `${index}.${field}`;
 
   const resetManualForm = (nextAction = actionTab) => {
     setManagerForm(emptyManagerForm());
     setPersonForms([emptyPersonForm()]);
     setAction(nextAction);
     setManualSubmitAttempted(false);
+    setManualTouchedFields({});
   };
 
   const personValidation = useMemo(() => validatePersonForms(personForms), [personForms]);
@@ -502,8 +547,22 @@ export default function Requests() {
     )));
   };
 
+  const handleManualPersonBlur = (index, field, rawValue) => {
+    setManualTouchedFields((prev) => ({ ...prev, [manualTouchKey(index, field)]: true }));
+    if (field === 'email') {
+      updatePersonForm(index, 'email', String(rawValue ?? '').trim().toLowerCase());
+    }
+  };
+
+  const setManualPersonFieldRef = (index, field, node) => {
+    manualPersonFieldRefs.current[manualTouchKey(index, field)] = node;
+  };
+
+  const shouldShowManualFieldError = (index, field) =>
+    manualSubmitAttempted || Boolean(manualTouchedFields[manualTouchKey(index, field)]);
+
   const getManualFieldError = (index, field) => {
-    if (!manualSubmitAttempted) return null;
+    if (!shouldShowManualFieldError(index, field)) return null;
     return personValidation.errorsByRow[index]?.[field] || null;
   };
 
@@ -530,6 +589,8 @@ export default function Requests() {
 
   // Reset filters when switching Add / Remove
   const handleActionTabSwitch = (tab) => {
+    flushViewedRequestHighlights();
+    bumpHighlights();
     setActionTab(tab);
     setAction(tab);
     setSearchQuery('');
@@ -653,9 +714,22 @@ export default function Requests() {
   const handleCreateRequest = async (e) => {
     e.preventDefault();
     setManualSubmitAttempted(true);
-    if (!isModalFormValid) return;
 
-    const normalizedPeople = personValidation.normalizedForms;
+    const validation = validatePersonForms(personForms);
+    if (!validation.ok) {
+      const firstInvalid = firstInvalidPersonField(validation.errorsByRow);
+      if (firstInvalid) {
+        const ref = manualPersonFieldRefs.current[manualTouchKey(firstInvalid.rowIndex, firstInvalid.field)];
+        ref?.focus?.();
+        ref?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+        showToast(firstInvalid.message, 'error');
+      } else {
+        showToast('Fix the highlighted fields to create the request.', 'error');
+      }
+      return;
+    }
+
+    const normalizedPeople = validation.normalizedForms;
 
     try {
       const created = await fetchJson('/api/admin/requests/manual', {
@@ -766,7 +840,7 @@ export default function Requests() {
       showToast(err.message || 'Failed to save — refreshing list.', 'error');
       loadWithCache('requests_page', getNewRequestsPage, (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
-          knownRequestIdsRef.current = new Set(data.requests.map((r) => r.id));
+          syncAdminNewRequestHighlights(data.requests, { isManualEntry });
         }
         setNewRequests(data.requests);
         setLiveDirectory(data.persons);
@@ -810,7 +884,7 @@ export default function Requests() {
     {
       key: 'person',
       label: 'Person',
-      width: '19%',
+      width: '17%',
       headerClassName: 'text-center',
       cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (_, row) => {
@@ -833,7 +907,7 @@ export default function Requests() {
     {
       key: 'manager',
       label: 'Manager',
-      width: '19%',
+      width: '17%',
       headerClassName: 'text-center',
       cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (_, row) => {
@@ -847,6 +921,25 @@ export default function Requests() {
           />
         );
       }
+    },
+    {
+      key: 'managerNotes',
+      label: 'Manager notes',
+      width: '14%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
+      render: (_, row) => {
+        const notes = readManagerNotes(row);
+        return (
+          <TruncateCell
+            className={`text-xs leading-relaxed ${
+              notes ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'
+            }`}
+          >
+            {formatManagerNotes(row)}
+          </TruncateCell>
+        );
+      },
     }
   ];
 
@@ -927,10 +1020,7 @@ export default function Requests() {
     }
   ];
 
-  const displayedRows = useMemo(
-    () => filteredRequests.map((req) => ({ ...req, alreadyExists: req.tags?.includes(TAG_ALREADY_EXISTS) })),
-    [filteredRequests]
-  );
+  const displayedRows = filteredRequests;
 
   return (
     <div className={adminPageScrollClass}>
@@ -1023,7 +1113,7 @@ export default function Requests() {
         emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
         onOpenRequest={handleOpenRequest}
         onMarkAs={(row) => setConfirmActionRequest({ request: row, adminNote: '' })}
-        getRowClassName={(row) => (isRequestUnseen(row.id) ? ADMIN_NEW_ROW_HIGHLIGHT_CLASS : '')}
+        getRowClassName={getRequestRowClassName}
         directory={liveDirectory}
       />
 
@@ -1032,7 +1122,7 @@ export default function Requests() {
           columns={newColumns}
           rows={displayedRows}
           onRowClick={handleOpenRequest}
-          getRowClassName={(row) => (isRequestUnseen(row.id) ? ADMIN_NEW_ROW_HIGHLIGHT_CLASS : '')}
+          getRowClassName={getRequestRowClassName}
           emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
           compact
           centerHeaders
@@ -1075,14 +1165,21 @@ export default function Requests() {
           <>
             <button onClick={() => { setShowAddManualModal(false); resetManualForm(); }}
               className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer">Cancel</button>
-            <button onClick={handleCreateRequest} disabled={!isModalFormValid}
-              className={`px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm cursor-pointer ${isModalFormValid ? 'bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)]' : 'bg-gray-300 cursor-not-allowed'}`}>
+            <button
+              type="button"
+              onClick={handleCreateRequest}
+              className={`px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm cursor-pointer ${
+                isModalFormValid
+                  ? 'bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)]'
+                  : 'bg-gray-300'
+              }`}
+            >
               {personForms.length === 1 ? 'Create Request' : `Create ${personForms.length} Requests`}
             </button>
           </>
         }
       >
-        <form onSubmit={handleCreateRequest} className="space-y-4 text-left">
+        <form onSubmit={handleCreateRequest} noValidate className="space-y-4 text-left">
           <div className="space-y-3">
             <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Manager Details</span>
             <div className={formGridClass}>
@@ -1149,6 +1246,8 @@ export default function Requests() {
                         maxLength={PERSON_FIELD_LIMITS[field]}
                         value={person[field]}
                         onChange={(e) => updatePersonForm(index, field, e.target.value)}
+                        onBlur={() => handleManualPersonBlur(index, field, person[field])}
+                        ref={(node) => setManualPersonFieldRef(index, field, node)}
                         aria-invalid={error ? true : undefined}
                         className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${error ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
                       />
@@ -1160,12 +1259,18 @@ export default function Requests() {
                 <div>
                   <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Email *</label>
                   <input
-                    type="email"
+                    type="text"
+                    inputMode="email"
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     maxLength={PERSON_FIELD_LIMITS.email}
                     value={person.email}
                     onChange={(e) => updatePersonForm(index, 'email', e.target.value)}
-                    onBlur={() => updatePersonForm(index, 'email', person.email.trim().toLowerCase())}
+                    onBlur={() => handleManualPersonBlur(index, 'email', person.email)}
+                    ref={(node) => setManualPersonFieldRef(index, 'email', node)}
                     aria-invalid={getManualFieldError(index, 'email') ? true : undefined}
                     className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${getManualFieldError(index, 'email') ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
                   />
@@ -1181,6 +1286,8 @@ export default function Requests() {
                     maxLength={PERSON_FIELD_LIMITS.location}
                     value={person.location}
                     onChange={(e) => updatePersonForm(index, 'location', e.target.value)}
+                    onBlur={() => handleManualPersonBlur(index, 'location', person.location)}
+                    ref={(node) => setManualPersonFieldRef(index, 'location', node)}
                     aria-invalid={getManualFieldError(index, 'location') ? true : undefined}
                     className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${getManualFieldError(index, 'location') ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
                   />
@@ -1201,6 +1308,8 @@ export default function Requests() {
                     id={`manual-person-${person.id}-notes`}
                     value={person.notes}
                     onChange={(e) => updatePersonForm(index, 'notes', e.target.value)}
+                    onBlur={() => handleManualPersonBlur(index, 'notes', person.notes)}
+                    ref={(node) => setManualPersonFieldRef(index, 'notes', node)}
                     placeholder="Any additional notes for this request..."
                     rows={2}
                     className="w-full px-3 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all resize-none"
