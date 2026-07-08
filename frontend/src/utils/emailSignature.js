@@ -5,6 +5,15 @@ export const LEGACY_SIGNATURE = 'Kind regards,\nPower Music Team';
 const LEGACY_SIGNATURE_RE = /\n*Kind regards,?\s*\n\s*Power Music Team\s*$/i;
 const NEW_SIGNATURE_MARKER = `Thank you.\n\n${SIGNATURE_PERSON}`;
 
+// Any 3-line block that opens with "Andrea Petty" and closes with "Power Music Inc." —
+// captures every duplicate the model might have baked into the body, regardless
+// of which inbox title sits between them.
+const EMBEDDED_SIG_BLOCK_RE = /Andrea Petty[ \t]*\n[^\n]*\n[ \t]*Power Music(?:\s*Inc\.?)?[ \t]*/gi;
+// Standalone "Thank you." / "Thanks." lines that belong to the closing.
+const THANK_YOU_LINE_RE = /^[ \t]*(thank you|thanks)[.!]?[ \t]*$/gim;
+// Leading greeting the composer emits: "Hi Xxx," / "Hello Xxx," / "Hey Xxx," / "Dear Xxx," at start.
+const LEADING_GREETING_RE = /^[ \t]*(hi|hello|hey|dear)\b[^\n]*[,!]?[ \t]*\n+/i;
+
 export function buildEmailSignature(inboxTitle) {
   const title = (inboxTitle || '').trim() || 'Power Music';
   return `Thank you.\n\n${SIGNATURE_PERSON}\n${title}\n${SIGNATURE_COMPANY}`;
@@ -35,22 +44,26 @@ export function hasNewSignature(text) {
   return text.includes(NEW_SIGNATURE_MARKER);
 }
 
-/** Normalize stored drafts: drop body thanks, swap legacy sign-off for inbox signature. */
+// The greeting and the sign-off are owned by the render layer, not the model.
+// Everything the model returns is squeezed through this so any embedded signature
+// blocks, leading greetings, and trailing "Thank you." lines are stripped —
+// even if the model repeats them several times.
+export function extractDraftBody(rawBody) {
+  if (!rawBody?.trim()) return '';
+  let text = rawBody.replace(/\r\n/g, '\n');
+  text = text.replace(LEGACY_SIGNATURE_RE, '');
+  text = text.replace(EMBEDDED_SIG_BLOCK_RE, '');
+  text = text.replace(THANK_YOU_LINE_RE, '');
+  text = text.replace(LEADING_GREETING_RE, '');
+  text = text.replace(/\n{3,}/g, '\n\n');
+  return text.trim();
+}
+
+/** Normalize stored drafts: strip embedded/legacy signatures + gratitudes, then re-close with the canonical inbox signature. */
 export function normalizeDraftSignature(body, inboxTitle) {
-  if (!body?.trim()) return body;
-
-  let text = body.replace(/\r\n/g, '\n').trimEnd();
-  const hadLegacy = LEGACY_SIGNATURE_RE.test(text);
-  text = stripLegacySignature(text);
-  text = stripGratitudePhrases(text);
-
-  const signature = buildEmailSignature(inboxTitle);
-  if (!text.endsWith(signature)) {
-    if (hadLegacy || !hasNewSignature(text)) {
-      text = text ? `${text}\n\n${signature}` : signature;
-    }
-  }
-  return text;
+  const stripped = extractDraftBody(body);
+  if (!stripped) return body;
+  return `${stripped}\n\n${buildEmailSignature(inboxTitle)}`;
 }
 
 export function splitDraftBody(body, inboxTitle) {

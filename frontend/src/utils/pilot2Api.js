@@ -1,6 +1,6 @@
 // Pilot 2 API client — same base URL convention as the Pilot 1 pages
 // (see utils/api.js: localhost in dev, same-origin in production).
-import API_BASE, { fetchJson } from './api';
+import { fetchJson, authFetch } from './api';
 
 const ADMIN_TIMEOUT_MS = 45000;
 
@@ -156,6 +156,47 @@ export const updateDraft = (id, draftBody) =>
   request(`/api/pilot2/emails/${id}/draft`, { method: 'PUT', body: JSON.stringify({ draftBody }) });
 export const sendEmail = (id, finalBody) =>
   request(`/api/pilot2/emails/${id}/send`, { method: 'POST', body: JSON.stringify({ finalBody }) });
+export const sendReplyAll = (id, finalBody, extraCc = []) =>
+  request(`/api/pilot2/emails/${id}/reply-all`, {
+    method: 'POST',
+    body: JSON.stringify({ finalBody, extraCc }),
+  });
+export const sendForward = (id, finalBody, toEmails, ccEmails = []) =>
+  request(`/api/pilot2/emails/${id}/forward`, {
+    method: 'POST',
+    body: JSON.stringify({ finalBody, toEmails, ccEmails }),
+  });
+export const composeMessage = ({ inbox, toEmails, ccEmails = [], subject, finalBody }) =>
+  request('/api/pilot2/compose', {
+    method: 'POST',
+    body: JSON.stringify({ inbox, toEmails, ccEmails, subject, finalBody }),
+  });
+
+// Attachment bytes need the auth header, so we can't use a plain <a href>.
+// Fetch the blob, then trigger a client-side download via an object URL.
+export async function downloadAttachment(emailId, attachmentId, filename) {
+  const res = await authFetch(
+    `/api/pilot2/emails/${emailId}/attachments/${attachmentId}`,
+  );
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      /* keep statusText */
+    }
+    throw new Error(typeof detail === 'string' ? detail : 'Download failed');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || 'attachment';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 export const bulkPatchEmails = (ids, patch) =>
   request('/api/pilot2/emails/bulk-patch', { method: 'POST', body: JSON.stringify({ ids, ...patch }) });
 export const deleteEmailForever = (id) =>

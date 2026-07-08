@@ -17,7 +17,7 @@ export default function AppLayout({ children }) {
   }, [mobileNavOpen]);
 
   return (
-    <div className="min-h-[100dvh] bg-[var(--color-surface-bg)] text-[var(--color-text-primary)] antialiased font-sans">
+    <div className="h-[100dvh] overflow-hidden bg-[var(--color-surface-bg)] text-[var(--color-text-primary)] antialiased font-sans">
       {mobileNavOpen && (
         <button
           type="button"
@@ -29,7 +29,7 @@ export default function AppLayout({ children }) {
 
       <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
 
-      <div className="flex min-h-[100dvh] flex-col md:ml-[240px]">
+      <div className="flex h-[100dvh] flex-col overflow-hidden md:ml-[240px]">
         <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border-default)] bg-white px-4 md:hidden">
           <button
             type="button"
@@ -45,7 +45,7 @@ export default function AppLayout({ children }) {
           </div>
         </header>
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-4 sm:p-6">
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 sm:p-6">
           {children}
         </main>
       </div>

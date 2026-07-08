@@ -1,33 +1,33 @@
 import {
   SIGNATURE_COMPANY,
   SIGNATURE_PERSON,
-  splitDraftBody,
+  extractDraftBody,
 } from '../../utils/emailSignature';
 
-export default function DraftBodyDisplay({ body, inboxTitle, className = '' }) {
-  const { main, signature } = splitDraftBody(body, inboxTitle);
-
-  if (!signature) {
-    return (
-      <div className={`whitespace-pre-wrap ${className}`.trim()}>
-        {splitDraftBody(body, inboxTitle).main}
-      </div>
-    );
-  }
-
-  const lines = signature.split('\n');
-  const inboxLine = lines[3] || '';
-  const companyLine = lines[4] || SIGNATURE_COMPANY;
+// Greeting + closing are owned by the presentation layer, never by the model.
+// We only render what the model produced *between* those two — anything that
+// looks like a signature or greeting the model may have snuck in is stripped
+// by `extractDraftBody` before we render.
+export default function DraftBodyDisplay({ body, inboxTitle, firstName, className = '' }) {
+  const cleanBody = extractDraftBody(body);
+  const title = (inboxTitle || '').trim() || 'Power Music';
+  const greetingName = (firstName || '').trim() || 'there';
 
   return (
     <div className={`leading-relaxed ${className}`.trim()}>
-      {main ? <span className="whitespace-pre-wrap">{main}</span> : null}
-      {main ? <span className="block h-4" aria-hidden /> : null}
-      <span className="whitespace-pre-wrap block">Thank you.</span>
+      <span className="block whitespace-pre-wrap">{`Hi ${greetingName},`}</span>
+      <span className="block h-4" aria-hidden />
+      {cleanBody ? (
+        <>
+          <span className="block whitespace-pre-wrap">{cleanBody}</span>
+          <span className="block h-4" aria-hidden />
+        </>
+      ) : null}
+      <span className="block whitespace-pre-wrap">Thank you.</span>
       <span className="block h-4" aria-hidden />
       <strong className="font-semibold text-[var(--color-text-primary)]">{SIGNATURE_PERSON}</strong>
-      <span className="block whitespace-pre-wrap">{inboxLine}</span>
-      <span className="block whitespace-pre-wrap">{companyLine}</span>
+      <span className="block whitespace-pre-wrap">{title}</span>
+      <span className="block whitespace-pre-wrap">{SIGNATURE_COMPANY}</span>
     </div>
   );
 }
