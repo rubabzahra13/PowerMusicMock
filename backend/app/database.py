@@ -89,6 +89,13 @@ def create_db_engine():
     try:
         kwargs = {}
         db_url = get_database_url()
+        # Disable psycopg server-side prepared statements. They are unsafe
+        # against a transaction-mode pooler (Supabase Supavisor / PgBouncer on
+        # port 6543): a prepared statement created on one pooled backend may not
+        # exist on the next, raising "prepared statement does not exist". This is
+        # the recommended setting for transaction pooling and is harmless (tiny
+        # perf cost) on direct / session-mode connections, so we set it always.
+        kwargs["connect_args"] = {"prepare_threshold": None}
         if os.getenv("VERCEL"):
             # Serverless: default to NullPool so each request releases its DB
             # connection as soon as the session closes. Holding a warm
