@@ -29,6 +29,10 @@ WORKSPACE_CHANGED = "workspace-changed"
 def broadcast(event: str = WORKSPACE_CHANGED, payload: dict | None = None) -> None:
     """Publish one event to the configured Realtime channel (best-effort)."""
     if not config.realtime_enabled():
+        logger.info(
+            "Realtime disabled (SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY "
+            "not set) — dashboard will only update on its 30s poll, not instantly."
+        )
         return
 
     url = f"{config.SUPABASE_URL}/realtime/v1/api/broadcast"
@@ -57,7 +61,13 @@ def broadcast(event: str = WORKSPACE_CHANGED, payload: dict | None = None) -> No
     try:
         # Short timeout: this runs after a much longer sync, so a couple of
         # seconds is negligible, and we never want it to hang ingestion.
-        urllib.request.urlopen(request, timeout=3)
+        response = urllib.request.urlopen(request, timeout=3)
+        logger.info(
+            "Realtime broadcast '%s' -> HTTP %s (channel=%s)",
+            event,
+            getattr(response, "status", "?"),
+            config.REALTIME_CHANNEL,
+        )
     except Exception:
         logger.warning("Realtime broadcast failed", exc_info=True)
 
