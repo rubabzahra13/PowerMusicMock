@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
@@ -416,6 +416,9 @@ export default function Requests() {
   const { showToast } = useToast();
   const { profile } = useAuth();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const deepLinkRequestId = searchParams.get('id');
+  const consumedDeepLinkRef = useRef(null);
   const adminDisplayName = profile?.full_name?.trim() || 'Power Music Admin';
 
   // ── Action tab (Add / Remove) ──
@@ -444,6 +447,15 @@ export default function Requests() {
     registerNewRequestsPageVisit(location.key);
     bumpHighlights();
   }, [location.key]);
+
+  useEffect(() => {
+    if (!deepLinkRequestId || !newRequests.length) return;
+    if (consumedDeepLinkRef.current === deepLinkRequestId) return;
+    const row = newRequests.find((request) => request.id === deepLinkRequestId);
+    if (!row) return;
+    consumedDeepLinkRef.current = deepLinkRequestId;
+    handleOpenRequest(row);
+  }, [deepLinkRequestId, newRequests]);
 
   const applyRequestsPage = useCallback((data, isStale) => {
     if (Array.isArray(data.requests)) {

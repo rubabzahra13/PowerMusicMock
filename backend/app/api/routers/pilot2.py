@@ -877,7 +877,7 @@ def create_template(payload: schemas.TemplateIn, db: Session = Depends(get_db), 
         last_updated=now,
     )
     db.add(template)
-    pipeline.log(db, "template_created", f"Template created: {template.name}")
+    pipeline.log(db, "template_created", f"Template created: {template.name}", email_id=template.id)
     db.commit()
     db.refresh(template)
     return template
@@ -899,7 +899,7 @@ def update_template(template_id: str, payload: schemas.TemplateUpdateIn, db: Ses
     template.subject = payload.subject
     template.body = payload.body
     template.last_updated = datetime.now(timezone.utc)
-    pipeline.log(db, "template_updated", f"Template updated: {template.name}")
+    pipeline.log(db, "template_updated", f"Template updated: {template.name}", email_id=template.id)
     db.commit()
     db.refresh(template)
     return template

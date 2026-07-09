@@ -345,6 +345,8 @@ export default function EmailQueue() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const mailboxFromUrl = searchParams.get('mailbox');
+  const emailIdFromUrl = searchParams.get('emailId');
+  const consumedEmailDeepLinkRef = useRef(null);
   const [emails, setEmails] = useState([]);
   const [inboxes, setInboxes] = useState([]);
   const [mailbox, setMailbox] = useState(() =>
@@ -492,6 +494,37 @@ export default function EmailQueue() {
     // Skip while a local save is in flight (track() re-syncs afterwards).
     if (pendingRef.current === 0) revalidate();
   });
+
+  useEffect(() => {
+    if (MAILBOX_IDS.has(mailboxFromUrl)) {
+      setMailbox(mailboxFromUrl);
+    }
+  }, [mailboxFromUrl]);
+
+  useEffect(() => {
+    if (!emailIdFromUrl || !emails.length) return;
+    if (consumedEmailDeepLinkRef.current === emailIdFromUrl) return;
+    const email = emails.find((row) => row.id === emailIdFromUrl);
+    if (!email) return;
+    consumedEmailDeepLinkRef.current = emailIdFromUrl;
+    if (email.inbox) setInboxFilter(email.inbox);
+    if (MAILBOX_IDS.has(mailboxFromUrl)) {
+      setMailbox(mailboxFromUrl);
+    } else if (email.deleted) {
+      setMailbox('bin');
+    } else if (email.archived) {
+      setMailbox('archive');
+    } else if (email.flagged) {
+      setMailbox('flagged');
+    } else if (email.draftStatus === 'Sent') {
+      setMailbox('sent');
+    } else {
+      setMailbox('inbox');
+    }
+    setSelectedId(email.id);
+    setIsEditingDraft(false);
+    setComposerMode('reply');
+  }, [emailIdFromUrl, emails, mailboxFromUrl]);
 
   useEffect(() => {
     if (!sortOpen) return;

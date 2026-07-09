@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from threading import Lock
 
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from jwt import PyJWKClient
 from sqlalchemy.orm import Session
 
@@ -186,6 +186,25 @@ def get_authenticated_user(
     )
     _cache_set(user_id, user)
     return user
+
+
+auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+@auth_router.get("/me")
+def get_current_profile(
+    user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    profile = db.query(models.Profile).filter(models.Profile.id == user.id).first()
+    if profile is None:
+        raise HTTPException(status_code=403, detail="User profile not found")
+    return {
+        "id": str(profile.id),
+        "email": profile.email or user.email,
+        "full_name": profile.full_name,
+        "role": profile.role,
+    }
 
 
 def require_admin(

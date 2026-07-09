@@ -23,11 +23,45 @@ def clean_email_subject(subject: str) -> str:
     return text or "General enquiry"
 
 
+_INTENT_TEMPLATE_NAMES = {
+    "Events": "Event Reply",
+    "Enquiry": "Enquiry Reply",
+    "Cancellation": "Cancellation Reply",
+    "Renewal": "Renewal Reply",
+    "Finance": "Payment Reply",
+    "Partnership": "Partnership Reply",
+}
+
+
 def suggest_template_name(intent: str | None, subject: str) -> str:
-    clean = clean_email_subject(subject)
     label = (intent or "Enquiry").strip()
+    if label in _INTENT_TEMPLATE_NAMES:
+        return _INTENT_TEMPLATE_NAMES[label]
+    clean = clean_email_subject(subject)
     snippet = clean[:48].strip() or "Reply"
     return f"{label}: {snippet}"
+
+
+def _guidance_rules_for_intent(db: Session, intent: str | None) -> list[str]:
+    note = (
+        db.query(models.GuidanceNote)
+        .filter(models.GuidanceNote.intent == (intent or "Enquiry"))
+        .first()
+    )
+    if note is None or not note.rules:
+        return []
+    return [str(rule).strip() for rule in note.rules if str(rule).strip()]
+
+
+def _build_new_template_rationale(email: models.Email, guidance_rules: list[str]) -> str:
+    lines = [
+        "Andrea sent this reply without a matching template.",
+        f"Source email: {clean_email_subject(email.subject)}",
+    ]
+    if guidance_rules:
+        lines.append("Drafting instructions learned from your past edits for this intent:")
+        lines.extend(f"• {rule}" for rule in guidance_rules[:5])
+    return "\n".join(lines)
 
 
 def suggest_template_subject(subject: str) -> str:
@@ -62,6 +96,7 @@ def maybe_suggest_new_template(
     if existing:
         return False
 
+    guidance_rules = _guidance_rules_for_intent(db, email.intent)
     now = datetime.now(timezone.utc)
     db.add(
         models.TemplateSuggestion(
@@ -73,10 +108,7 @@ def maybe_suggest_new_template(
             suggested_name=suggest_template_name(email.intent, email.subject),
             suggested_subject=suggest_template_subject(email.subject),
             suggested_body=final_body.strip(),
-            rationale=(
-                "Andrea wrote this reply without a matching template. "
-                f"Source: {clean_email_subject(email.subject)}"
-            ),
+            rationale=_build_new_template_rationale(email, guidance_rules),
             status="pending",
             created_at=now,
         )

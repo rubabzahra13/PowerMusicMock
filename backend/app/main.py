@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import DatabaseConnectionError, get_db, verify_database_connection, engine
+from app.api.auth import auth_router
 from app.api.routers import pilot1, pilot2
 from app.pilot2 import scheduler
 
@@ -78,6 +79,7 @@ def health_check(db: Session = Depends(get_db)):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"status": "ok", "database": "connected"}
 
+app.include_router(auth_router)
 app.include_router(pilot1.router)
 app.include_router(pilot2.router)
 

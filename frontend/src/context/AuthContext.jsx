@@ -10,7 +10,7 @@ import {
 import { getAuthCallbackUrl } from '../utils/authRedirect';
 import { clearAuthCache, readAuthCache, writeAuthCache } from '../utils/authCache';
 import { readInitialAuthState, clearStoredSession, readStoredSession, isSessionExpired } from '../utils/authBootstrap';
-import { setAccessTokenProvider } from '../utils/api';
+import { setAccessTokenProvider, getApiUrl } from '../utils/api';
 import { requestManagerPasswordReset, resendManagerSignupConfirmation } from '../utils/managerAuthEmail';
 
 const AuthContext = createContext(null);
@@ -26,7 +26,52 @@ function withTimeout(promise, ms, message) {
   ]);
 }
 
-async function fetchUserProfile(userId) {
+async function fetchUserProfileViaBackend(accessToken, email) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(getApiUrl('/api/auth/me'), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body.detail ?? detail;
+      } catch {
+        /* keep statusText */
+      }
+      if (res.status === 403) {
+        if (isAdminEmail(email)) {
+          throw new Error(
+            'Admin profile is missing. Run backend/seed_admin.py against this database, then try again.',
+          );
+        }
+        throw new Error(
+          typeof detail === 'string' ? detail : 'User profile not found.',
+        );
+      }
+      throw new Error(
+        typeof detail === 'string' ? detail : 'Failed to retrieve user role from database.',
+      );
+    }
+    return res.json();
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Could not load your account profile. Try again in a moment.');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function fetchUserProfile(userId, { accessToken, email } = {}) {
+  if (accessToken) {
+    return fetchUserProfileViaBackend(accessToken, email);
+  }
+
   const supabase = getSupabase();
   if (!supabase) throw new Error('Supabase is not configured.');
 
@@ -195,7 +240,10 @@ export function AuthProvider({ children }) {
       if (!currentUser) return;
 
       try {
-        const profileData = await fetchUserProfile(currentUser.id);
+        const profileData = await fetchUserProfile(currentUser.id, {
+          accessToken: currentSession?.access_token,
+          email: currentUser.email,
+        });
         if (!active) return;
         applyProfile(setRole, setProfile, profileData);
       } catch (err) {
@@ -344,7 +392,10 @@ export function AuthProvider({ children }) {
       }
 
       const profileData = await withTimeout(
-        fetchUserProfile(data.user.id),
+        fetchUserProfile(data.user.id, {
+          accessToken: data.session?.access_token,
+          email: data.user.email,
+        }),
         AUTH_TIMEOUT_MS,
         'Could not load your account profile. Try again in a moment.',
       );
@@ -579,7 +630,10 @@ export function AuthProvider({ children }) {
     }
 
     if (data.session) {
-      const profileData = await fetchUserProfile(data.user.id);
+      const profileData = await fetchUserProfile(data.user.id, {
+        accessToken: data.session.access_token,
+        email: data.user.email,
+      });
       setUser(data.user);
       setSession(data.session);
       applyProfile(setRole, setProfile, profileData);

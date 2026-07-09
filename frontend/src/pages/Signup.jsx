@@ -776,6 +776,12 @@ export default function Signup() {
           type="submit"
           disabled={
             loading ||
+            !formData.firstName.trim() ||
+            !formData.lastName.trim() ||
+            !formData.email.trim() ||
+            !formData.club.trim() ||
+            !formData.password ||
+            !formData.confirmPassword ||
             !isPasswordStrongEnough(formData.password, { email: formData.email }) ||
             formData.password !== formData.confirmPassword
           }

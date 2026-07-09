@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, FileText, Trash2, Save, X, ChevronDown, Plus, Pencil,
   SlidersHorizontal, SortAsc, Mail, RotateCcw, Eye, Clock,
@@ -102,7 +102,8 @@ function TemplateSuggestionPanel({
   onApprove,
   onReject,
 }) {
-  if (!suggestions.length) return null;
+  const revisionSuggestions = suggestions.filter((item) => item.kind === 'revision');
+  if (!revisionSuggestions.length) return null;
 
   const templateName = (templateId) =>
     templates.find((row) => row.id === templateId)?.name || 'template';
@@ -111,13 +112,10 @@ function TemplateSuggestionPanel({
     <div className="shrink-0 space-y-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-3">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
         <Sparkles className="h-3.5 w-3.5 text-[var(--color-brand-primary)]" aria-hidden="true" />
-        AI suggestions
+        AI template edits
       </div>
-      {suggestions.map((item) => {
-        const isNew = item.kind === 'new';
-        const title = isNew
-          ? `Add template: ${item.suggestedName}`
-          : `Edit ${templateName(item.templateId)}`;
+      {revisionSuggestions.map((item) => {
+        const title = `Edit ${templateName(item.templateId)}`;
         return (
           <div
             key={item.id}
@@ -127,9 +125,7 @@ function TemplateSuggestionPanel({
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</p>
                 <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-                  {isNew
-                    ? 'Based on a reply you sent when no template matched this email.'
-                    : 'Based on how you edited drafts before sending — suggested fix for next time.'}
+                  Based on how you edited drafts before sending — suggested fix for next time.
                 </p>
                 {item.rationale && (
                   <p className="mt-1.5 text-xs text-[var(--color-text-muted)] line-clamp-2">{item.rationale}</p>
@@ -163,13 +159,82 @@ function TemplateSuggestionPanel({
                   ) : (
                     <Check className="h-3.5 w-3.5" aria-hidden="true" />
                   )}
-                  {isNew ? 'Add' : 'Apply edit'}
+                  Apply edit
                 </button>
               </div>
             </div>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function CategorySuggestionCard({
+  suggestion,
+  busyId,
+  onApprove,
+  onReject,
+  isLast,
+}) {
+  return (
+    <div
+      className={`px-3.5 py-3 bg-[var(--color-brand-primary)]/[0.06] border-t border-[var(--color-brand-primary)]/15 ${
+        isLast ? '' : 'border-b border-[var(--color-brand-primary)]/10'
+      }`}
+    >
+      <div className="flex items-start gap-2.5">
+        <div
+          className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--color-brand-primary)]/12"
+          aria-hidden="true"
+        >
+          <Sparkles className="h-3.5 w-3.5 text-[var(--color-brand-primary)]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+            Add template: {suggestion.suggestedName}
+          </p>
+          <p className="mt-0.5 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+            Andrea sent a reply without a matching template. Save it here so the AI can reuse her wording next time.
+          </p>
+          {suggestion.rationale && (
+            <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed text-[var(--color-text-muted)] line-clamp-4">
+              {suggestion.rationale}
+            </p>
+          )}
+          <p className="mt-2 text-[11px] font-medium text-[var(--color-text-muted)] truncate">
+            Subject: {suggestion.suggestedSubject}
+          </p>
+          <div className="mt-2.5 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onReject(suggestion)}
+              disabled={busyId === suggestion.id}
+              className="inline-flex h-7 items-center gap-1 rounded-lg border border-[var(--color-border-default)] px-2 text-[11px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-white disabled:opacity-50"
+            >
+              {busyId === suggestion.id ? (
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+              ) : (
+                <X className="h-3 w-3" aria-hidden="true" />
+              )}
+              Dismiss
+            </button>
+            <button
+              type="button"
+              onClick={() => onApprove(suggestion)}
+              disabled={busyId === suggestion.id}
+              className="inline-flex h-7 items-center gap-1 rounded-lg bg-[var(--color-brand-primary)] px-2.5 text-[11px] font-semibold text-white transition-colors hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50"
+            >
+              {busyId === suggestion.id ? (
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+              ) : (
+                <Check className="h-3 w-3" aria-hidden="true" />
+              )}
+              Add template
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -203,18 +268,38 @@ function hasDraftableNewContent(form) {
   );
 }
 
-function groupTemplatesByCategory(templates) {
+function intentToCategory(intent) {
+  const map = {
+    Membership: 'Membership',
+    Payments: 'Payments',
+    Events: 'Events',
+    Enquiry: 'General Enquiries',
+    Cancellation: 'Membership',
+    Renewal: 'Membership',
+    Partnership: 'Other',
+    Finance: 'Payments',
+  };
+  return map[intent] || 'General Enquiries';
+}
+
+function groupTemplatesByCategory(templates, newSuggestions = []) {
   const byCategory = new Map();
   templates.forEach((template) => {
     const category = template.category || 'Other';
-    if (!byCategory.has(category)) byCategory.set(category, []);
-    byCategory.get(category).push(template);
+    if (!byCategory.has(category)) byCategory.set(category, { items: [], suggestions: [] });
+    byCategory.get(category).items.push(template);
+  });
+  newSuggestions.forEach((suggestion) => {
+    const category = intentToCategory(suggestion.intent);
+    if (!byCategory.has(category)) byCategory.set(category, { items: [], suggestions: [] });
+    byCategory.get(category).suggestions.push(suggestion);
   });
   const ordered = CATEGORY_ORDER.filter((cat) => byCategory.has(cat));
   const extras = [...byCategory.keys()].filter((cat) => !CATEGORY_ORDER.includes(cat));
   return [...ordered, ...extras].map((category) => ({
     category,
-    items: byCategory.get(category),
+    items: byCategory.get(category).items,
+    suggestions: byCategory.get(category).suggestions,
   }));
 }
 
@@ -449,7 +534,23 @@ function TemplateToolbarButton({
   );
 }
 
-function CategorySection({ category, items, selectedId, onSelect, onEdit, onDelete, onRestore }) {
+function CategorySection({
+  category,
+  items,
+  suggestions = [],
+  revisionTemplateIds = new Set(),
+  selectedId,
+  onSelect,
+  onEdit,
+  onDelete,
+  onRestore,
+  suggestionBusyId,
+  onApproveSuggestion,
+  onRejectSuggestion,
+}) {
+  const totalCount = items.length + suggestions.length;
+  if (totalCount === 0) return null;
+
   return (
     <section className="px-3">
       <div className="flex items-center gap-2 mb-1.5 px-1">
@@ -459,9 +560,16 @@ function CategorySection({ category, items, selectedId, onSelect, onEdit, onDele
         <div className="flex-1 h-px bg-[var(--color-border-default)]/80" aria-hidden="true" />
         <span className="text-[10px] font-medium text-[var(--color-text-muted)] tabular-nums shrink-0">
           {items.length}
+          {suggestions.length > 0 && (
+            <span className="ml-1 text-[var(--color-brand-primary)]">+{suggestions.length}</span>
+          )}
         </span>
       </div>
-      <div className="rounded-xl border border-[var(--color-border-default)] bg-white shadow-[0_1px_2px_rgba(26,26,46,0.04)] overflow-hidden">
+      <div className={`rounded-xl border overflow-hidden shadow-[0_1px_2px_rgba(26,26,46,0.04)] ${
+        suggestions.length > 0
+          ? 'border-[var(--color-brand-primary)]/30 bg-white'
+          : 'border-[var(--color-border-default)] bg-white'
+      }`}>
         {items.map((template, index) => (
           <TemplateListItem
             key={template.id}
@@ -473,7 +581,18 @@ function CategorySection({ category, items, selectedId, onSelect, onEdit, onDele
             onDelete={onDelete}
             onRestore={onRestore}
             inCard
-            isLast={index === items.length - 1}
+            isLast={index === items.length - 1 && suggestions.length === 0}
+            hasPendingRevision={revisionTemplateIds.has(template.id)}
+          />
+        ))}
+        {suggestions.map((suggestion, index) => (
+          <CategorySuggestionCard
+            key={suggestion.id}
+            suggestion={suggestion}
+            busyId={suggestionBusyId}
+            onApprove={onApproveSuggestion}
+            onReject={onRejectSuggestion}
+            isLast={index === suggestions.length - 1}
           />
         ))}
       </div>
@@ -489,6 +608,7 @@ function TemplateListItem({
   muted = false,
   inCard = false,
   isLast = false,
+  hasPendingRevision = false,
   onEdit,
   onDelete,
   onRestore,
@@ -540,11 +660,13 @@ function TemplateListItem({
       } ${
         muted ? 'opacity-75' : ''
       } ${
-        isSelected
-          ? inCard
-            ? 'bg-[var(--color-surface-highlight)]/80'
-            : 'bg-[var(--color-surface-highlight)] border-l-[3px] border-l-[var(--color-brand-primary)]'
-          : 'hover:bg-[var(--color-surface-highlight)]/50'
+        hasPendingRevision
+          ? 'bg-[var(--color-brand-primary)]/[0.05]'
+          : isSelected
+            ? inCard
+              ? 'bg-[var(--color-surface-highlight)]/80'
+              : 'bg-[var(--color-surface-highlight)] border-l-[3px] border-l-[var(--color-brand-primary)]'
+            : 'hover:bg-[var(--color-surface-highlight)]/50'
       }`}
     >
       <div
@@ -572,6 +694,12 @@ function TemplateListItem({
           >
             {template.name}
           </span>
+          {hasPendingRevision && (
+            <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-[var(--color-brand-primary)]/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--color-brand-primary)]">
+              <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
+              AI edit suggested
+            </span>
+          )}
           <span className="block text-[11px] text-[var(--color-text-muted)] truncate leading-tight">
             {template.subject}
           </span>
@@ -615,6 +743,9 @@ function TemplateListItem({
 export default function TemplateManagement() {
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const templateIdFromUrl = searchParams.get('id');
+  const consumedTemplateDeepLinkRef = useRef(null);
 
   // Template state (single source of truth: the backend database).
   // Cached copy renders instantly; fresh data replaces it, and window focus
@@ -772,6 +903,28 @@ export default function TemplateManagement() {
   const inboxFilterRef = useRef(inboxFilter);
   const autoSavePromiseRef = useRef(null);
   const persistDraftChainRef = useRef(Promise.resolve());
+
+  useEffect(() => {
+    if (!templateIdFromUrl || templatesLoading || !templates.length) return;
+    if (consumedTemplateDeepLinkRef.current === templateIdFromUrl) return;
+    const template = templates.find((row) => row.id === templateIdFromUrl);
+    if (!template) return;
+    consumedTemplateDeepLinkRef.current = templateIdFromUrl;
+    if (template.inbox) {
+      writeSelectedInbox(template.inbox);
+      setInboxFilter(template.inbox);
+    }
+    setLibraryTab(
+      template.status === 'Draft'
+        ? 'drafts'
+        : template.status === 'Archived'
+          ? 'deleted'
+          : 'templates',
+    );
+    setSelectedId(template.id);
+    setIsEditing(false);
+    setIsCreatingNew(false);
+  }, [templateIdFromUrl, templates, templatesLoading]);
 
   editFormRef.current = editForm;
   isCreatingNewRef.current = isCreatingNew;
@@ -1164,10 +1317,33 @@ export default function TemplateManagement() {
     return displayedTemplates.slice(start, start + TEMPLATE_PAGE_SIZE);
   }, [displayedTemplates, currentPage]);
 
-  const categoryGroups = useMemo(
-    () => (libraryTab === 'templates' ? groupTemplatesByCategory(paginatedTemplates) : []),
-    [paginatedTemplates, libraryTab],
+  const newSuggestions = useMemo(
+    () => suggestions.filter((item) => item.kind === 'new'),
+    [suggestions],
   );
+
+  const revisionTemplateIds = useMemo(
+    () => new Set(
+      suggestions
+        .filter((item) => item.kind === 'revision' && item.templateId)
+        .map((item) => item.templateId),
+    ),
+    [suggestions],
+  );
+
+  const categoryGroups = useMemo(() => {
+    if (libraryTab !== 'templates') return [];
+    const q = search.trim().toLowerCase();
+    const filteredSuggestions = newSuggestions.filter((item) => {
+      const matchSearch = q === ''
+        || item.suggestedName.toLowerCase().includes(q)
+        || item.suggestedSubject.toLowerCase().includes(q);
+      const matchCat = categoryFilter === 'All Categories'
+        || intentToCategory(item.intent) === categoryFilter;
+      return matchSearch && matchCat;
+    });
+    return groupTemplatesByCategory(displayedTemplates, filteredSuggestions);
+  }, [displayedTemplates, libraryTab, newSuggestions, search, categoryFilter]);
 
   const pageStart = displayedTemplates.length === 0 ? 0 : (currentPage - 1) * TEMPLATE_PAGE_SIZE + 1;
   const pageEnd = Math.min(currentPage * TEMPLATE_PAGE_SIZE, displayedTemplates.length);
@@ -1629,7 +1805,7 @@ export default function TemplateManagement() {
         </div>
       );
     }
-    if (displayedTemplates.length === 0) {
+    if (displayedTemplates.length === 0 && newSuggestions.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center h-full p-8 text-center">
           <div className="w-12 h-12 rounded-2xl bg-white border border-[var(--color-border-default)] flex items-center justify-center mb-3 shadow-sm">
@@ -1647,15 +1823,20 @@ export default function TemplateManagement() {
     if (libraryTab === 'templates') {
       return (
         <div className="py-3 space-y-4">
-          {categoryGroups.map(({ category, items }) => (
+          {categoryGroups.map(({ category, items, suggestions: categorySuggestions }) => (
             <CategorySection
               key={category}
               category={category}
               items={items}
+              suggestions={categorySuggestions}
+              revisionTemplateIds={revisionTemplateIds}
               selectedId={selectedId}
               onSelect={handleSelectTemplate}
               onEdit={handleListEdit}
               onDelete={handleListDelete}
+              suggestionBusyId={suggestionBusyId}
+              onApproveSuggestion={handleApproveSuggestion}
+              onRejectSuggestion={handleRejectSuggestion}
             />
           ))}
         </div>

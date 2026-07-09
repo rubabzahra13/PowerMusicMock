@@ -30,7 +30,8 @@ const PARTNER_ACTIVITY_TYPES = new Set([
   'request_submitted',
   'tag_applied',
   'marked_added',
-  'marked_removed'
+  'marked_removed',
+  'automated_email',
 ]);
 
 const PANEL = 'bg-white border border-[var(--color-border-default)]';
@@ -237,17 +238,23 @@ function ServiceColumn({
               <p className="text-sm text-[var(--color-text-muted)] text-center py-4">{activityEmptyText}</p>
             ) : (
               activities.map((activity, index) => {
-                const isClickable = Boolean(activity.link) || activity.type === 'template_updated';
+                const isClickable = Boolean(activity.link);
                 const meta = getActivityMeta(activity.type);
                 const Icon = meta.icon;
                 const isLast = index === activities.length - 1;
 
                 return (
-                  <div
+                  <button
                     key={activity.id}
-                    onClick={() => isClickable && onActivityClick(activity)}
-                    className={`relative flex gap-2.5 ${isLast ? '' : 'pb-3'} ${
-                      isClickable ? 'cursor-pointer group' : ''
+                    type="button"
+                    onClick={isClickable ? () => onActivityClick(activity) : undefined}
+                    disabled={!isClickable}
+                    className={`relative flex gap-2.5 w-full text-left ${
+                      isLast ? '' : 'pb-3'
+                    } ${
+                      isClickable
+                        ? `cursor-pointer group ${theme.alertCardHover} rounded-lg border border-transparent px-1 -mx-1`
+                        : 'cursor-default'
                     }`}
                   >
                     {!isLast && (
@@ -258,7 +265,7 @@ function ServiceColumn({
                     }`}>
                       <Icon className={`w-4 h-4 ${theme.iconColor}`} />
                     </div>
-                    <div className={`flex-1 min-w-0 rounded-lg px-2 py-1 -mx-1 transition-colors ${
+                    <div className={`flex-1 min-w-0 rounded-lg px-2 py-1 transition-colors ${
                       isClickable ? theme.activityHover : ''
                     }`}>
                       <div className="flex items-start justify-between gap-2">
@@ -273,7 +280,7 @@ function ServiceColumn({
                         {formatActivityDate(activity.timestamp)}
                       </p>
                     </div>
-                  </div>
+                  </button>
                 );
               })
             )}
@@ -319,7 +326,7 @@ export default function Home() {
           timestamp: entry.timestamp,
           type: entry.type,
           description: entry.description,
-          link: null,
+          link: entry.emailId ? `/templates?id=${entry.emailId}` : null,
         })),
       );
       setLiveFlaggedAlerts(
@@ -357,14 +364,24 @@ export default function Home() {
     }
   };
 
-  const goToFlaggedEmails = () => navigate('/email-responses?mailbox=flagged');
-
-  const handleActivityClick = (activity) => {
-    if (activity.type === 'template_updated') {
-      navigate('/templates');
+  const goToFlaggedEmail = (alert) => {
+    if (alert?.id) {
+      navigate(`/email-responses?mailbox=flagged&emailId=${encodeURIComponent(alert.id)}`);
       return;
     }
-    if (activity.link) navigate('/new-requests');
+    navigate('/email-responses?mailbox=flagged');
+  };
+
+  const handleActivityClick = (activity) => {
+    if (activity.link) navigate(activity.link);
+  };
+
+  const handlePartnerAlertClick = (alert) => {
+    if (alert?.id) {
+      navigate(`/new-requests?id=${encodeURIComponent(alert.id)}`);
+      return;
+    }
+    navigate('/new-requests');
   };
 
   const duplicateAlerts = (Array.isArray(livePendingRequests) ? livePendingRequests : [])
@@ -411,14 +428,14 @@ export default function Home() {
           activityLoading={!customerReady}
           kpis={[
             { label: 'New Emails', value: liveCustomerKpis.newEmails, icon: Mail, onClick: () => navigate('/email-responses') },
-            { label: 'Flagged', value: liveCustomerKpis.flaggedEmails, icon: Flag, onClick: goToFlaggedEmails },
+            { label: 'Flagged', value: liveCustomerKpis.flaggedEmails, icon: Flag, onClick: () => navigate('/email-responses?mailbox=flagged') },
             { label: 'Active Templates', value: liveCustomerKpis.templatesActive, icon: FileText, onClick: () => navigate('/templates') }
           ]}
           alertsTitle="Flagged emails"
           alertsSubtitle={flaggedEmailAlerts.length ? 'Requires review' : 'All clear'}
           alerts={flaggedEmailAlerts}
           alertEmptyText="No flagged emails to review."
-          onAlertClick={goToFlaggedEmails}
+          onAlertClick={goToFlaggedEmail}
           activities={customerActivity}
           activityEmptyText="No recent template activity."
           formatActivityDate={formatActivityDate}
@@ -439,7 +456,7 @@ export default function Home() {
           alertsSubtitle={duplicateAlerts.length ? 'Potential duplicate entries' : 'Nothing urgent'}
           alerts={duplicateAlerts}
           alertEmptyText="No duplicate warnings right now."
-          onAlertClick={() => navigate('/new-requests')}
+          onAlertClick={handlePartnerAlertClick}
           activities={partnerActivity}
           activityTitle="Recent Requests"
           activitySubtitle="Latest requests"
