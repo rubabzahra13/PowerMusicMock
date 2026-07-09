@@ -102,3 +102,16 @@ def filter_emails_by_ignore_list(
             continue
         kept.append(email)
     return kept
+
+
+def list_flagged_workspace_emails(db: Session) -> List[models.Email]:
+    """Flagged emails visible in Email responses (workspace + flagged tab rules)."""
+    visible = models.Email.draft_status.notin_(["Ignored", "Imported", "Processing"])
+    rows = (
+        db.query(models.Email)
+        .filter(visible, models.Email.deleted.is_(False))
+        .filter(models.Email.flagged.is_(True), models.Email.archived.is_(False))
+        .order_by(models.Email.received_at.desc())
+        .all()
+    )
+    return filter_emails_by_ignore_list(rows, load_rules_grouped(db))

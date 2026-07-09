@@ -40,11 +40,8 @@ def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         models.Email.read.is_(False),
         models.Email.archived.is_(False),
     ).count()
-    flagged_base = base.filter(
-        models.Email.flagged.is_(True),
-        models.Email.archived.is_(False),
-    )
-    flagged_emails = flagged_base.count()
+    flagged_rows = ignore_list.list_flagged_workspace_emails(db)
+    flagged_emails = len(flagged_rows)
     templates_active = (
         db.query(models.EmailTemplate)
         .filter(models.EmailTemplate.status == "Active")
@@ -57,7 +54,6 @@ def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         .limit(8)
         .all()
     )
-    flagged_rows = flagged_base.order_by(models.Email.received_at.desc()).all()
     flagged_alerts = [
         {
             "id": row.id,
