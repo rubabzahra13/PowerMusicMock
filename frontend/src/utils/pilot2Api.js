@@ -222,6 +222,16 @@ export const getTemplates = (inbox) => {
   const query = inbox ? `?inbox=${encodeURIComponent(inbox)}` : '';
   return request(`/api/pilot2/templates${query}`);
 };
+export const getTemplatesForConnectedInboxes = async (inboxes) => {
+  const connected = (inboxes ?? []).filter((inbox) => inbox.status === 'Connected');
+  if (!connected.length) return getTemplates();
+  const batches = await Promise.all(connected.map((inbox) => getTemplates(inbox.email)));
+  const byId = new Map();
+  for (const batch of batches) {
+    for (const row of batch ?? []) byId.set(row.id, row);
+  }
+  return [...byId.values()];
+};
 export const createTemplate = (template) =>
   request('/api/pilot2/templates', { method: 'POST', body: JSON.stringify(template) });
 export const updateTemplate = (id, template) =>

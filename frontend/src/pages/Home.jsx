@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 import {
   AlertTriangle,
@@ -15,26 +15,50 @@ import {
   Users
 } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
-import { adminPageShellClass } from '../utils/responsiveLayout';
-import { loadWithCache, getDashboard, getPilot2Overview } from '../utils/pilot2Api';
+import { loadWithCache, refreshCache, getDashboard, getPilot2Overview, getPilot2Workspace, getTemplatesForConnectedInboxes } from '../utils/pilot2Api';
+import { countInboxTabAcrossConnectedInboxes, countFlaggedAcrossConnectedInboxes, buildFlaggedDashboardAlerts, buildTemplateDashboardActivities } from '../utils/emailMailboxCounts';
 import DottedScroll from '../components/ui/DottedScroll';
 import { PanelListSkeleton, ActivitySkeleton } from '../components/ui';
 
 const PANEL_VISIBLE_ITEMS = 3;
-const ALERT_LIST_SCROLL_CLASS = 'max-h-[15.5rem] overflow-y-scroll scrollbar-hide pr-5';
-const ACTIVITY_LIST_SCROLL_CLASS = 'max-h-[12.75rem] overflow-y-scroll scrollbar-hide pr-5';
+const ALERT_LIST_SCROLL_CLASS = 'overflow-visible xl:max-h-[15.5rem] xl:overflow-y-auto xl:scrollbar-hide xl:pr-5';
+const ACTIVITY_LIST_SCROLL_CLASS = 'overflow-visible xl:max-h-[12.75rem] xl:overflow-y-auto xl:scrollbar-hide xl:pr-5';
 import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
 
 const CUSTOMER_ACTIVITY_TYPES = new Set(['template_created', 'template_updated']);
-const PARTNER_ACTIVITY_TYPES = new Set([
-  'request_submitted',
-  'tag_applied',
-  'marked_added',
-  'marked_removed',
-  'automated_email',
-]);
+const HANDLED_ACTIVITY_TYPES = new Set(['marked_added', 'marked_removed']);
 
 const PANEL = 'bg-white border border-[var(--color-border-default)]';
+
+function readPmSessionCache(key) {
+  try {
+    const cached = sessionStorage.getItem(`pm_cache_${key}`);
+    if (!cached) return null;
+    return JSON.parse(cached);
+  } catch {
+    return null;
+  }
+}
+
+function readCachedTemplatesForInboxes(inboxes) {
+  const connected = (inboxes ?? []).filter((inbox) => inbox.status === 'Connected');
+  const byId = new Map();
+  for (const inbox of connected) {
+    const batch = readPmSessionCache(`templates_${inbox.email}`);
+    if (!Array.isArray(batch)) continue;
+    for (const row of batch) byId.set(row.id, row);
+  }
+  return [...byId.values()];
+}
+
+function applyDashboardTemplateActivities(inboxes, setLiveCustomerActivity) {
+  const cached = readCachedTemplatesForInboxes(inboxes);
+  if (cached.length > 0) {
+    setLiveCustomerActivity(buildTemplateDashboardActivities(cached, inboxes));
+    return true;
+  }
+  return false;
+}
 
 const COLUMN_THEMES = {
   customer: {
@@ -164,19 +188,19 @@ function ServiceColumn({
   const theme = COLUMN_THEMES[themeKey];
 
   return (
-    <div className={`flex flex-col gap-3 h-full min-h-0 overflow-hidden rounded-2xl p-4 xl:p-5 border ${theme.shell}`}>
+    <div className={`relative flex w-full min-w-0 flex-col gap-3 rounded-2xl border p-4 sm:p-5 xl:h-full xl:min-h-0 xl:overflow-hidden ${theme.shell}`}>
       <div className="shrink-0">
         <h2 className="text-base font-bold uppercase tracking-wide text-[var(--color-text-primary)]">{title}</h2>
         <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">{description}</p>
       </div>
 
-      <div className={`grid gap-2.5 shrink-0 ${kpis.length >= 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
+      <div className={`grid w-full min-w-0 shrink-0 gap-2.5 ${kpis.length >= 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
         {kpis.map((kpi) => (
           <KpiCard key={kpi.label} {...kpi} theme={theme} />
         ))}
       </div>
 
-      <div className="flex-1 flex flex-col gap-3 min-h-0">
+      <div className="flex flex-col gap-3 xl:flex-1 xl:min-h-0">
         <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col shrink-0`}>
           <div className={`px-3.5 py-2.5 border-b flex items-center justify-between gap-3 shrink-0 ${theme.panelHeader}`}>
             <div className="flex items-center gap-2.5 min-w-0">
@@ -340,6 +364,7 @@ function ServiceColumn({
 
 export default function Home() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [livePendingRequests, setLivePendingRequests] = useState([]);
   const [liveKpis, setLiveKpis] = useState({ pendingRequests: 0, usersInLedger: 0 });
@@ -351,8 +376,10 @@ export default function Home() {
   });
   const [liveCustomerActivity, setLiveCustomerActivity] = useState([]);
   const [liveFlaggedAlerts, setLiveFlaggedAlerts] = useState([]);
+  const [inboxEmailTotal, setInboxEmailTotal] = useState(0);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [templatesReady, setTemplatesReady] = useState(false);
   const [partnerReady, setPartnerReady] = useState(false);
-  const [customerReady, setCustomerReady] = useState(false);
 
   useEffect(() => {
     const applyDashboard = (data) => {
@@ -367,40 +394,51 @@ export default function Home() {
         flaggedEmails: data.flaggedEmails ?? 0,
         templatesActive: data.templatesActive ?? 0,
       });
-      setLiveCustomerActivity(
-        (Array.isArray(data.activity) ? data.activity : []).map((entry) => ({
-          id: `act-${entry.id}`,
-          timestamp: entry.timestamp,
-          type: entry.type,
-          description: entry.description,
-          partitionLabel: entry.inboxTitle || null,
-          link: entry.emailId ? `/templates?id=${encodeURIComponent(entry.emailId)}` : null,
-        })),
-      );
-      setLiveFlaggedAlerts(
-        (Array.isArray(data.flaggedAlerts) ? data.flaggedAlerts : []).map((alert) => ({
-          id: alert.id,
-          title: alert.title,
-          subtitle: alert.subtitle || 'Requires manual review',
-          partitionLabel: alert.inboxTitle || null,
-          timestamp: alert.timestamp,
-          type: 'critical',
-          isNew: true,
-        })),
-      );
-      setCustomerReady(true);
+    };
+    const refreshDashboardTemplates = (inboxes) => {
+      const hadCached = applyDashboardTemplateActivities(inboxes, setLiveCustomerActivity);
+      if (hadCached) setTemplatesReady(true);
+
+      refreshCache(
+        'home_dashboard_templates',
+        () => getTemplatesForConnectedInboxes(inboxes),
+        (templates) => {
+          setLiveCustomerActivity(buildTemplateDashboardActivities(templates, inboxes));
+          setTemplatesReady(true);
+        },
+      ).catch((err) => {
+        console.error(err);
+        if (!hadCached) {
+          setLiveCustomerActivity(buildTemplateDashboardActivities([], inboxes));
+        }
+        setTemplatesReady(true);
+      });
+    };
+    const applyWorkspaceCustomerData = (data) => {
+      const emails = data.emails ?? [];
+      const inboxes = data.inboxes ?? [];
+      setInboxEmailTotal(countInboxTabAcrossConnectedInboxes(emails, inboxes));
+      setLiveFlaggedAlerts(buildFlaggedDashboardAlerts(emails, inboxes));
+      setLiveCustomerKpis((prev) => ({
+        ...prev,
+        flaggedEmails: countFlaggedAcrossConnectedInboxes(emails, inboxes),
+      }));
+      refreshDashboardTemplates(inboxes);
+      setWorkspaceReady(true);
     };
     const load = () => {
       loadWithCache('home_dashboard', getDashboard, applyDashboard)
         .catch((err) => console.error(err));
       loadWithCache('home_customer_overview', getPilot2Overview, applyCustomerOverview)
         .catch((err) => console.error(err));
+      loadWithCache('pilot2_workspace', getPilot2Workspace, applyWorkspaceCustomerData)
+        .catch((err) => console.error(err));
     };
     load();
     const refresh = () => { if (!document.hidden) load(); };
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
-  }, []);
+  }, [location.key]);
 
   const formatActivityDate = (isoString) => {
     try {
@@ -450,41 +488,42 @@ export default function Home() {
     ...alert,
     time: alert.timestamp ? formatActivityDate(alert.timestamp) : '',
   }));
+  const hasFlaggedAlerts = flaggedEmailAlerts.length > 0;
 
   const customerActivity = liveCustomerActivity
     .filter((a) => CUSTOMER_ACTIVITY_TYPES.has(a.type));
 
   const partnerActivity = (Array.isArray(livePartnerActivity) ? livePartnerActivity : [])
-    .filter((a) => PARTNER_ACTIVITY_TYPES.has(a.type))
+    .filter((a) => HANDLED_ACTIVITY_TYPES.has(a.type))
     .map((a) => ({
       ...a,
-      link: a.linkedRequestId ? `/new-requests?id=${a.linkedRequestId}` : null
+      link: a.linkedRequestId ? `/directory?id=${encodeURIComponent(a.linkedRequestId)}` : null,
     }))
     .slice(0, 2);
 
   return (
-    <div className={`${adminPageShellClass} select-none`}>
+    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto xl:overflow-hidden select-none">
       <PageHeader
         section="Overview"
-        title="Good morning, Andrea."
+        title="Hello Andrea."
         description="Here's your operational overview for today."
         className="mb-4 shrink-0"
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 grid-rows-2 xl:grid-rows-1 gap-4 flex-1 min-h-0 items-stretch">
+      <div className="grid w-full min-w-0 grid-cols-1 gap-4 pb-2 xl:grid-cols-2 xl:flex-1 xl:min-h-0 xl:grid-rows-1 xl:items-stretch xl:pb-0">
         <ServiceColumn
           themeKey="customer"
           title="Customer Support"
           description="Totals across all connected inboxes."
-          alertsLoading={!customerReady}
-          activityLoading={!customerReady}
+          alertsLoading={!workspaceReady}
+          activityLoading={!templatesReady}
           kpis={[
-            { label: 'New Emails', value: liveCustomerKpis.newEmails, hint: 'All inboxes', icon: Mail, onClick: () => navigate('/email-responses') },
+            { label: 'In inboxes', value: inboxEmailTotal, hint: 'All inboxes', icon: Mail, onClick: () => navigate('/email-responses') },
             { label: 'Flagged', value: liveCustomerKpis.flaggedEmails, hint: 'All inboxes', icon: Flag, onClick: () => navigate('/email-responses?mailbox=flagged') },
             { label: 'Active Templates', value: liveCustomerKpis.templatesActive, hint: 'All inboxes', icon: FileText, onClick: () => navigate('/templates') }
           ]}
           alertsTitle="New flags"
-          alertsSubtitle={flaggedEmailAlerts.length ? 'For all inboxes' : 'All clear'}
+          alertsSubtitle={hasFlaggedAlerts ? 'For all inboxes' : 'All clear'}
           alerts={flaggedEmailAlerts}
           alertEmptyText="No flagged emails to review."
           showAlertCount={false}
@@ -508,15 +547,15 @@ export default function Home() {
             { label: 'Users in ledger', value: liveKpis.usersInLedger, icon: Users, onClick: () => navigate('/directory') }
           ]}
           alertsTitle="New priority alerts"
-          alertsSubtitle={duplicateAlerts.length ? 'Latest potential duplicates' : 'Nothing urgent'}
+          alertsSubtitle={duplicateAlerts.length ? 'Latest potential duplicates' : 'No alerts'}
           alerts={duplicateAlerts}
-          alertEmptyText="No duplicate warnings right now."
+          alertEmptyText="No alerts"
           showAlertCount={false}
           onAlertClick={handlePartnerAlertClick}
           activities={partnerActivity}
-          activityTitle="Recent Requests"
-          activitySubtitle="Latest user management requests"
-          activityEmptyText="No recent partner activity."
+          activityTitle="Handled requests"
+          activitySubtitle={partnerActivity.length ? 'Recently marked in directory' : 'No handled requests'}
+          activityEmptyText="No handled requests."
           formatActivityDate={formatActivityDate}
           onActivityClick={handleActivityClick}
         />

@@ -75,3 +75,15 @@ export function splitDraftBody(body, inboxTitle) {
   }
   return { main: text, signature: null };
 }
+
+/** Full outbound reply text: greeting + editable middle + canonical signature. */
+export function composeOutboundReply(body, inboxTitle, firstName) {
+  const title = (inboxTitle || '').trim() || 'Power Music';
+  const greetingName = (firstName || '').trim() || 'there';
+  const middle = extractDraftBody(body);
+  const signature = buildEmailSignature(title);
+  if (!middle) {
+    return body?.trim() ? body : `Hi ${greetingName},\n\n${signature}`;
+  }
+  return `Hi ${greetingName},\n\n${middle}\n\n${signature}`;
+}

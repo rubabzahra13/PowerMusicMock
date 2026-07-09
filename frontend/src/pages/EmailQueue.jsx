@@ -12,6 +12,7 @@ import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton, DraftCreatin
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClass } from '../utils/responsiveLayout';
 import DraftBodyDisplay from '../components/email/DraftBodyDisplay';
+import DraftBodyEditor from '../components/email/DraftBodyEditor';
 import ThreadListItem from '../components/email/ThreadListItem';
 import ThreadHistory, { ForwardedInBanner } from '../components/email/ThreadHistory';
 import ReplyTargetPicker from '../components/email/ReplyTargetPicker';
@@ -21,8 +22,9 @@ import AttachmentChips from '../components/email/AttachmentChips';
 import SafeHtml from '../components/email/SafeHtml';
 import { buildThreadTranscript, groupIntoThreads, threadKeyFor } from '../utils/emailThreads';
 import { buildAddressBook, parseRecipientList, isValidEmail, seedReplyAllRecipients } from '../utils/emailAddressBook';
+import { countMailboxEmails } from '../utils/emailMailboxCounts';
 import { resolveSelectedInbox, writeSelectedInbox } from '../utils/selectedInbox';
-import { buildEmailSignature, normalizeDraftSignature, resolveInboxTitle } from '../utils/emailSignature';
+import { buildEmailSignature, normalizeDraftSignature, resolveInboxTitle, extractDraftBody, composeOutboundReply } from '../utils/emailSignature';
 import { useRealtimeBroadcast } from '../hooks/useRealtimeBroadcast';
 
 const PAGE_SIZE = 20;
@@ -228,6 +230,15 @@ function matchesMailbox(email, mailbox) {
   }
 }
 
+function emailMatchesQueueView(email, mailbox, inboxFilter, archivedIds) {
+  if (!email || email.inbox !== inboxFilter) return false;
+  if (mailbox === 'bin') return Boolean(email.deleted);
+  if (email.deleted) return false;
+  if (mailbox === 'archive') return archivedIds.has(email.id);
+  if (archivedIds.has(email.id)) return false;
+  return matchesMailbox(email, mailbox);
+}
+
 function emailMatchesDateRange(iso, dateFrom, dateTo) {
   if (!dateFrom && !dateTo) return true;
   try {
@@ -340,6 +351,7 @@ export default function EmailQueue() {
   const mailboxFromUrl = searchParams.get('mailbox');
   const emailIdFromUrl = searchParams.get('emailId');
   const consumedEmailDeepLinkRef = useRef(null);
+  const applyingEmailDeepLinkRef = useRef(false);
   const skipSelectionResetRef = useRef(false);
   const scrollDeepLinkRef = useRef(false);
   const [emails, setEmails] = useState([]);
@@ -549,18 +561,14 @@ export default function EmailQueue() {
     []
   );
 
-  const mailboxCounts = useMemo(() => {
-    const forInbox = (predicate) =>
-      emails.filter((e) => e.inbox === inboxFilter && predicate(e));
-    return {
-      inbox: forInbox((e) => !e.deleted && !archivedIds.has(e.id) && matchesMailbox(e, 'inbox')).length,
-      urgent: forInbox((e) => !e.deleted && !archivedIds.has(e.id) && matchesMailbox(e, 'urgent')).length,
-      flagged: forInbox((e) => !e.deleted && !archivedIds.has(e.id) && matchesMailbox(e, 'flagged')).length,
-      archive: forInbox((e) => !e.deleted && archivedIds.has(e.id)).length,
-      sent: forInbox((e) => !e.deleted && !archivedIds.has(e.id) && matchesMailbox(e, 'sent')).length,
-      bin: forInbox((e) => e.deleted).length,
-    };
-  }, [emails, archivedIds, inboxFilter]);
+  const mailboxCounts = useMemo(() => ({
+    inbox: countMailboxEmails(emails, { accountEmail: inboxFilter, mailbox: 'inbox', archivedIds }),
+    urgent: countMailboxEmails(emails, { accountEmail: inboxFilter, mailbox: 'urgent', archivedIds }),
+    flagged: countMailboxEmails(emails, { accountEmail: inboxFilter, mailbox: 'flagged', archivedIds }),
+    archive: countMailboxEmails(emails, { accountEmail: inboxFilter, mailbox: 'archive', archivedIds }),
+    sent: countMailboxEmails(emails, { accountEmail: inboxFilter, mailbox: 'sent', archivedIds }),
+    bin: countMailboxEmails(emails, { accountEmail: inboxFilter, mailbox: 'bin', archivedIds }),
+  }), [emails, archivedIds, inboxFilter]);
 
   const filteredEmails = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -674,23 +682,41 @@ export default function EmailQueue() {
   const activeMailboxLabel = activeMailbox?.label ?? 'Inbox';
   const ActiveMailboxIcon = activeMailbox?.icon;
 
+  useEffect(() => {
+    consumedEmailDeepLinkRef.current = null;
+    applyingEmailDeepLinkRef.current = Boolean(emailIdFromUrl);
+  }, [emailIdFromUrl]);
+
   useLayoutEffect(() => {
     if (!emailIdFromUrl || !emails.length) return;
-    if (consumedEmailDeepLinkRef.current === emailIdFromUrl) return;
+
     const email = emails.find((row) => row.id === emailIdFromUrl);
     if (!email) return;
-    consumedEmailDeepLinkRef.current = emailIdFromUrl;
-    skipSelectionResetRef.current = true;
-    scrollDeepLinkRef.current = true;
-    if (email.inbox) {
+
+    const targetMailbox = resolveMailboxForEmail(email, mailboxFromUrl);
+    applyingEmailDeepLinkRef.current = true;
+
+    if (email.inbox && email.inbox !== inboxFilter) {
       writeSelectedInbox(email.inbox);
       setInboxFilter(email.inbox);
     }
-    setMailbox(resolveMailboxForEmail(email, mailboxFromUrl));
+    if (mailbox !== targetMailbox) {
+      setMailbox(targetMailbox);
+    }
+
+    if (!emailMatchesQueueView(email, targetMailbox, email.inbox || inboxFilter, archivedIds)) {
+      return;
+    }
+
+    if (consumedEmailDeepLinkRef.current === emailIdFromUrl) return;
+    consumedEmailDeepLinkRef.current = emailIdFromUrl;
+    applyingEmailDeepLinkRef.current = false;
+    skipSelectionResetRef.current = true;
+    scrollDeepLinkRef.current = true;
     setSelectedId(email.id);
     setIsEditingDraft(false);
     setComposerMode('reply');
-  }, [emailIdFromUrl, emails, mailboxFromUrl]);
+  }, [emailIdFromUrl, emails, mailboxFromUrl, inboxFilter, mailbox, archivedIds]);
 
   useLayoutEffect(() => {
     setPage(1);
@@ -699,8 +725,25 @@ export default function EmailQueue() {
       skipSelectionResetRef.current = false;
       return;
     }
+    if (emailIdFromUrl) {
+      const target = emails.find((row) => row.id === emailIdFromUrl);
+      if (target) {
+        if (applyingEmailDeepLinkRef.current) {
+          if (!emailMatchesQueueView(target, mailbox, inboxFilter, archivedIds)) {
+            return;
+          }
+          setSelectedId(emailIdFromUrl);
+          scrollDeepLinkRef.current = true;
+          applyingEmailDeepLinkRef.current = false;
+          return;
+        }
+        if (emailMatchesQueueView(target, mailbox, inboxFilter, archivedIds)) {
+          return;
+        }
+      }
+    }
     setSelectedId(null);
-  }, [mailbox, inboxFilter, intentFilter, readFilter, search, dateFrom, dateTo, sortOrder]);
+  }, [mailbox, inboxFilter, intentFilter, readFilter, search, dateFrom, dateTo, sortOrder, emailIdFromUrl, emails, archivedIds]);
 
   useLayoutEffect(() => {
     if (!scrollDeepLinkRef.current || !emailIdFromUrl) return;
@@ -739,6 +782,15 @@ export default function EmailQueue() {
     if (draftEdits[email.id] != null) return draftEdits[email.id];
     return buildDraft(email, inboxes);
   }, [draftEdits, inboxes]);
+
+  const updateDraftMiddle = useCallback((email, middle) => {
+    const inboxTitle = resolveInboxTitle(inboxes, email.inbox);
+    const signature = buildEmailSignature(inboxTitle);
+    const next = middle.trim()
+      ? `${middle.trim()}\n\n${signature}`
+      : buildDraft(email, inboxes);
+    setDraftEdits((prev) => ({ ...prev, [email.id]: next }));
+  }, [inboxes]);
 
   // Selecting a thread focuses the composer on its "active reply target" (the
   // newest inbound that still needs a reply) and marks *every* unread message
@@ -1091,7 +1143,12 @@ export default function EmailQueue() {
       showToast('Wait until the reply draft is ready, or edit the draft before sending.', 'error');
       return;
     }
-    const body = getDraftForEmail(selectedEmail);
+    const inboxTitle = resolveInboxTitle(inboxes, selectedEmail.inbox);
+    const body = composeOutboundReply(
+      getDraftForEmail(selectedEmail),
+      inboxTitle,
+      getFirstName(getReplyRecipientName(selectedEmail)),
+    );
     try {
       let updated;
       if (composerMode === 'reply-all') {
@@ -2083,11 +2140,11 @@ export default function EmailQueue() {
                           />
                         </div>
                       ) : (
-                        <textarea
-                          value={getDraftForEmail(selectedEmail)}
-                          onChange={(e) => setDraftEdits((prev) => ({ ...prev, [selectedEmail.id]: e.target.value }))}
-                          rows={10}
-                          className="w-full rounded-lg border border-[var(--color-border-default)] bg-white px-4 py-3.5 text-sm text-[var(--color-text-primary)] leading-relaxed font-sans resize-none focus:outline-none focus:border-[var(--color-brand-primary)]/30 focus:ring-2 focus:ring-[var(--color-brand-primary)]/10 min-h-[120px]"
+                        <DraftBodyEditor
+                          value={extractDraftBody(getDraftForEmail(selectedEmail))}
+                          onChange={(e) => updateDraftMiddle(selectedEmail, e.target.value)}
+                          inboxTitle={resolveInboxTitle(inboxes, selectedEmail.inbox)}
+                          firstName={getFirstName(getReplyRecipientName(selectedEmail))}
                         />
                       )}
                     </div>

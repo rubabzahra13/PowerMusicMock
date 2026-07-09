@@ -104,6 +104,30 @@ def filter_emails_by_ignore_list(
     return kept
 
 
+def count_inbox_tab_emails(
+    db: Session,
+    *,
+    account_emails: Optional[Iterable[str]] = None,
+) -> int:
+    """Emails on the Inbox tab in Email responses (per-inbox rules, summed when scoped)."""
+    visible = models.Email.draft_status.notin_(["Ignored", "Imported", "Processing"])
+    query = (
+        db.query(models.Email)
+        .filter(visible, models.Email.deleted.is_(False))
+        .filter(
+            models.Email.archived.is_(False),
+            models.Email.draft_status != "Sent",
+        )
+    )
+    if account_emails is not None:
+        scoped = set(account_emails)
+        if not scoped:
+            return 0
+        query = query.filter(models.Email.account_email.in_(scoped))
+    rows = query.all()
+    return len(filter_emails_by_ignore_list(rows, load_rules_grouped(db)))
+
+
 def list_flagged_workspace_emails(db: Session) -> List[models.Email]:
     """Flagged emails visible in Email responses (workspace + flagged tab rules)."""
     visible = models.Email.draft_status.notin_(["Ignored", "Imported", "Processing"])

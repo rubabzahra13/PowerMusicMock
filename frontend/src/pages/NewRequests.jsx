@@ -330,23 +330,23 @@ function NewRequestsMobileList({
                         {formatManagerNotes(row)}
                       </span>
                     </p>
-
-                    <div className="border-t border-[var(--color-border-default)]/70 pt-2">
-                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
-                        Needs review
-                      </p>
-                      <RequestComparison
-                        intakeMatch={row.intakeMatch}
-                        directoryMatch={row.directoryMatch}
-                        directory={directory}
-                        requestPerson={row.person}
-                        variant="table"
-                      />
-                    </div>
                   </div>
                   <Eye className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
                 </div>
               </button>
+
+              <div className="mt-2 border-t border-[var(--color-border-default)]/70 pt-2">
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
+                  Needs review
+                </p>
+                <RequestComparison
+                  intakeMatch={row.intakeMatch}
+                  directoryMatch={row.directoryMatch}
+                  directory={directory}
+                  requestPerson={row.person}
+                  variant="table"
+                />
+              </div>
 
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button

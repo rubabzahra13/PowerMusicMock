@@ -115,6 +115,11 @@ function templateCreatedAt(template) {
   return template?.createdAt || template?.lastUpdated;
 }
 
+function templateIdsMatch(a, b) {
+  if (a == null || b == null) return false;
+  return String(a) === String(b);
+}
+
 function templateWasEdited(template) {
   const created = template?.createdAt;
   const updated = template?.lastUpdated;
@@ -609,7 +614,7 @@ function CategorySection({
             key={template.id}
             template={template}
             tab="templates"
-            isSelected={template.id === selectedId}
+            isSelected={templateIdsMatch(template.id, selectedId)}
             onClick={() => onSelect(template)}
             onEdit={onEdit}
             onDelete={onDelete}
@@ -780,8 +785,11 @@ export default function TemplateManagement() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const templateIdFromUrl = searchParams.get('id');
+  const inboxFromUrl = searchParams.get('inbox');
   const consumedTemplateDeepLinkRef = useRef(null);
+  const applyingTemplateDeepLinkRef = useRef(false);
   const skipPageResetRef = useRef(false);
+  const skipSelectionResetRef = useRef(false);
   const scrollDeepLinkRef = useRef(false);
 
   // Template state (single source of truth: the backend database).
@@ -845,6 +853,10 @@ export default function TemplateManagement() {
       // Drop the selection if that inbox was deleted meanwhile.
       setInboxFilter((prev) => {
         if (prev && rows.some((r) => r.email === prev)) return prev;
+        if (inboxFromUrl && rows.some((r) => r.email === inboxFromUrl)) {
+          writeSelectedInbox(inboxFromUrl);
+          return inboxFromUrl;
+        }
         return resolveSelectedInbox(rows);
       });
     }).catch((err) => {
@@ -1234,6 +1246,16 @@ export default function TemplateManagement() {
   }, [persistNewDraft]);
 
   useEffect(() => {
+    consumedTemplateDeepLinkRef.current = null;
+    applyingTemplateDeepLinkRef.current = Boolean(templateIdFromUrl);
+  }, [templateIdFromUrl]);
+
+  useEffect(() => {
+    if (applyingTemplateDeepLinkRef.current) return;
+    if (skipSelectionResetRef.current) {
+      skipSelectionResetRef.current = false;
+      return;
+    }
     setSelectedId(null);
     setEditForm(null);
     setIsEditing(false);
@@ -1397,24 +1419,60 @@ export default function TemplateManagement() {
   }, [displayedTemplates.length, page, totalPages]);
 
   useLayoutEffect(() => {
-    if (!templateIdFromUrl || templatesLoading || !templates.length) return;
-    if (consumedTemplateDeepLinkRef.current === templateIdFromUrl) return;
-    const template = templates.find((row) => row.id === templateIdFromUrl);
-    if (!template) return;
-    consumedTemplateDeepLinkRef.current = templateIdFromUrl;
-    skipPageResetRef.current = true;
-    scrollDeepLinkRef.current = true;
-    if (template.inbox) {
-      writeSelectedInbox(template.inbox);
-      setInboxFilter(template.inbox);
+    if (!templateIdFromUrl || templatesLoading) return;
+
+    const targetInbox = inboxFromUrl || templates.find((row) => templateIdsMatch(row.id, templateIdFromUrl))?.inbox;
+    applyingTemplateDeepLinkRef.current = true;
+
+    if (targetInbox && targetInbox !== inboxFilter) {
+      writeSelectedInbox(targetInbox);
+      setInboxFilter(targetInbox);
+      return;
     }
-    setLibraryTab(
-      template.status === 'Draft'
-        ? 'drafts'
-        : template.status === 'Archived'
-          ? 'deleted'
-          : 'templates',
-    );
+
+    if (!templates.length) {
+      applyingTemplateDeepLinkRef.current = false;
+      return;
+    }
+
+    const template = templates.find((row) => templateIdsMatch(row.id, templateIdFromUrl));
+    if (!template) {
+      applyingTemplateDeepLinkRef.current = false;
+      return;
+    }
+
+    const targetTab = template.status === 'Draft'
+      ? 'drafts'
+      : template.status === 'Archived'
+        ? 'deleted'
+        : 'templates';
+
+    if (consumedTemplateDeepLinkRef.current === templateIdFromUrl) {
+      if (!templateIdsMatch(selectedIdRef.current, template.id)) {
+        skipPageResetRef.current = true;
+        skipSelectionResetRef.current = true;
+        scrollDeepLinkRef.current = true;
+        if (libraryTab !== targetTab) setLibraryTab(targetTab);
+        setSelectedId(template.id);
+        setEditForm({
+          name: template.name,
+          subject: template.subject,
+          body: template.body,
+          language: 'English',
+        });
+        setIsEditing(false);
+        setIsCreatingNew(false);
+      }
+      applyingTemplateDeepLinkRef.current = false;
+      return;
+    }
+
+    consumedTemplateDeepLinkRef.current = templateIdFromUrl;
+    applyingTemplateDeepLinkRef.current = false;
+    skipPageResetRef.current = true;
+    skipSelectionResetRef.current = true;
+    scrollDeepLinkRef.current = true;
+    setLibraryTab(targetTab);
     setSelectedId(template.id);
     setEditForm({
       name: template.name,
@@ -1424,11 +1482,46 @@ export default function TemplateManagement() {
     });
     setIsEditing(false);
     setIsCreatingNew(false);
-  }, [templateIdFromUrl, templates, templatesLoading]);
+  }, [templateIdFromUrl, inboxFromUrl, templates, templatesLoading, inboxFilter, libraryTab]);
+
+  useLayoutEffect(() => {
+    if (!templateIdFromUrl || templatesLoading || !templates.length) return;
+
+    const target = templates.find((row) => templateIdsMatch(row.id, templateIdFromUrl));
+    if (!target) return;
+
+    const targetTab = target.status === 'Draft'
+      ? 'drafts'
+      : target.status === 'Archived'
+        ? 'deleted'
+        : 'templates';
+
+    if (applyingTemplateDeepLinkRef.current) {
+      if (libraryTab === targetTab) {
+        skipSelectionResetRef.current = true;
+        scrollDeepLinkRef.current = true;
+        setSelectedId(target.id);
+        setEditForm({
+          name: target.name,
+          subject: target.subject,
+          body: target.body,
+          language: 'English',
+        });
+        setIsEditing(false);
+        setIsCreatingNew(false);
+        applyingTemplateDeepLinkRef.current = false;
+      }
+      return;
+    }
+
+    if (libraryTab === targetTab && templateIdsMatch(selectedIdRef.current, templateIdFromUrl)) {
+      return;
+    }
+  }, [libraryTab, inboxFilter, templateIdFromUrl, templates, templatesLoading]);
 
   useLayoutEffect(() => {
     if (!scrollDeepLinkRef.current || !templateIdFromUrl) return;
-    const idx = displayedTemplates.findIndex((row) => row.id === templateIdFromUrl);
+    const idx = displayedTemplates.findIndex((row) => templateIdsMatch(row.id, templateIdFromUrl));
     if (idx < 0) return;
     const targetPage = Math.floor(idx / TEMPLATE_PAGE_SIZE) + 1;
     if (targetPage !== page) setPage(targetPage);
@@ -1464,7 +1557,7 @@ export default function TemplateManagement() {
   };
 
   // ── Select a template ──
-  const selectedTemplate = templates.find(t => t.id === selectedId) || null;
+  const selectedTemplate = templates.find((t) => templateIdsMatch(t.id, selectedId)) || null;
 
   const handleSelectTemplate = (tmpl) => {
     cancelFocusOutSave();
@@ -1962,7 +2055,7 @@ export default function TemplateManagement() {
               template={tmpl}
               tab={libraryTab}
               muted={libraryTab === 'deleted'}
-              isSelected={tmpl.id === selectedId}
+              isSelected={templateIdsMatch(tmpl.id, selectedId)}
               onClick={() => handleSelectTemplate(tmpl)}
               onEdit={libraryTab === 'deleted' ? undefined : handleListEdit}
               onDelete={handleListDelete}
@@ -2322,7 +2415,7 @@ export default function TemplateManagement() {
                           {editForm?.status === 'Active' && (
                             <TemplateToolbarButton variant="save" icon={Save} label="Create template" onClick={handleSave} className="min-w-36" />
                           )}
-                          <TemplateToolbarButton variant="discard" icon={X} label="Discard" onClick={handleDiscardNew} className="min-w-36" />
+                          <TemplateToolbarButton variant="discardIcon" icon={X} label="Discard" onClick={handleDiscardNew} />
                         </>
                       )}
                       {isEditing && !isCreatingNew && libraryTab !== 'deleted' && (
@@ -2439,7 +2532,14 @@ export default function TemplateManagement() {
                       {isCreatingNew && (
                         <p className="text-xs text-[var(--color-text-muted)] leading-relaxed rounded-lg border border-[var(--color-border-default)]/80 bg-white px-3 py-2.5">
                           Drafts save automatically when you click elsewhere, switch tabs, or select another template after filling in name, subject, or body.
-                          Click <strong className="font-semibold text-[var(--color-text-secondary)]">Discard</strong> to leave without saving.
+                          Click{' '}
+                          <span
+                            className="inline-flex h-4 w-4 items-center justify-center rounded border border-[var(--color-border-default)] align-[-2px] text-[var(--color-text-secondary)]"
+                            aria-label="Discard"
+                          >
+                            <X className="h-3 w-3" aria-hidden="true" />
+                          </span>
+                          {' '}to leave without saving.
                         </p>
                       )}
 
@@ -2482,7 +2582,12 @@ export default function TemplateManagement() {
                               )}
                             </div>
                             <div className="space-y-1.5 min-w-0">
-                              <TemplateFieldLabel htmlFor="template-name">Template name</TemplateFieldLabel>
+                              <TemplateFieldLabel
+                                htmlFor="template-name"
+                                hint="e.g. Enquiry reply, Renewal reminder"
+                              >
+                                Template name
+                              </TemplateFieldLabel>
                               <input
                                 id="template-name"
                                 type="text"
@@ -2507,7 +2612,12 @@ export default function TemplateManagement() {
                           </div>
                         ) : (
                           <div className="space-y-1.5">
-                            <TemplateFieldLabel htmlFor="template-name">Template name</TemplateFieldLabel>
+                            <TemplateFieldLabel
+                              htmlFor="template-name"
+                              hint="e.g. Enquiry reply, Renewal reminder"
+                            >
+                              Template name
+                            </TemplateFieldLabel>
                             <input
                               id="template-name"
                               type="text"

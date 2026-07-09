@@ -73,9 +73,6 @@ def _assert_can_add_inbox(db: Session) -> None:
 @router.get("/overview", response_model=schemas.Pilot2OverviewOut)
 def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     """Lightweight home-dashboard payload — avoids loading the full email workspace."""
-    visible = models.Email.draft_status.notin_(["Ignored", "Imported", "Processing"])
-    base = db.query(models.Email).filter(visible, models.Email.deleted.is_(False))
-
     connected_accounts = (
         db.query(models.EmailAccount)
         .filter(models.EmailAccount.status == "Connected")
@@ -85,11 +82,7 @@ def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     connected_emails = set(inbox_titles.keys())
 
     if connected_emails:
-        new_emails = base.filter(
-            models.Email.read.is_(False),
-            models.Email.archived.is_(False),
-            models.Email.account_email.in_(connected_emails),
-        ).count()
+        new_emails = ignore_list.count_inbox_tab_emails(db, account_emails=connected_emails)
     else:
         new_emails = 0
 

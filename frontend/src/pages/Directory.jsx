@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
 
 import { format, parseISO } from 'date-fns';
@@ -24,6 +24,17 @@ const directoryHighlightClass = (row) =>
 const personManagerName = (user) => user.managerName || '';
 const personHandledBy = (user) => user.handledBy || user.addedBy || 'Power Music Admin';
 const personAdminNotes = (user) => user.adminNotes || '';
+
+function requestIdsMatch(a, b) {
+  if (a == null || b == null) return false;
+  return String(a) === String(b);
+}
+
+function findLedgerRowForRequestId(ledger, requestId) {
+  return (ledger ?? []).find((user) =>
+    requestIdsMatch(user.id, requestId) || requestIdsMatch(user.sourceRequestId, requestId),
+  );
+}
 
 const SORT_PRESETS = [
   { value: 'displayId-desc', label: 'ID (newest first)' },
@@ -331,6 +342,9 @@ function DirectoryMobileList({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function UserLedger() {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const requestIdFromUrl = searchParams.get('id');
+  const consumedDirectoryDeepLinkRef = useRef(null);
   const [liveUserLedger, setLiveUserLedger] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
   const [highlightVersion, setHighlightVersion] = useState(0);
@@ -373,6 +387,8 @@ export default function UserLedger() {
   const [filterLocation, setFilterLocation] = useState('All');
   const [filterClub, setFilterClub] = useState('All');
   const [selectedUser, setSelectedUser] = useState(null);
+  const selectedUserRef = useRef(selectedUser);
+  selectedUserRef.current = selectedUser;
   const [sortPreset, setSortPreset] = useState(DEFAULT_SORT);
   const [filterOpen, setFilterOpen] = useState(true);
 
@@ -452,6 +468,33 @@ export default function UserLedger() {
     setHighlightVersion((v) => v + 1);
     setSelectedUser(row);
   };
+
+  useEffect(() => {
+    consumedDirectoryDeepLinkRef.current = null;
+  }, [requestIdFromUrl]);
+
+  useLayoutEffect(() => {
+    if (!requestIdFromUrl || tableLoading || !liveUserLedger.length) return;
+
+    const row = findLedgerRowForRequestId(liveUserLedger, requestIdFromUrl);
+    if (!row) return;
+
+    if (
+      consumedDirectoryDeepLinkRef.current === requestIdFromUrl
+      && selectedUserRef.current
+      && requestIdsMatch(selectedUserRef.current.id, row.id)
+    ) {
+      return;
+    }
+
+    consumedDirectoryDeepLinkRef.current = requestIdFromUrl;
+    if (row.status === 'Added' || row.status === 'Removed') {
+      setStatusTab(row.status);
+    }
+    clearDirectoryPersonHighlight(row.email);
+    setHighlightVersion((v) => v + 1);
+    setSelectedUser(row);
+  }, [requestIdFromUrl, liveUserLedger, tableLoading]);
 
   const handleExportCSV = () => {
     const headers = ['ID', 'Person Name', 'Person Email', 'Location', 'Status', 'Date Added', 'Manager Name', 'Manager Email', 'Club', 'Manager notes', 'Admin notes'];

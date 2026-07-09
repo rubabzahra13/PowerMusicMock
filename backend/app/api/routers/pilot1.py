@@ -233,14 +233,7 @@ def _visible_new_requests_query(db: Session):
 @router.get("/api/kpis", response_model=schemas.KpiOut)
 def get_kpis(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     pending = _visible_new_requests_query(db).count()
-    users = (
-        db.query(models.ManagerRequest)
-        .filter(
-            models.ManagerRequest.status == "handled",
-            models.ManagerRequest.outcome == "Added",
-        )
-        .count()
-    )
+    users = len(roster_snapshot_rows(db, limit=10_000))
     return {"pendingRequests": pending, "usersInLedger": users}
 
 
@@ -252,14 +245,7 @@ def get_dashboard(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         .all()
     )
     hydrate_request_display(pending)
-    users = (
-        db.query(models.ManagerRequest)
-        .filter(
-            models.ManagerRequest.status == "handled",
-            models.ManagerRequest.outcome == "Added",
-        )
-        .count()
-    )
+    users = len(roster_snapshot_rows(db, limit=10_000))
     return {
         "kpis": {
             "pendingRequests": len(pending),
