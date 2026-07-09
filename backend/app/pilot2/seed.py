@@ -1,8 +1,8 @@
-"""Seed Pilot 2 reference data: the five vertical inboxes and the template
-library migrated from the admin's Google Drive folder / signatures.
+"""Seed Pilot 2 reference data: template library for connected inboxes.
 
 Run from backend/:  python -m app.pilot2.seed
-Idempotent — existing rows (matched by inbox email / template name) are kept.
+Idempotent — existing rows (matched by template name per inbox) are kept.
+Inboxes are added via the Gmail accounts page (OAuth), not seeded here.
 """
 
 from datetime import datetime, timezone
@@ -11,16 +11,7 @@ from app import models
 from app.database import SessionLocal, engine
 from app.pilot2 import pipeline
 
-# Dummy data for the pilot build. At handover we swap these for the client's
-# real inboxes and her real template library.
-INBOXES = [
-    ("cc@powermusic.com", "Customer Care"),
-    ("cc@powermusicapp.com", "Music Apps"),
-    ("info@powermusic.com", "General Info"),
-    ("tracks@powermusic.com", "Tracks"),
-    ("royaltyfree@powermusic.com", "Royalty Free Music"),
-    ("rubabzahra248@gmail.com", "Test Inbox (Dev)"),
-]
+INBOXES: list[tuple[str, str]] = []
 
 SIGNOFF = ""  # Reply signature is appended by the composer per inbox title.
 
@@ -101,8 +92,29 @@ def seed():
                 ))
                 db.commit()
 
+        # Remove legacy placeholder inboxes that were never connected via OAuth.
+        placeholders = (
+            db.query(models.EmailAccount)
+            .filter(
+                models.EmailAccount.connected_at.is_(None),
+                models.EmailAccount.status != "Connected",
+            )
+            .all()
+        )
+        for account in placeholders:
+            db.query(models.EmailTemplate).filter(
+                models.EmailTemplate.account_email == account.email
+            ).delete(synchronize_session=False)
+            db.query(models.Email).filter(
+                models.Email.account_email == account.email
+            ).delete(synchronize_session=False)
+            db.delete(account)
+        if placeholders:
+            db.commit()
+
         accounts = (
             db.query(models.EmailAccount)
+            .filter(models.EmailAccount.status == "Connected")
             .order_by(models.EmailAccount.id)
             .all()
         )
@@ -133,7 +145,7 @@ def seed():
                     ))
                     template_count += 1
                     db.commit()
-        print(f"Seeded {len(INBOXES)} inboxes and {template_count} inbox-scoped templates.")
+        print(f"Seeded templates for {len(accounts)} connected inbox(es); added {template_count} new template(s).")
     finally:
         db.close()
 

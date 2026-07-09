@@ -39,6 +39,7 @@ GOOGLE_REDIRECT_URI = os.getenv(
     "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/pilot2/inboxes/oauth/callback"
 )
 FRONTEND_URL = os.getenv("PILOT2_FRONTEND_URL", "http://localhost:5173")
+MAX_CONNECTED_INBOXES = int(os.getenv("PILOT2_MAX_CONNECTED_INBOXES", "7"))
 
 # Shared secret for the poll/distill trigger endpoints. When set, callers
 # must send it (X-Cron-Secret header, Authorization: Bearer, or ?secret=).

@@ -27,7 +27,47 @@ logger = logging.getLogger(__name__)
 
 @router.get("/inboxes", response_model=List[schemas.InboxOut])
 def list_inboxes(db: Session = Depends(get_db), _admin=Depends(require_admin)):
+    _purge_never_connected_inboxes(db)
     return db.query(models.EmailAccount).order_by(models.EmailAccount.id).all()
+
+
+def _purge_never_connected_inboxes(db: Session) -> None:
+    """Drop seed placeholders and abandoned connect attempts that never completed OAuth."""
+    placeholders = (
+        db.query(models.EmailAccount)
+        .filter(
+            models.EmailAccount.connected_at.is_(None),
+            models.EmailAccount.status != "Connected",
+        )
+        .all()
+    )
+    if not placeholders:
+        return
+    for account in placeholders:
+        db.query(models.EmailTemplate).filter(
+            models.EmailTemplate.account_email == account.email
+        ).delete(synchronize_session=False)
+        db.query(models.Email).filter(
+            models.Email.account_email == account.email
+        ).delete(synchronize_session=False)
+        db.delete(account)
+    db.commit()
+
+
+def _connected_inbox_count(db: Session) -> int:
+    return (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.status == "Connected")
+        .count()
+    )
+
+
+def _assert_can_add_inbox(db: Session) -> None:
+    if _connected_inbox_count(db) >= config.MAX_CONNECTED_INBOXES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum of {config.MAX_CONNECTED_INBOXES} connected inboxes reached. Disconnect one before adding another.",
+        )
 
 
 @router.get("/overview", response_model=schemas.Pilot2OverviewOut)
@@ -120,25 +160,42 @@ def get_workspace(db: Session = Depends(get_db), _admin=Depends(require_admin)):
 
 @router.post("/inboxes/connect")
 def connect_inbox(payload: schemas.InboxConnectIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    account = (
-        db.query(models.EmailAccount)
-        .filter(models.EmailAccount.email == payload.email)
-        .first()
-    )
+    title = payload.title.strip()
+    email = (payload.email or "").strip().lower()
+    if not title:
+        raise HTTPException(status_code=400, detail="Display name cannot be empty.")
+    if email and "@" not in email:
+        raise HTTPException(status_code=400, detail="Enter a valid Gmail address.")
+
+    account = None
+    if email:
+        account = (
+            db.query(models.EmailAccount)
+            .filter(models.EmailAccount.email == email)
+            .first()
+        )
     if account is None:
+        _assert_can_add_inbox(db)
+        account_id = pipeline.next_id(db, models.EmailAccount, "inbox")
         account = models.EmailAccount(
-            id=pipeline.next_id(db, models.EmailAccount, "inbox"),
-            email=payload.email,
-            title=payload.title,
+            id=account_id,
+            email=email or f"__pending__{account_id}@connect.local",
+            title=title,
         )
         db.add(account)
+    else:
+        account.title = title
 
     if gmail.is_live():
-        # The admin finishes the connection on Google's consent screen; the
-        # callback below flips the account to Connected.
+        # OAuth state is the inbox id so Google supplies the email on callback.
         db.commit()
-        return {"authUrl": gmail.get_authorization_url(state=account.email)}
+        return {"authUrl": gmail.get_authorization_url(state=account.id)}
 
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Gmail address is required when Gmail is in mock mode.",
+        )
     account.status = "Connected"
     account.connected_at = datetime.now(timezone.utc)
     pipeline.log(db, "inbox_connected", f"Inbox {account.email} connected (mock mode).")
@@ -158,15 +215,46 @@ def oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
 
     account = (
         db.query(models.EmailAccount)
-        .filter(models.EmailAccount.email == authorized_email)
+        .filter(models.EmailAccount.id == state)
         .first()
     )
     if account is None:
+        account = (
+            db.query(models.EmailAccount)
+            .filter(models.EmailAccount.email == state)
+            .first()
+        )
+    if account is None:
+        return HTMLResponse(
+            oauth_pages.oauth_error_page(
+                message="This connection session expired. Go back to Email accounts and try again."
+            ),
+            status_code=400,
+        )
+
+    duplicate = (
+        db.query(models.EmailAccount)
+        .filter(
+            models.EmailAccount.email == authorized_email,
+            models.EmailAccount.id != account.id,
+        )
+        .first()
+    )
+    if duplicate is not None:
+        return HTMLResponse(
+            oauth_pages.oauth_error_page(
+                message=f"{authorized_email} is already connected as {duplicate.title}."
+            ),
+            status_code=400,
+        )
+
+    account.email = authorized_email
+    if account.status != "Connected" and _connected_inbox_count(db) >= config.MAX_CONNECTED_INBOXES:
         return HTMLResponse(
             oauth_pages.oauth_error_page(
                 message=(
-                    f"Authorized Gmail account {authorized_email} does not match a "
-                    f"configured inbox (expected {state})."
+                    f"Maximum of {config.MAX_CONNECTED_INBOXES} connected inboxes reached. "
+                    "Disconnect one in Email accounts, then try again."
                 )
             ),
             status_code=400,

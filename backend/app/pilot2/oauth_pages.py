@@ -310,7 +310,7 @@ def oauth_success_page(*, email: str, title: str) -> str:
         <div class="status">
           <div class="status-icon success" aria-hidden="true">{_CHECK_SVG}</div>
           <h1 class="status-title">Inbox connected</h1>
-          <p class="status-text">Gmail is linked. Your mail will sync in the background.</p>
+          <p class="status-text">Email is linked. Your mail will sync in the background.</p>
         </div>
 
         <div class="panel">
@@ -332,7 +332,7 @@ def oauth_success_page(*, email: str, title: str) -> str:
         </div>
 
         <div class="actions">
-          <a class="btn btn-primary" href="{escape(_dashboard_url())}">Return to Gmail accounts</a>
+          <a class="btn btn-primary" href="{escape(_dashboard_url())}">Return to Email accounts</a>
           <button type="button" class="btn btn-secondary" onclick="window.close()">Close this tab</button>
         </div>
 
@@ -362,13 +362,13 @@ def oauth_error_page(*, message: str) -> str:
           <div class="help-steps-title">What to do next</div>
           <ol>
             <li>Close this tab</li>
-            <li>Go back to Gmail accounts in the dashboard</li>
+            <li>Go back to Email accounts in the dashboard</li>
             <li>Click <strong>Connect</strong> again and complete Google sign-in in one go</li>
           </ol>
         </div>
 
         <div class="actions">
-          <a class="btn btn-primary" href="{escape(_dashboard_url())}">Back to Gmail accounts</a>
+          <a class="btn btn-primary" href="{escape(_dashboard_url())}">Back to Email accounts</a>
           <button type="button" class="btn btn-secondary" onclick="window.close()">Close this tab</button>
         </div>
       </div>

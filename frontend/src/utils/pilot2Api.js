@@ -139,8 +139,11 @@ export const getPilot2Workspace = () => request('/api/pilot2/workspace');
 
 // Inboxes
 export const getInboxes = () => request('/api/pilot2/inboxes');
-export const connectInbox = (email, title) =>
-  request('/api/pilot2/inboxes/connect', { method: 'POST', body: JSON.stringify({ email, title }) });
+export const connectInbox = (title, email = '') =>
+  request('/api/pilot2/inboxes/connect', {
+    method: 'POST',
+    body: JSON.stringify({ title, email: email || '' }),
+  });
 export const disconnectInbox = (id) =>
   request(`/api/pilot2/inboxes/${id}/disconnect`, { method: 'POST' });
 export const updateInbox = (id, title) =>

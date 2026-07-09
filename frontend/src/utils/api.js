@@ -64,6 +64,15 @@ function isUserAbort(err, userSignal) {
   return err?.name === 'AbortError' && userSignal?.aborted;
 }
 
+function formatApiErrorDetail(detail) {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((entry) => entry?.msg || 'Invalid request').join(' ');
+  }
+  if (detail && typeof detail === 'object' && detail.msg) return detail.msg;
+  return JSON.stringify(detail);
+}
+
 /** Fetch JSON from the API; throws with server `detail` on non-2xx. */
 export async function fetchJson(path, options = {}) {
   const { signal: userSignal, timeout = DEFAULT_TIMEOUT_MS, ...rest } = options;
@@ -96,7 +105,7 @@ export async function fetchJson(path, options = {}) {
         // is signed out and routed to login instead of a broken dashboard.
         window.dispatchEvent(new CustomEvent('auth:session-expired'));
       }
-      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+      throw new Error(formatApiErrorDetail(detail));
     }
     return res.json();
   } catch (err) {

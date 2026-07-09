@@ -3,7 +3,7 @@ export function hasDiffs(match) {
 }
 
 export function hasComparisonContext(intakeMatch, directoryMatch) {
-  return Boolean(directoryMatch || (intakeMatch && hasDiffs(intakeMatch)));
+  return Boolean(intakeMatch || directoryMatch);
 }
 
 export function differingFields(match) {
@@ -23,10 +23,7 @@ export function formatFieldList(labels) {
 
 export function getMatchStatusLabel(match, allMatch, kind = 'intake') {
   if (allMatch) {
-    if (kind === 'directory') return 'Matches directory record';
-    const sameLabels = matchingFields(match).map((field) => field.label);
-    if (sameLabels.length === 0) return 'All details match';
-    return `${formatFieldList(sameLabels)} match`;
+    return 'No difference found';
   }
 
   if (kind === 'intake') {
@@ -35,4 +32,3 @@ export function getMatchStatusLabel(match, allMatch, kind = 'intake') {
 
   return 'Some data differs · View details';
 }
-

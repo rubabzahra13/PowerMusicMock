@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Mail, Link2, Unlink, Trash2, Pencil } from 'lucide-react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { Mail, Link2, Unlink, Trash2, Pencil, Plus } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClassNarrow } from '../utils/responsiveLayout';
@@ -16,6 +16,8 @@ import {
   clearCache,
 } from '../utils/pilot2Api';
 
+const MAX_CONNECTED_INBOXES = 7;
+
 function connectedDate(iso) {
   if (!iso) return null;
   try { return format(parseISO(iso), 'd MMM yyyy'); } catch { return iso; }
@@ -29,6 +31,15 @@ export default function GmailAccounts() {
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addTitle, setAddTitle] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
+
+  const connectedAccounts = useMemo(
+    () => accounts.filter((account) => account.status === 'Connected'),
+    [accounts],
+  );
+  const atAccountLimit = connectedAccounts.length >= MAX_CONNECTED_INBOXES;
 
   const refresh = useCallback(() => {
     loadWithCache('inboxes', getInboxes, (rows) => {
@@ -46,10 +57,48 @@ export default function GmailAccounts() {
     return () => window.removeEventListener('focus', refresh);
   }, [refresh]);
 
+  const handleAddAccount = async () => {
+    const title = addTitle.trim();
+    if (!title) {
+      showToast('Enter a display name for this inbox.', 'error');
+      return;
+    }
+    if (atAccountLimit) {
+      showToast(`Maximum of ${MAX_CONNECTED_INBOXES} connected inboxes reached.`, 'error');
+      return;
+    }
+    setAddBusy(true);
+    try {
+      const result = await connectInbox(title);
+      clearCache('pilot2_workspace');
+      if (result.authUrl) {
+        window.location.assign(result.authUrl);
+        return;
+      }
+      showToast('Inbox connected.', 'success');
+      setAddOpen(false);
+      setAddTitle('');
+      refresh();
+    } catch (err) {
+      showToast(`Connect failed: ${err.message}`, 'error');
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  const openAddAccount = () => {
+    if (atAccountLimit) {
+      showToast(`Maximum of ${MAX_CONNECTED_INBOXES} connected inboxes reached.`, 'error');
+      return;
+    }
+    setAddTitle('');
+    setAddOpen(true);
+  };
+
   const handleConnect = async (account) => {
     setBusyId(account.id);
     try {
-      const result = await connectInbox(account.email, account.title);
+      const result = await connectInbox(account.title, account.email);
       clearCache('pilot2_workspace');
       if (result.authUrl) {
         window.location.assign(result.authUrl);
@@ -130,19 +179,49 @@ export default function GmailAccounts() {
       <Toast />
       <PageHeader
         section="Customer support"
-        title="Gmail accounts"
-        description="Manage connected Gmail inboxes for each vertical."
+        title="Email accounts"
+        description={
+          loading
+            ? 'Loading connected inboxes…'
+            : `${connectedAccounts.length} of ${MAX_CONNECTED_INBOXES} inboxes connected`
+        }
         className="mb-4 shrink-0"
+        actions={(
+          <button
+            type="button"
+            onClick={openAddAccount}
+            disabled={addBusy || atAccountLimit}
+            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer shrink-0 disabled:opacity-40"
+          >
+            <Plus className="w-4 h-4" />
+            Add account
+          </button>
+        )}
       />
 
       <DottedScroll>
         {loading ? (
           <CardListSkeleton rows={4} />
-        ) : accounts.length === 0 ? (
-          <div className="text-center py-16 text-sm text-[var(--color-text-muted)]">
-            No Gmail accounts configured.
+        ) : connectedAccounts.length === 0 ? (
+          <div className="text-center py-16 px-6">
+            <div className="w-12 h-12 rounded-2xl bg-white border border-[var(--color-border-default)] flex items-center justify-center mx-auto mb-3 shadow-sm">
+              <Mail className="w-6 h-6 text-[var(--color-text-muted)] opacity-60" />
+            </div>
+            <p className="text-sm font-semibold text-[var(--color-text-primary)]">No email accounts connected</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1 max-w-[260px] mx-auto leading-relaxed">
+              Add an inbox, then sign in with Google to connect it.
+            </p>
+            <button
+              type="button"
+              onClick={openAddAccount}
+              disabled={atAccountLimit}
+              className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] rounded-lg transition-colors shadow-sm cursor-pointer disabled:opacity-40"
+            >
+              <Plus className="w-4 h-4" />
+              Add account
+            </button>
           </div>
-        ) : accounts.map((account) => {
+        ) : connectedAccounts.map((account) => {
           const isConnected = account.status === 'Connected';
           const isBusy = busyId === account.id;
           return (
@@ -233,6 +312,52 @@ export default function GmailAccounts() {
       </DottedScroll>
 
       <Modal
+        isOpen={addOpen}
+        onClose={() => !addBusy && setAddOpen(false)}
+        title="Add email account"
+        footer={(
+          <>
+            <button
+              type="button"
+              onClick={() => setAddOpen(false)}
+              disabled={addBusy}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium text-[var(--color-text-primary)] hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-40"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleAddAccount}
+              disabled={addBusy || !addTitle.trim()}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer disabled:opacity-40"
+            >
+              {addBusy ? 'Redirecting…' : 'Continue to Google'}
+            </button>
+          </>
+        )}
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide mb-2">
+              Display name
+            </label>
+            <input
+              type="text"
+              value={addTitle}
+              onChange={(e) => setAddTitle(e.target.value)}
+              placeholder="e.g. Customer Care"
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddAccount(); }}
+              className="w-full px-3 py-2 text-sm border border-[var(--color-border-default)] rounded-lg focus:outline-none focus:border-[var(--color-brand-primary)]"
+              autoFocus
+            />
+          </div>
+          <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+            You will be redirected to Google to sign in with the inbox account and approve access.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={renameTarget != null}
         onClose={() => setRenameTarget(null)}
         title="Rename inbox"
@@ -299,7 +424,7 @@ export default function GmailAccounts() {
             Remove <strong>{deleteTarget?.title}</strong> ({deleteTarget?.email}) from the dashboard?
           </p>
           <p className="text-[var(--color-text-secondary)]">
-            This disconnects Gmail and removes the inbox from this list. Existing emails in the queue are not deleted.
+            This disconnects the account and removes the inbox from this list. Existing emails in the queue are not deleted.
           </p>
         </div>
       </Modal>

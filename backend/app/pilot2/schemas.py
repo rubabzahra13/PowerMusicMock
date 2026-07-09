@@ -29,8 +29,8 @@ class InboxOut(BaseModel):
 
 
 class InboxConnectIn(BaseModel):
-    email: str
     title: str
+    email: str = ""
 
 
 class InboxUpdateIn(BaseModel):

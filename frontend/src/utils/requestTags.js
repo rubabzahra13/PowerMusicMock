@@ -64,14 +64,14 @@ export function sentViaTableRequestTags(tags = []) {
 }
 
 export function intakeMismatchReviewTag(compact = true) {
-  return { variant: 'review-mismatch', label: 'Manager Req differs Auto Mail data', prefix: '! ', compact };
+  return { variant: 'review-mismatch', label: 'Auto Mail differs', prefix: '! ', compact };
 }
 
 export function directoryReviewTag(directoryRecord, compact = true) {
   const isRemoved = directoryRecord?.status === 'Removed';
   return {
     variant: isRemoved ? 'review-removed' : 'review-exists',
-    label: isRemoved ? 'user already removed' : 'user already added',
+    label: isRemoved ? 'Already removed in DB' : 'Already added in DB',
     prefix: '⚠ ',
     compact,
   };
