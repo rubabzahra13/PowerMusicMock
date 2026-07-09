@@ -653,6 +653,7 @@ function TemplateListItem({
 
   return (
     <div
+      data-template-selected={isSelected || undefined}
       className={`${
         inCard
           ? `${isLast ? '' : 'border-b border-[var(--color-border-default)]/70'}`
@@ -746,6 +747,8 @@ export default function TemplateManagement() {
   const [searchParams] = useSearchParams();
   const templateIdFromUrl = searchParams.get('id');
   const consumedTemplateDeepLinkRef = useRef(null);
+  const skipPageResetRef = useRef(false);
+  const scrollDeepLinkRef = useRef(false);
 
   // Template state (single source of truth: the backend database).
   // Cached copy renders instantly; fresh data replaces it, and window focus
@@ -903,28 +906,6 @@ export default function TemplateManagement() {
   const inboxFilterRef = useRef(inboxFilter);
   const autoSavePromiseRef = useRef(null);
   const persistDraftChainRef = useRef(Promise.resolve());
-
-  useEffect(() => {
-    if (!templateIdFromUrl || templatesLoading || !templates.length) return;
-    if (consumedTemplateDeepLinkRef.current === templateIdFromUrl) return;
-    const template = templates.find((row) => row.id === templateIdFromUrl);
-    if (!template) return;
-    consumedTemplateDeepLinkRef.current = templateIdFromUrl;
-    if (template.inbox) {
-      writeSelectedInbox(template.inbox);
-      setInboxFilter(template.inbox);
-    }
-    setLibraryTab(
-      template.status === 'Draft'
-        ? 'drafts'
-        : template.status === 'Archived'
-          ? 'deleted'
-          : 'templates',
-    );
-    setSelectedId(template.id);
-    setIsEditing(false);
-    setIsCreatingNew(false);
-  }, [templateIdFromUrl, templates, templatesLoading]);
 
   editFormRef.current = editForm;
   isCreatingNewRef.current = isCreatingNew;
@@ -1349,12 +1330,62 @@ export default function TemplateManagement() {
   const pageEnd = Math.min(currentPage * TEMPLATE_PAGE_SIZE, displayedTemplates.length);
 
   useLayoutEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
     setPage(1);
   }, [libraryTab, inboxFilter, search, sortMode, categoryFilter, dateFrom, dateTo]);
 
   useLayoutEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [displayedTemplates.length, page, totalPages]);
+
+  useLayoutEffect(() => {
+    if (!templateIdFromUrl || templatesLoading || !templates.length) return;
+    if (consumedTemplateDeepLinkRef.current === templateIdFromUrl) return;
+    const template = templates.find((row) => row.id === templateIdFromUrl);
+    if (!template) return;
+    consumedTemplateDeepLinkRef.current = templateIdFromUrl;
+    skipPageResetRef.current = true;
+    scrollDeepLinkRef.current = true;
+    if (template.inbox) {
+      writeSelectedInbox(template.inbox);
+      setInboxFilter(template.inbox);
+    }
+    setLibraryTab(
+      template.status === 'Draft'
+        ? 'drafts'
+        : template.status === 'Archived'
+          ? 'deleted'
+          : 'templates',
+    );
+    setSelectedId(template.id);
+    setEditForm({
+      name: template.name,
+      subject: template.subject,
+      body: template.body,
+      language: 'English',
+    });
+    setIsEditing(false);
+    setIsCreatingNew(false);
+  }, [templateIdFromUrl, templates, templatesLoading]);
+
+  useLayoutEffect(() => {
+    if (!scrollDeepLinkRef.current || !templateIdFromUrl) return;
+    const idx = displayedTemplates.findIndex((row) => row.id === templateIdFromUrl);
+    if (idx < 0) return;
+    const targetPage = Math.floor(idx / TEMPLATE_PAGE_SIZE) + 1;
+    if (targetPage !== page) setPage(targetPage);
+  }, [templateIdFromUrl, displayedTemplates, page]);
+
+  useEffect(() => {
+    if (!scrollDeepLinkRef.current || !templateIdFromUrl || !selectedId) return;
+    const row = document.querySelector('[data-template-selected="true"]');
+    if (!row) return;
+    scrollDeepLinkRef.current = false;
+    row.scrollIntoView({ block: 'nearest' });
+  }, [templateIdFromUrl, selectedId, libraryTab, inboxFilter, categoryGroups, paginatedTemplates]);
 
   const handleLibraryTabChange = (tab) => {
     if (tab === libraryTab) return;

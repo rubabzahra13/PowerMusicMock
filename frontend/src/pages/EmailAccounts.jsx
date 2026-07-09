@@ -50,15 +50,13 @@ export default function GmailAccounts() {
     setBusyId(account.id);
     try {
       const result = await connectInbox(account.email, account.title);
-      // The Email Queue caches inbox status; drop it so the change shows there immediately.
       clearCache('pilot2_workspace');
       if (result.authUrl) {
-        window.open(result.authUrl, '_blank', 'noopener');
-        showToast('Approve access in the Google tab, then return here.', 'info');
-      } else {
-        showToast(`${account.email} connected.`, 'success');
-        refresh();
+        window.location.assign(result.authUrl);
+        return;
       }
+      showToast(`${account.email} connected.`, 'success');
+      refresh();
     } catch (err) {
       showToast(`Connect failed: ${err.message}`, 'error');
     } finally {
@@ -214,7 +212,7 @@ export default function GmailAccounts() {
                     className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-[var(--color-text-primary)] bg-white border border-[var(--color-border-default)] rounded-lg hover:bg-gray-50 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
                   >
                     <Link2 className="w-4 h-4 text-[var(--color-text-secondary)]" />
-                    {isConnected ? 'Reconnect' : 'Connect'}
+                    {isBusy ? 'Redirecting…' : isConnected ? 'Reconnect' : 'Connect'}
                   </button>
                   {isConnected && (
                     <button

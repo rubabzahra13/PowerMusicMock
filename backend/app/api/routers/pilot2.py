@@ -36,17 +36,40 @@ def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     visible = models.Email.draft_status.notin_(["Ignored", "Imported", "Processing"])
     base = db.query(models.Email).filter(visible, models.Email.deleted.is_(False))
 
-    new_emails = base.filter(
-        models.Email.read.is_(False),
-        models.Email.archived.is_(False),
-    ).count()
-    flagged_rows = ignore_list.list_flagged_workspace_emails(db)
-    flagged_emails = len(flagged_rows)
-    templates_active = (
-        db.query(models.EmailTemplate)
-        .filter(models.EmailTemplate.status == "Active")
-        .count()
+    connected_accounts = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.status == "Connected")
+        .all()
     )
+    inbox_titles = {acc.email: acc.title for acc in connected_accounts}
+    connected_emails = set(inbox_titles.keys())
+
+    if connected_emails:
+        new_emails = base.filter(
+            models.Email.read.is_(False),
+            models.Email.archived.is_(False),
+            models.Email.account_email.in_(connected_emails),
+        ).count()
+    else:
+        new_emails = 0
+
+    flagged_rows = [
+        row
+        for row in ignore_list.list_flagged_workspace_emails(db)
+        if row.account_email in connected_emails
+    ]
+    flagged_emails = len(flagged_rows)
+    if connected_emails:
+        templates_active = (
+            db.query(models.EmailTemplate)
+            .filter(
+                models.EmailTemplate.status == "Active",
+                models.EmailTemplate.account_email.in_(connected_emails),
+            )
+            .count()
+        )
+    else:
+        templates_active = 0
     activity = (
         db.query(models.ProcessingLog)
         .filter(models.ProcessingLog.type == "template_updated")
@@ -59,9 +82,10 @@ def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
             "id": row.id,
             "title": row.subject or "Flagged email requires review",
             "subtitle": row.flag_reason or "Requires manual review",
+            "inboxTitle": inbox_titles.get(row.account_email, row.account_email),
             "timestamp": row.received_at.isoformat() if row.received_at else None,
         }
-        for row in flagged_rows
+        for row in flagged_rows[:2]
     ]
     return {
         "newEmails": new_emails,

@@ -93,7 +93,7 @@ function getActivityMeta(type) {
   return { icon: icons[type] || icons.default };
 }
 
-function KpiCard({ label, value, icon: Icon, onClick, theme }) {
+function KpiCard({ label, value, hint, icon: Icon, onClick, theme }) {
   const Tag = onClick ? 'button' : 'div';
 
   return (
@@ -111,12 +111,29 @@ function KpiCard({ label, value, icon: Icon, onClick, theme }) {
         }`}>
           {value}
         </p>
+        {hint && (
+          <p className="text-[10px] font-medium text-[var(--color-text-muted)] mt-0.5">{hint}</p>
+        )}
       </div>
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${theme.kpiIconWell || theme.iconWell}`}>
         <Icon className={`w-5 h-5 ${theme.kpiIconColor || theme.iconColor}`} />
       </div>
     </Tag>
   );
+}
+
+function groupAlertsByPartition(alerts) {
+  const groups = [];
+  for (const alert of alerts) {
+    const label = alert.partitionLabel || null;
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) {
+      last.items.push(alert);
+    } else {
+      groups.push({ label, items: [alert] });
+    }
+  }
+  return groups;
 }
 
 function ServiceColumn({
@@ -128,6 +145,7 @@ function ServiceColumn({
   alerts,
   alertEmptyText,
   onAlertClick,
+  showAlertCount = true,
   activities,
   activityTitle = 'Recent activity',
   activitySubtitle = 'Latest events',
@@ -165,7 +183,7 @@ function ServiceColumn({
                 <p className={`text-xs truncate ${theme.panelSubtitle}`}>{alertsSubtitle}</p>
               </div>
             </div>
-            {alerts.length > 0 && (
+            {showAlertCount && alerts.length > 0 && (
               <span className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full text-white ${theme.badge}`}>
                 {alerts.length}
               </span>
@@ -174,7 +192,7 @@ function ServiceColumn({
 
           <DottedScroll
             scrollClassName={ALERT_LIST_SCROLL_CLASS}
-            contentClassName="space-y-1.5 p-2.5"
+            contentClassName="space-y-2.5 p-2.5"
           >
             {alertsLoading ? (
               <PanelListSkeleton rows={PANEL_VISIBLE_ITEMS} />
@@ -184,7 +202,17 @@ function ServiceColumn({
                 <p className="text-sm font-medium text-[var(--color-text-secondary)]">{alertEmptyText}</p>
               </div>
             ) : (
-              alerts.map((alert) => {
+              groupAlertsByPartition(alerts).map((group) => (
+                <section key={group.label || group.items[0]?.id} className="space-y-1.5">
+                  {group.label && (
+                    <div className="flex items-center gap-2 px-1 pb-0.5">
+                      <h4 className="text-[11px] font-medium text-[var(--color-text-secondary)] shrink-0">
+                        {group.label}
+                      </h4>
+                      <div className="flex-1 h-px bg-[var(--color-border-default)]/80" aria-hidden="true" />
+                    </div>
+                  )}
+                  {group.items.map((alert) => {
                 const isClickable = Boolean(onAlertClick);
                 const alertBorder = theme.alertBorder[alert.type] || theme.alertBorder.warning;
                 const AlertIcon = alert.type === 'critical' ? Flag : Users;
@@ -212,7 +240,9 @@ function ServiceColumn({
                     </div>
                   </button>
                 );
-              })
+                  })}
+                </section>
+              ))
             )}
           </DottedScroll>
         </div>
@@ -326,14 +356,15 @@ export default function Home() {
           timestamp: entry.timestamp,
           type: entry.type,
           description: entry.description,
-          link: entry.emailId ? `/templates?id=${entry.emailId}` : null,
+          link: entry.emailId ? `/templates?id=${encodeURIComponent(entry.emailId)}` : null,
         })),
       );
       setLiveFlaggedAlerts(
         (Array.isArray(data.flaggedAlerts) ? data.flaggedAlerts : []).map((alert) => ({
           id: alert.id,
           title: alert.title,
-          subtitle: alert.subtitle,
+          subtitle: alert.subtitle || 'Requires manual review',
+          partitionLabel: alert.inboxTitle || null,
           timestamp: alert.timestamp,
           type: 'critical',
           isNew: true,
@@ -386,6 +417,8 @@ export default function Home() {
 
   const duplicateAlerts = (Array.isArray(livePendingRequests) ? livePendingRequests : [])
     .filter((req) => req.tags?.includes(TAG_ALREADY_EXISTS))
+    .sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt))
+    .slice(0, 2)
     .map((req) => ({
       id: req.id,
       title: `${req.person.firstName} ${req.person.lastName}`.trim(),
@@ -423,18 +456,19 @@ export default function Home() {
         <ServiceColumn
           themeKey="customer"
           title="Customer Support"
-          description="Gmail templates, connected inboxes, and flagged emails."
+          description="Totals across all connected inboxes."
           alertsLoading={!customerReady}
           activityLoading={!customerReady}
           kpis={[
-            { label: 'New Emails', value: liveCustomerKpis.newEmails, icon: Mail, onClick: () => navigate('/email-responses') },
-            { label: 'Flagged', value: liveCustomerKpis.flaggedEmails, icon: Flag, onClick: () => navigate('/email-responses?mailbox=flagged') },
-            { label: 'Active Templates', value: liveCustomerKpis.templatesActive, icon: FileText, onClick: () => navigate('/templates') }
+            { label: 'New Emails', value: liveCustomerKpis.newEmails, hint: 'All inboxes', icon: Mail, onClick: () => navigate('/email-responses') },
+            { label: 'Flagged', value: liveCustomerKpis.flaggedEmails, hint: 'All inboxes', icon: Flag, onClick: () => navigate('/email-responses?mailbox=flagged') },
+            { label: 'Active Templates', value: liveCustomerKpis.templatesActive, hint: 'All inboxes', icon: FileText, onClick: () => navigate('/templates') }
           ]}
-          alertsTitle="Flagged emails"
-          alertsSubtitle={flaggedEmailAlerts.length ? 'Requires review' : 'All clear'}
+          alertsTitle="Flagged recently"
+          alertsSubtitle={flaggedEmailAlerts.length ? 'Latest across connected inboxes' : 'All clear'}
           alerts={flaggedEmailAlerts}
           alertEmptyText="No flagged emails to review."
+          showAlertCount={false}
           onAlertClick={goToFlaggedEmail}
           activities={customerActivity}
           activityEmptyText="No recent template activity."
@@ -452,10 +486,11 @@ export default function Home() {
             { label: 'Pending requests', value: liveKpis.pendingRequests, icon: Inbox, onClick: () => navigate('/new-requests') },
             { label: 'Users in ledger', value: liveKpis.usersInLedger, icon: Users, onClick: () => navigate('/directory') }
           ]}
-          alertsTitle="Priority alerts"
-          alertsSubtitle={duplicateAlerts.length ? 'Potential duplicate entries' : 'Nothing urgent'}
+          alertsTitle="New priority alerts"
+          alertsSubtitle={duplicateAlerts.length ? 'Latest potential duplicates' : 'Nothing urgent'}
           alerts={duplicateAlerts}
           alertEmptyText="No duplicate warnings right now."
+          showAlertCount={false}
           onAlertClick={handlePartnerAlertClick}
           activities={partnerActivity}
           activityTitle="Recent Requests"

@@ -225,6 +225,15 @@ function formatDetailTime(iso) {
   }
 }
 
+function resolveMailboxForEmail(email, mailboxFromUrl) {
+  if (MAILBOX_IDS.has(mailboxFromUrl)) return mailboxFromUrl;
+  if (email.deleted) return 'bin';
+  if (email.archived) return 'archive';
+  if (email.flagged) return 'flagged';
+  if (email.draftStatus === 'Sent') return 'sent';
+  return 'inbox';
+}
+
 function matchesMailbox(email, mailbox) {
   switch (mailbox) {
     case 'inbox': return email.draftStatus !== 'Sent';
@@ -347,6 +356,8 @@ export default function EmailQueue() {
   const mailboxFromUrl = searchParams.get('mailbox');
   const emailIdFromUrl = searchParams.get('emailId');
   const consumedEmailDeepLinkRef = useRef(null);
+  const skipSelectionResetRef = useRef(false);
+  const scrollDeepLinkRef = useRef(false);
   const [emails, setEmails] = useState([]);
   const [inboxes, setInboxes] = useState([]);
   const [mailbox, setMailbox] = useState(() =>
@@ -500,31 +511,6 @@ export default function EmailQueue() {
       setMailbox(mailboxFromUrl);
     }
   }, [mailboxFromUrl]);
-
-  useEffect(() => {
-    if (!emailIdFromUrl || !emails.length) return;
-    if (consumedEmailDeepLinkRef.current === emailIdFromUrl) return;
-    const email = emails.find((row) => row.id === emailIdFromUrl);
-    if (!email) return;
-    consumedEmailDeepLinkRef.current = emailIdFromUrl;
-    if (email.inbox) setInboxFilter(email.inbox);
-    if (MAILBOX_IDS.has(mailboxFromUrl)) {
-      setMailbox(mailboxFromUrl);
-    } else if (email.deleted) {
-      setMailbox('bin');
-    } else if (email.archived) {
-      setMailbox('archive');
-    } else if (email.flagged) {
-      setMailbox('flagged');
-    } else if (email.draftStatus === 'Sent') {
-      setMailbox('sent');
-    } else {
-      setMailbox('inbox');
-    }
-    setSelectedId(email.id);
-    setIsEditingDraft(false);
-    setComposerMode('reply');
-  }, [emailIdFromUrl, emails, mailboxFromUrl]);
 
   useEffect(() => {
     if (!sortOpen) return;
@@ -699,10 +685,50 @@ export default function EmailQueue() {
   const ActiveMailboxIcon = activeMailbox?.icon;
 
   useLayoutEffect(() => {
+    if (!emailIdFromUrl || !emails.length) return;
+    if (consumedEmailDeepLinkRef.current === emailIdFromUrl) return;
+    const email = emails.find((row) => row.id === emailIdFromUrl);
+    if (!email) return;
+    consumedEmailDeepLinkRef.current = emailIdFromUrl;
+    skipSelectionResetRef.current = true;
+    scrollDeepLinkRef.current = true;
+    if (email.inbox) {
+      writeSelectedInbox(email.inbox);
+      setInboxFilter(email.inbox);
+    }
+    setMailbox(resolveMailboxForEmail(email, mailboxFromUrl));
+    setSelectedId(email.id);
+    setIsEditingDraft(false);
+    setComposerMode('reply');
+  }, [emailIdFromUrl, emails, mailboxFromUrl]);
+
+  useLayoutEffect(() => {
     setPage(1);
     setCheckedIds(new Set());
+    if (skipSelectionResetRef.current) {
+      skipSelectionResetRef.current = false;
+      return;
+    }
     setSelectedId(null);
   }, [mailbox, inboxFilter, intentFilter, readFilter, search, dateFrom, dateTo, sortOrder]);
+
+  useLayoutEffect(() => {
+    if (!scrollDeepLinkRef.current || !emailIdFromUrl) return;
+    const idx = filteredThreads.findIndex((thread) =>
+      thread.messages.some((message) => message.id === emailIdFromUrl),
+    );
+    if (idx < 0) return;
+    const targetPage = Math.floor(idx / PAGE_SIZE) + 1;
+    if (targetPage !== page) setPage(targetPage);
+  }, [emailIdFromUrl, filteredThreads, page]);
+
+  useEffect(() => {
+    if (!scrollDeepLinkRef.current || !emailIdFromUrl || !selectedId) return;
+    const row = document.querySelector('[data-email-thread-selected="true"]');
+    if (!row) return;
+    scrollDeepLinkRef.current = false;
+    row.scrollIntoView({ block: 'nearest' });
+  }, [emailIdFromUrl, selectedId, page, listGroups]);
 
   useLayoutEffect(() => {
     const maxPage = Math.max(1, Math.ceil(filteredThreads.length / PAGE_SIZE));

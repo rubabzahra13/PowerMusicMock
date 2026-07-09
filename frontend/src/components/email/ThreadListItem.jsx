@@ -57,6 +57,7 @@ export default function ThreadListItem({ thread, selected, checked, onClick, onC
       role="button"
       tabIndex={0}
       aria-current={selected || undefined}
+      data-email-thread-selected={selected || undefined}
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
