@@ -45,7 +45,37 @@ Analyse the inbound email and return ONLY a JSON object with these keys:
   repeated follow-ups, or no template fits)
 - flag_reason: short human-readable reason when flag is true, else null
 - template_ids: ids of templates from the provided library that answer this email,
-  best match first; empty array if none fit"""
+  best match first; empty array if none fit
+
+Key distinctions:
+- should_ignore is for BULK/AUTOMATED mail (newsletters, promotions, "unsubscribe"
+  blasts, vendor noise, auto-notifications) — NOT for a real person making a
+  request. A human asking to cancel, unsubscribe, or leave is a real request:
+  should_ignore=false.
+- Only invent a new intent when the email's purpose genuinely fits none of the
+  known intents; a slightly unusual enquiry is still "Enquiry".
+
+Examples (email → output):
+
+1) Bulk newsletter — ignore it:
+From: deals@shopmail.com  Subject: This week's offers
+"Huge savings inside! Shop now. Unsubscribe here."
+{"intent":"Enquiry","confidence":96,"language":"en","sender_first_name":"there","urgent":false,"should_ignore":true,"flag":false,"flag_reason":null,"template_ids":[]}
+
+2) A real customer cancelling — handle it, do NOT ignore:
+From: jane@gmail.com  Subject: Cancel my membership
+"I'd like to cancel my Power Music membership. Please confirm."
+{"intent":"Cancellation","confidence":97,"language":"en","sender_first_name":"Jane","urgent":false,"should_ignore":false,"flag":false,"flag_reason":null,"template_ids":[]}
+
+3) A topic no known intent covers — name a new one, flag it:
+From: alex@gmail.com  Subject: Producer job application
+"I'd love to join your team as a producer. My CV is attached."
+{"intent":"Job Application","confidence":94,"language":"en","sender_first_name":"Alex","urgent":false,"should_ignore":false,"flag":true,"flag_reason":"New topic, no template yet","template_ids":[]}
+
+4) Money/refund — flag for the admin:
+From: sam@gmail.com  Subject: Charged twice
+"I was billed twice for my order and need a refund to my card."
+{"intent":"Finance","confidence":95,"language":"en","sender_first_name":"Sam","urgent":false,"should_ignore":false,"flag":true,"flag_reason":"Refund needs admin review","template_ids":[]}"""
 
 
 # Common words carry no matching signal — drop them before scoring overlap.
@@ -208,7 +238,9 @@ def classify(
     )
     result = generate_json(
         config.CLASSIFIER_MODEL,
-        _SYSTEM.format(intents=", ".join(intents_list)),
+        # .replace (not .format) — the few-shot JSON examples contain literal
+        # braces that str.format would choke on.
+        _SYSTEM.replace("{intents}", ", ".join(intents_list)),
         prompt,
         response_schema=_CLASSIFIER_SCHEMA,
         kind="classify",
