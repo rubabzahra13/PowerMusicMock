@@ -64,9 +64,9 @@ def generate_json(model: str, system: str, prompt: str) -> Optional[dict[str, An
     if not backup or backup == model:
         # Cross-fallback: Gemini quotas are per-model, so a backup only helps
         # if it's a DIFFERENT model. When the configured backup equals the
-        # primary (e.g. composer already runs on flash), fall back to the
-        # other workhorse model instead of skipping the fallback entirely.
-        backup = "gemini-2.5-flash" if "lite" in model else "gemini-2.5-flash-lite"
+        # primary (e.g. composer already runs on flash), fall back to the other
+        # workhorse alias instead of skipping the fallback entirely.
+        backup = "gemini-flash-latest" if "lite" in model else "gemini-flash-lite-latest"
     attempts = [model, model] + ([backup] if backup != model else [])
     for attempt, attempt_model in enumerate(attempts):
         if attempt > 0:

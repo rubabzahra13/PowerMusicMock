@@ -166,6 +166,13 @@ def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     }
 
 
+@router.get("/intents", response_model=List[str])
+def list_intents(db: Session = Depends(get_db), _admin=Depends(require_admin)):
+    """All intents the system knows — the seed set plus any the AI auto-created
+    from emails. Backs the intent filter and template intent selector."""
+    return pipeline.known_intent_names(db)
+
+
 @router.get("/workspace", response_model=schemas.Pilot2WorkspaceOut)
 def get_workspace(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     inboxes = db.query(models.EmailAccount).order_by(models.EmailAccount.id).all()

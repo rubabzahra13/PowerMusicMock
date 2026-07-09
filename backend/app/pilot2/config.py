@@ -9,19 +9,21 @@ from app.pilot2.signature import build_signature
 load_dotenv()
 
 # AI
+# Use the stable "-latest" aliases: pinned versions (e.g. gemini-2.5-flash) get
+# retired and start returning 404, silently dropping the whole pipeline to the
+# keyword heuristic. The aliases always resolve to a current model. Override per
+# env if a specific pinned version is ever required.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Cheap, fast model for the high-volume classification call.
-CLASSIFIER_MODEL = os.getenv("PILOT2_CLASSIFIER_MODEL", "gemini-2.5-flash-lite")
-# Composer runs on every email too, so it also defaults to Flash; bump via env
-# if draft quality needs it.
-COMPOSER_MODEL = os.getenv("PILOT2_COMPOSER_MODEL", "gemini-2.5-flash")
+CLASSIFIER_MODEL = os.getenv("PILOT2_CLASSIFIER_MODEL", "gemini-flash-lite-latest")
+# Composer runs on every email too; flash is the quality/speed balance.
+COMPOSER_MODEL = os.getenv("PILOT2_COMPOSER_MODEL", "gemini-flash-latest")
 # Distiller runs once a day on a batch, so a stronger model is affordable.
-DISTILLER_MODEL = os.getenv("PILOT2_DISTILLER_MODEL", "gemini-2.5-flash")
+DISTILLER_MODEL = os.getenv("PILOT2_DISTILLER_MODEL", "gemini-flash-latest")
 # Tried when the primary model is overloaded or rate-limited. Must be a
-# DIFFERENT model from the primaries: quotas are per-model, so falling back
-# to the same model just re-hits the same 429 (production logs showed
-# flash-lite rate-limited while flash succeeded in the same second).
-BACKUP_MODEL = os.getenv("PILOT2_BACKUP_MODEL", "gemini-2.5-flash")
+# DIFFERENT model from the primary — quotas are per-model, so falling back to
+# the same model just re-hits the same 429.
+BACKUP_MODEL = os.getenv("PILOT2_BACKUP_MODEL", "gemini-flash-latest")
 
 # Mark an email urgent when the sender has sent at least this many messages on
 # the same thread (chasing us for a reply), regardless of the AI's tone read.

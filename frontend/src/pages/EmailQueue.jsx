@@ -556,10 +556,20 @@ export default function EmailQueue() {
     return () => clearInterval(interval);
   }, [selectedId, selectedDraftPending, revalidate]);
 
-  const intentOptions = useMemo(
-    () => INTENTS.map((intent) => ({ value: intent, label: intent === 'All' ? 'All intents' : intent })),
-    []
-  );
+  // Intents are dynamic: the base set plus any the AI auto-created from mail.
+  // Derive from the loaded emails so new intents (e.g. "Job Application")
+  // appear in the filter automatically.
+  const intentOptions = useMemo(() => {
+    const seen = new Set(INTENTS.filter((intent) => intent !== 'All'));
+    for (const email of emails) {
+      if (email.intent) seen.add(email.intent);
+    }
+    const names = [...seen].sort((a, b) => a.localeCompare(b));
+    return ['All', ...names].map((intent) => ({
+      value: intent,
+      label: intent === 'All' ? 'All intents' : intent,
+    }));
+  }, [emails]);
 
   const mailboxCounts = useMemo(() => ({
     inbox: countMailboxEmails(emails, { accountEmail: inboxFilter, mailbox: 'inbox', archivedIds }),

@@ -30,7 +30,11 @@ class Classification:
 
 _SYSTEM = """You are the email triage agent for Power Music, a fitness-music company.
 Analyse the inbound email and return ONLY a JSON object with these keys:
-- intent: one of {intents}
+- intent: the single best-matching intent from the KNOWN INTENTS list below.
+  If — and only if — none of them fit this email's purpose, return a concise
+  NEW intent name in Title Case (1-3 words, e.g. "Order Timing"). Prefer reusing
+  an existing intent over inventing a near-duplicate.
+  KNOWN INTENTS: {intents}
 - confidence: integer 0-100
 - language: ISO 639-1 code of the email body (en, fr, de, es, ja, ...)
 - sender_first_name: the sender's first name, or "there" if unknown
@@ -137,9 +141,28 @@ def _heuristic(from_name: str, subject: str, body: str, templates: list) -> Clas
     )
 
 
-def classify(from_name: str, from_email: str, subject: str, body: str, templates: list) -> Classification:
+def _sanitize_intent(value) -> str:
+    """Normalise a returned intent name (known or newly proposed) to a clean,
+    capped Title-Case label. Falls back to 'Enquiry' when empty."""
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    text = re.sub(r"[^A-Za-z0-9 &/-]", "", text)[:40].strip()
+    if not text:
+        return "Enquiry"
+    return " ".join(word[:1].upper() + word[1:] if word else word for word in text.split(" "))
+
+
+def classify(
+    from_name: str,
+    from_email: str,
+    subject: str,
+    body: str,
+    templates: list,
+    known_intents: Optional[List[str]] = None,
+) -> Classification:
     if not llm_available():
         return _heuristic(from_name, subject, body, templates)
+
+    intents_list = known_intents or config.INTENTS
 
     library = [
         {"id": t.id, "name": t.name, "intent": t.intent, "category": t.category, "subject": t.subject}
@@ -152,14 +175,16 @@ def classify(from_name: str, from_email: str, subject: str, body: str, templates
     )
     result = generate_json(
         config.CLASSIFIER_MODEL,
-        _SYSTEM.format(intents=", ".join(config.INTENTS)),
+        _SYSTEM.format(intents=", ".join(intents_list)),
         prompt,
     )
     if result is None:
         return _heuristic(from_name, subject, body, templates)
 
     valid_ids = {t.id for t in templates}
-    intent = result.get("intent") if result.get("intent") in config.INTENTS else "Enquiry"
+    # Accept the returned intent as-is (known OR a newly proposed one) — no
+    # longer forced into a fixed list, so genuinely new intents are captured.
+    intent = _sanitize_intent(result.get("intent"))
     language = str(result.get("language") or "en").lower()[:5]
     if not re.fullmatch(r"[a-z]{2}(-[a-z]{2})?", language):
         language = "en"

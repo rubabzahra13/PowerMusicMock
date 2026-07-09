@@ -38,6 +38,19 @@ def log(db: Session, type_: str, description: str, email_id: Optional[str] = Non
     ))
 
 
+def known_intent_names(db: Session) -> list:
+    """Every intent the system knows: the seed list plus any the AI has already
+    named on an email or template. New intents auto-persist here — once a novel
+    intent is stored on an email, it is a known intent for every later email."""
+    names: dict = {name: None for name in config.INTENTS}
+    for source in (models.Email.intent, models.EmailTemplate.intent):
+        for (value,) in db.query(source).filter(source.isnot(None)).distinct():
+            cleaned = (value or "").strip()
+            if cleaned:
+                names.setdefault(cleaned, None)
+    return list(names.keys())
+
+
 def persist_attachments(db: Session, email_id: str, attachments) -> None:
     """Store attachment metadata rows for an email.
 
@@ -246,8 +259,12 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
         email.subject,
         email.body,
         templates,
+        known_intents=known_intent_names(db),
     )
 
+    # Storing the (possibly brand-new) intent on the email is what "creates" it:
+    # known_intent_names() reads it back for the next email, so a novel intent
+    # the AI names once becomes a known intent thereafter (auto-created).
     email.intent = classification.intent
     email.intent_confidence = classification.confidence
     email.language = classification.language
