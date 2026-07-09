@@ -990,6 +990,19 @@ def list_templates(inbox: Optional[str] = None, db: Session = Depends(get_db), _
     return query.order_by(models.EmailTemplate.name).all()
 
 
+def _embed_template_best_effort(db: Session, template: models.EmailTemplate) -> None:
+    """Compute + store the template's semantic embedding. Best-effort: a model
+    outage or rate limit must never fail the template save."""
+    try:
+        from app.pilot2.ai import embeddings
+
+        if embeddings.embed_and_store_template(db, template):
+            db.commit()
+    except Exception:
+        logger.exception("Template embedding failed for %s", template.id)
+        db.rollback()
+
+
 @router.post("/templates", response_model=schemas.TemplateOut)
 def create_template(payload: schemas.TemplateIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     account = (
@@ -1017,6 +1030,7 @@ def create_template(payload: schemas.TemplateIn, db: Session = Depends(get_db), 
     pipeline.log(db, "template_created", f"Template created: {template.name}", email_id=template.id)
     db.commit()
     db.refresh(template)
+    _embed_template_best_effort(db, template)
     return template
 
 
@@ -1039,6 +1053,7 @@ def update_template(template_id: str, payload: schemas.TemplateUpdateIn, db: Ses
     pipeline.log(db, "template_updated", f"Template updated: {template.name}", email_id=template.id)
     db.commit()
     db.refresh(template)
+    _embed_template_best_effort(db, template)
     return template
 
 

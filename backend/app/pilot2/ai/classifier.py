@@ -44,6 +44,55 @@ Analyse the inbound email and return ONLY a JSON object with these keys:
   best match first; empty array if none fit"""
 
 
+# Common words carry no matching signal — drop them before scoring overlap.
+_STOPWORDS = {
+    "the", "and", "for", "you", "your", "our", "with", "this", "that", "have",
+    "are", "was", "were", "will", "would", "can", "could", "should", "from",
+    "about", "would", "there", "hello", "hi", "hey", "dear", "team", "please",
+    "thanks", "thank", "regards", "kind", "best", "any", "all", "how", "what",
+    "when", "where", "who", "why", "get", "got", "has", "had", "not", "but",
+    "just", "know", "let", "would", "like", "want", "need", "power", "music",
+}
+
+
+def _keywords(text: str) -> set:
+    return {
+        word
+        for word in re.findall(r"[a-z]{3,}", (text or "").lower())
+        if word not in _STOPWORDS
+    }
+
+
+def match_templates_by_keywords(
+    subject: str,
+    body: str,
+    templates: list,
+    *,
+    max_matches: int = 1,
+    min_score: int = 1,
+) -> List[str]:
+    """Lexical fallback matcher — no LLM, no reliance on the template `intent`
+    field. Scores each ACTIVE template by how many meaningful words it shares
+    with the email (matched on the signal-rich name/subject/category, not the
+    noisy full body), and returns the best match(es). Used when the model is
+    unavailable or returned no match, so template drafts still work on the free
+    tier / during rate limits. Deterministic and side-effect free.
+    """
+    email_words = _keywords(f"{subject} {subject} {body}")  # subject counts twice
+    if not email_words:
+        return []
+    scored: list[tuple[int, str]] = []
+    for t in templates:
+        if getattr(t, "status", None) != "Active":
+            continue
+        template_words = _keywords(f"{t.name} {t.subject} {getattr(t, 'category', '') or ''}")
+        score = len(email_words & template_words)
+        if score >= min_score:
+            scored.append((score, t.id))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [tid for _, tid in scored[:max_matches]]
+
+
 def _heuristic(from_name: str, subject: str, body: str, templates: list) -> Classification:
     text = f"{subject}\n{body}".lower()
     keyword_map = [
@@ -63,8 +112,9 @@ def _heuristic(from_name: str, subject: str, body: str, templates: list) -> Clas
     urgent = any(k in text for k in ["urgent", "asap", "immediately", "unacceptable"])
     should_ignore = any(k in text for k in ["unsubscribe", "no-reply", "noreply"]) or not body.strip()
 
-    matched = [t.id for t in templates if t.status == "Active" and t.intent == intent]
-    flag = not matched or confidence < 60 or "refund" in text
+    # Match by keyword overlap, not the (often-null) template intent label.
+    matched = match_templates_by_keywords(subject, body, templates, max_matches=1)
+    flag = not matched or "refund" in text
     flag_reason = None
     if flag:
         if "refund" in text:

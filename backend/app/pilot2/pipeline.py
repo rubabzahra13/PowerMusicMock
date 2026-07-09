@@ -281,7 +281,30 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
         return email
 
     templates_by_id = {t.id: t for t in templates}
-    matched = [templates_by_id[tid] for tid in classification.template_ids if tid in templates_by_id]
+    # Template matching, best signal first:
+    # 1. Semantic (embedding) similarity — reliable, ignores the intent label,
+    #    doesn't need a live generation call.
+    # 2. Whatever the classifier matched (LLM library match, or lexical when the
+    #    model was down).
+    # 3. Pure lexical keyword overlap — last-resort, still no model needed.
+    from app.pilot2.ai import embeddings
+
+    matched_ids = [
+        tid
+        for tid in embeddings.semantic_match_template_ids(
+            db, email.account_email, email.subject, email.body
+        )
+        if tid in templates_by_id
+    ]
+    if not matched_ids:
+        matched_ids = [tid for tid in classification.template_ids if tid in templates_by_id]
+    if not matched_ids:
+        matched_ids = [
+            tid
+            for tid in classifier.match_templates_by_keywords(email.subject, email.body, templates)
+            if tid in templates_by_id
+        ]
+    matched = [templates_by_id[tid] for tid in matched_ids]
 
     translations_by_template = {}
     if matched and classification.language != "en":

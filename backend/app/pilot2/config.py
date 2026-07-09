@@ -27,6 +27,15 @@ BACKUP_MODEL = os.getenv("PILOT2_BACKUP_MODEL", "gemini-2.5-flash")
 # the same thread (chasing us for a reply), regardless of the AI's tone read.
 URGENT_FOLLOWUP_THRESHOLD = int(os.getenv("PILOT2_URGENT_FOLLOWUP_THRESHOLD", "3"))
 
+# Semantic template matching (embeddings + pgvector). Matches an email to
+# templates by meaning, so matching no longer depends on the template `intent`
+# label or a live generation call (embeddings are cheap and rarely throttled).
+EMBEDDING_MODEL = os.getenv("PILOT2_EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_DIM = int(os.getenv("PILOT2_EMBEDDING_DIM", "768"))
+# Max cosine distance (0=identical, 2=opposite) to accept a semantic match.
+# Above this the email is treated as "no template fits".
+EMBEDDING_MAX_DISTANCE = float(os.getenv("PILOT2_EMBEDDING_MAX_DISTANCE", "0.75"))
+
 # Learning loop bounds — these guarantee a flat context size forever.
 MAX_RULES_PER_INTENT = int(os.getenv("PILOT2_MAX_RULES_PER_INTENT", "10"))
 MAX_RULE_CHARS = int(os.getenv("PILOT2_MAX_RULE_CHARS", "200"))
