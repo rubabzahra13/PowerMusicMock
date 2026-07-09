@@ -23,6 +23,10 @@ DISTILLER_MODEL = os.getenv("PILOT2_DISTILLER_MODEL", "gemini-2.5-flash")
 # flash-lite rate-limited while flash succeeded in the same second).
 BACKUP_MODEL = os.getenv("PILOT2_BACKUP_MODEL", "gemini-2.5-flash")
 
+# Mark an email urgent when the sender has sent at least this many messages on
+# the same thread (chasing us for a reply), regardless of the AI's tone read.
+URGENT_FOLLOWUP_THRESHOLD = int(os.getenv("PILOT2_URGENT_FOLLOWUP_THRESHOLD", "3"))
+
 # Learning loop bounds — these guarantee a flat context size forever.
 MAX_RULES_PER_INTENT = int(os.getenv("PILOT2_MAX_RULES_PER_INTENT", "10"))
 MAX_RULE_CHARS = int(os.getenv("PILOT2_MAX_RULE_CHARS", "200"))

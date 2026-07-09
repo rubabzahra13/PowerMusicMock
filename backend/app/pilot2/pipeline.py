@@ -11,7 +11,7 @@ from typing import Iterable, Optional
 from sqlalchemy.orm import Session
 
 from app import models
-from app.pilot2 import gmail
+from app.pilot2 import config, gmail
 from app.pilot2.ai import classifier, composer
 from app.pilot2.signature import build_signature
 
@@ -253,6 +253,23 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
     email.language = classification.language
     email.sender_first_name = classification.sender_first_name
     email.urgent = classification.urgent
+
+    # Deterministic urgency: a customer who has sent several messages on the
+    # same thread is chasing us for a reply — flag urgent regardless of the AI's
+    # tone read. Counts this sender's own messages in the thread (our replies
+    # have a different from_email and are excluded). The current email is
+    # already persisted, so it is included in the count.
+    if not email.urgent and email.gmail_thread_id and email.from_email:
+        thread_messages = (
+            db.query(models.Email)
+            .filter(
+                models.Email.gmail_thread_id == email.gmail_thread_id,
+                models.Email.from_email == email.from_email,
+            )
+            .count()
+        )
+        if thread_messages >= config.URGENT_FOLLOWUP_THRESHOLD:
+            email.urgent = True
 
     if classification.should_ignore:
         email.draft_status = "Ignored"
