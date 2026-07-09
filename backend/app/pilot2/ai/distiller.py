@@ -129,6 +129,7 @@ def run_distillation(db: Session) -> DistillResult:
             config.DISTILLER_MODEL,
             _SYSTEM.format(max_rules=config.MAX_RULES_PER_INTENT, max_chars=config.MAX_RULE_CHARS),
             prompt,
+            kind="distill",
         )
         if response is None:
             logger.warning("Distillation LLM call failed for intent %s; edits left queued", intent)

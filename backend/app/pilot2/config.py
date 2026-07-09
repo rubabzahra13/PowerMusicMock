@@ -34,9 +34,14 @@ URGENT_FOLLOWUP_THRESHOLD = int(os.getenv("PILOT2_URGENT_FOLLOWUP_THRESHOLD", "3
 # label or a live generation call (embeddings are cheap and rarely throttled).
 EMBEDDING_MODEL = os.getenv("PILOT2_EMBEDDING_MODEL", "gemini-embedding-001")
 EMBEDDING_DIM = int(os.getenv("PILOT2_EMBEDDING_DIM", "768"))
-# Max cosine distance (0=identical, 2=opposite) to accept a semantic match.
-# Above this the email is treated as "no template fits".
-EMBEDDING_MAX_DISTANCE = float(os.getenv("PILOT2_EMBEDDING_MAX_DISTANCE", "0.75"))
+# A template match must be a CLEAR winner, not just the least-bad of a cluster:
+# - best distance must be within EMBEDDING_MAX_DISTANCE (absolute ceiling), AND
+# - it must beat the runner-up by at least EMBEDDING_MIN_GAP.
+# Measured separation: real matches sit ~0.27-0.39 with a >0.1 gap; "nothing
+# fits" cases cluster ~0.42-0.49 with a ~0.01 gap. Otherwise -> no match
+# (holding reply + template suggestion).
+EMBEDDING_MAX_DISTANCE = float(os.getenv("PILOT2_EMBEDDING_MAX_DISTANCE", "0.55"))
+EMBEDDING_MIN_GAP = float(os.getenv("PILOT2_EMBEDDING_MIN_GAP", "0.06"))
 
 # Learning loop bounds — these guarantee a flat context size forever.
 MAX_RULES_PER_INTENT = int(os.getenv("PILOT2_MAX_RULES_PER_INTENT", "10"))

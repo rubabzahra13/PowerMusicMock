@@ -32,18 +32,28 @@ def embed_text(value: str) -> Optional[List[float]]:
     client = _get_client()
     if client is None or not (value or "").strip():
         return None
-    try:
-        from google.genai import types
+    from app.pilot2.ai import observability as obs
 
-        response = client.models.embed_content(
-            model=config.EMBEDDING_MODEL,
-            contents=value[:8000],
-            config=types.EmbedContentConfig(output_dimensionality=config.EMBEDDING_DIM),
-        )
-        return list(response.embeddings[0].values)
-    except Exception:
-        logger.warning("Embedding failed", exc_info=True)
-        return None
+    with obs.timed() as elapsed:
+        try:
+            from google.genai import types
+
+            response = client.models.embed_content(
+                model=config.EMBEDDING_MODEL,
+                contents=value[:8000],
+                config=types.EmbedContentConfig(output_dimensionality=config.EMBEDDING_DIM),
+            )
+            obs.record_llm_call(
+                kind="embed", model=config.EMBEDDING_MODEL, latency_ms=elapsed(), status="ok",
+            )
+            return list(response.embeddings[0].values)
+        except Exception as exc:
+            obs.record_llm_call(
+                kind="embed", model=config.EMBEDDING_MODEL, latency_ms=elapsed(),
+                status="error", error=exc,
+            )
+            logger.warning("Embedding failed", exc_info=True)
+            return None
 
 
 def to_pgvector_literal(values: List[float]) -> str:
@@ -89,14 +99,22 @@ def semantic_match_template_ids(
     body: str,
     *,
     limit: int = 1,
-) -> List[str]:
-    """Return the ids of the Active templates for this inbox whose meaning is
-    closest to the email, nearest first, within EMBEDDING_MAX_DISTANCE. Empty
-    when embeddings are unavailable or nothing is close enough."""
+) -> Optional[List[str]]:
+    """Ids of the Active templates whose meaning best fits the email, requiring
+    a clear winner (see EMBEDDING_MAX_DISTANCE / EMBEDDING_MIN_GAP).
+
+    Returns:
+      - None  → embeddings unavailable (caller should use a fallback matcher).
+      - []    → embeddings ran, but no template genuinely fits (holding reply).
+      - [ids] → the matched template(s).
+    The None-vs-[] distinction is important: when embeddings work, an empty
+    result is authoritative and must NOT fall through to a looser matcher that
+    would let a generic template absorb a poorly-fitting email."""
     vector = embed_text(f"{subject}\n{body}")
     if vector is None:
-        return []
+        return None
     try:
+        # Fetch one extra so we can measure the gap to the runner-up.
         rows = db.execute(
             text(
                 """
@@ -109,9 +127,20 @@ def semantic_match_template_ids(
                 LIMIT :lim
                 """
             ),
-            {"vec": to_pgvector_literal(vector), "acc": account_email, "lim": limit},
+            {"vec": to_pgvector_literal(vector), "acc": account_email, "lim": limit + 1},
         ).fetchall()
     except Exception:
         logger.warning("Semantic template search failed", exc_info=True)
+        return None
+
+    if not rows or rows[0][1] is None or rows[0][1] > config.EMBEDDING_MAX_DISTANCE:
         return []
-    return [row[0] for row in rows if row[1] is not None and row[1] <= config.EMBEDDING_MAX_DISTANCE]
+    # Require a clear winner: if the runner-up is nearly as close, the templates
+    # are clustered and none genuinely fits — treat it as no match.
+    if len(rows) > 1 and rows[1][1] is not None and (rows[1][1] - rows[0][1]) < config.EMBEDDING_MIN_GAP:
+        return []
+    return [
+        row[0]
+        for row in rows[:limit]
+        if row[1] is not None and row[1] <= config.EMBEDDING_MAX_DISTANCE
+    ]

@@ -97,6 +97,29 @@ def match_templates_by_keywords(
     return [tid for _, tid in scored[:max_matches]]
 
 
+# Typed schema — Gemini is constrained to return exactly this shape, so the
+# response is always valid JSON of the right types (no prose parsing / silent
+# malformed output that would drop us to the heuristic).
+_CLASSIFIER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "intent": {"type": "string"},
+        "confidence": {"type": "integer"},
+        "language": {"type": "string"},
+        "sender_first_name": {"type": "string"},
+        "urgent": {"type": "boolean"},
+        "should_ignore": {"type": "boolean"},
+        "flag": {"type": "boolean"},
+        "flag_reason": {"type": "string", "nullable": True},
+        "template_ids": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "intent", "confidence", "language", "sender_first_name",
+        "urgent", "should_ignore", "flag", "template_ids",
+    ],
+}
+
+
 def _heuristic(from_name: str, subject: str, body: str, templates: list) -> Classification:
     text = f"{subject}\n{body}".lower()
     keyword_map = [
@@ -187,6 +210,8 @@ def classify(
         config.CLASSIFIER_MODEL,
         _SYSTEM.format(intents=", ".join(intents_list)),
         prompt,
+        response_schema=_CLASSIFIER_SCHEMA,
+        kind="classify",
     )
     if result is None:
         return _heuristic(from_name, subject, body, templates)

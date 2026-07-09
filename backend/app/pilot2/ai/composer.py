@@ -57,6 +57,20 @@ class Draft:
     tweak_level: str
 
 
+# Typed schema so the composer always returns valid JSON of the right shape.
+_COMPOSER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "body": {"type": "string"},
+        "tweak_level": {
+            "type": "string",
+            "enum": ["verbatim", "personalized", "merged"],
+        },
+    },
+    "required": ["body", "tweak_level"],
+}
+
+
 _SYSTEM = """You draft customer-support email replies for Power Music.
 You are given the customer's email, one or more approved reply templates, and
 "guidance notes" distilled from how the human admin edited past drafts.
@@ -148,7 +162,10 @@ def compose(
         + f"\n\nTEMPLATES:\n{json.dumps(template_payload, indent=2)}"
         + f"\n\nCUSTOMER EMAIL:\nSubject: {subject}\n\n{body}"
     )
-    result = generate_json(config.COMPOSER_MODEL, system, prompt)
+    result = generate_json(
+        config.COMPOSER_MODEL, system, prompt,
+        response_schema=_COMPOSER_SCHEMA, kind="compose",
+    )
 
     if result is None or not str(result.get("body") or "").strip():
         return Draft(

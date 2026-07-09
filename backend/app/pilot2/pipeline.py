@@ -262,8 +262,6 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
         templates,
         known_intents=known_before,
     )
-    # A genuinely new kind of email — the AI named an intent we had never seen.
-    is_new_intent = classification.intent not in set(known_before)
 
     # Storing the (possibly brand-new) intent on the email is what "creates" it:
     # known_intent_names() reads it back for the next email, so a novel intent
@@ -309,22 +307,20 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
     # 3. Pure lexical keyword overlap — last-resort, still no model needed.
     from app.pilot2.ai import embeddings
 
-    if is_new_intent:
-        # A brand-new intent has no established template yet. Don't let a
-        # generic catch-all template absorb it — leave it unmatched so the
-        # composer sends the "we'll be back shortly" holding reply, and the
-        # on-send flow suggests creating a dedicated template for this intent.
-        matched_ids = []
+    # Semantic match requires a CLEAR winner (see embeddings.semantic_match), so
+    # a strong match is used even for a newly-named intent ("Order Timing" ->
+    # order-time template), while a poorly-fitting email returns [] -> holding
+    # reply + on-send template suggestion. When embeddings work, that result is
+    # AUTHORITATIVE (a generic template must not absorb a bad fit). Only when
+    # embeddings are unavailable (None) do we fall back to the classifier's
+    # match, then a lexical keyword match.
+    semantic = embeddings.semantic_match_template_ids(
+        db, email.account_email, email.subject, email.body
+    )
+    if semantic is not None:
+        matched_ids = [tid for tid in semantic if tid in templates_by_id]
     else:
-        matched_ids = [
-            tid
-            for tid in embeddings.semantic_match_template_ids(
-                db, email.account_email, email.subject, email.body
-            )
-            if tid in templates_by_id
-        ]
-        if not matched_ids:
-            matched_ids = [tid for tid in classification.template_ids if tid in templates_by_id]
+        matched_ids = [tid for tid in classification.template_ids if tid in templates_by_id]
         if not matched_ids:
             matched_ids = [
                 tid

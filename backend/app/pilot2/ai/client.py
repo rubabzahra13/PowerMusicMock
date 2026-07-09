@@ -49,13 +49,23 @@ def _extract_json(text: str) -> Optional[dict]:
         return None
 
 
-def generate_json(model: str, system: str, prompt: str) -> Optional[dict[str, Any]]:
+def generate_json(
+    model: str,
+    system: str,
+    prompt: str,
+    *,
+    response_schema: Optional[dict] = None,
+    kind: str = "generate",
+) -> Optional[dict[str, Any]]:
     """One structured-output call. Returns None on any failure.
 
-    Transient errors (overload, rate limit) are retried, then the backup
-    model is tried, so a busy Google model degrades to a slightly different
-    model instead of a template-only draft.
+    `response_schema` (a Gemini/OpenAPI schema dict) constrains the model to
+    valid, typed JSON — no more parsing prose or silent malformed output.
+    Transient errors (overload, rate limit) are retried, then a DIFFERENT backup
+    model is tried. Every attempt emits an LLM_TRACE for observability.
     """
+    from app.pilot2.ai import observability as obs
+
     client = _get_client()
     if client is None:
         return None
@@ -68,24 +78,38 @@ def generate_json(model: str, system: str, prompt: str) -> Optional[dict[str, An
         # workhorse alias instead of skipping the fallback entirely.
         backup = "gemini-flash-latest" if "lite" in model else "gemini-flash-lite-latest"
     attempts = [model, model] + ([backup] if backup != model else [])
+
+    call_config: dict[str, Any] = {
+        "system_instruction": system,
+        "temperature": 0.2,
+        "response_mime_type": "application/json",
+    }
+    if response_schema is not None:
+        call_config["response_schema"] = response_schema
+
     for attempt, attempt_model in enumerate(attempts):
         if attempt > 0:
             time.sleep(1.5 * attempt)
-        try:
-            response = client.models.generate_content(
-                model=attempt_model,
-                contents=prompt,
-                config={
-                    "system_instruction": system,
-                    "temperature": 0.2,
-                    "response_mime_type": "application/json",
-                },
-            )
-            return _extract_json(response.text or "")
-        except Exception:
-            logger.warning(
-                "Gemini call failed (model=%s, attempt %d/%d)",
-                attempt_model, attempt + 1, len(attempts),
-                exc_info=attempt == len(attempts) - 1,
-            )
+        with obs.timed() as elapsed:
+            try:
+                response = client.models.generate_content(
+                    model=attempt_model, contents=prompt, config=call_config
+                )
+                inp, out, total = obs.usage_tokens(response)
+                obs.record_llm_call(
+                    kind=kind, model=attempt_model, latency_ms=elapsed(), status="ok",
+                    input_tokens=inp, output_tokens=out, total_tokens=total,
+                    fallback_from=model if attempt_model != model else None,
+                )
+                return _extract_json(response.text or "")
+            except Exception as exc:
+                obs.record_llm_call(
+                    kind=kind, model=attempt_model, latency_ms=elapsed(), status="error",
+                    error=exc, fallback_from=model if attempt_model != model else None,
+                )
+                logger.warning(
+                    "Gemini call failed (model=%s, attempt %d/%d)",
+                    attempt_model, attempt + 1, len(attempts),
+                    exc_info=attempt == len(attempts) - 1,
+                )
     return None
