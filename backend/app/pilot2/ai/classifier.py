@@ -112,7 +112,7 @@ def _heuristic(from_name: str, subject: str, body: str, templates: list) -> Clas
             intent, confidence = name, 75
             break
 
-    first_name = from_name.split()[0] if from_name.strip() else "there"
+    first_name = _clean_first_name(from_name)
     urgent = any(k in text for k in ["urgent", "asap", "immediately", "unacceptable"])
     should_ignore = any(k in text for k in ["unsubscribe", "no-reply", "noreply"]) or not body.strip()
 
@@ -139,6 +139,16 @@ def _heuristic(from_name: str, subject: str, body: str, templates: list) -> Clas
         flag_reason=flag_reason,
         template_ids=matched[:1],
     )
+
+
+def _clean_first_name(value) -> str:
+    """First name for the greeting: letters only, first word, capitalised.
+    Falls back to 'there' (kept lowercase — reads right in 'Hi there,')."""
+    raw = re.sub(r"[^A-Za-z'\-]", " ", str(value or "")).strip()
+    first = raw.split(" ")[0] if raw else ""
+    if not first:
+        return "there"
+    return first[:1].upper() + first[1:]
 
 
 def _sanitize_intent(value) -> str:
@@ -192,7 +202,7 @@ def classify(
         intent=intent,
         confidence=max(0, min(100, int(result.get("confidence") or 0))),
         language=language,
-        sender_first_name=str(result.get("sender_first_name") or "there").strip() or "there",
+        sender_first_name=_clean_first_name(result.get("sender_first_name")),
         urgent=bool(result.get("urgent")),
         should_ignore=bool(result.get("should_ignore")),
         flag=bool(result.get("flag")),

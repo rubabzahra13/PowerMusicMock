@@ -44,6 +44,10 @@ def _polish_draft_body(body: str, signature: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
     if not text:
         return signature
+    # Capitalise the opening character — a template greeting like "hi ..." reads
+    # unprofessionally in the fill-only verbatim path.
+    if text[:1].isalpha():
+        text = text[0].upper() + text[1:]
     return f"{text}\n\n{signature}"
 
 

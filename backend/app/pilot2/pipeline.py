@@ -253,14 +253,17 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
         .all()
     )
 
+    known_before = known_intent_names(db)
     classification = classifier.classify(
         email.from_name,
         email.from_email,
         email.subject,
         email.body,
         templates,
-        known_intents=known_intent_names(db),
+        known_intents=known_before,
     )
+    # A genuinely new kind of email — the AI named an intent we had never seen.
+    is_new_intent = classification.intent not in set(known_before)
 
     # Storing the (possibly brand-new) intent on the email is what "creates" it:
     # known_intent_names() reads it back for the next email, so a novel intent
@@ -306,21 +309,28 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
     # 3. Pure lexical keyword overlap — last-resort, still no model needed.
     from app.pilot2.ai import embeddings
 
-    matched_ids = [
-        tid
-        for tid in embeddings.semantic_match_template_ids(
-            db, email.account_email, email.subject, email.body
-        )
-        if tid in templates_by_id
-    ]
-    if not matched_ids:
-        matched_ids = [tid for tid in classification.template_ids if tid in templates_by_id]
-    if not matched_ids:
+    if is_new_intent:
+        # A brand-new intent has no established template yet. Don't let a
+        # generic catch-all template absorb it — leave it unmatched so the
+        # composer sends the "we'll be back shortly" holding reply, and the
+        # on-send flow suggests creating a dedicated template for this intent.
+        matched_ids = []
+    else:
         matched_ids = [
             tid
-            for tid in classifier.match_templates_by_keywords(email.subject, email.body, templates)
+            for tid in embeddings.semantic_match_template_ids(
+                db, email.account_email, email.subject, email.body
+            )
             if tid in templates_by_id
         ]
+        if not matched_ids:
+            matched_ids = [tid for tid in classification.template_ids if tid in templates_by_id]
+        if not matched_ids:
+            matched_ids = [
+                tid
+                for tid in classifier.match_templates_by_keywords(email.subject, email.body, templates)
+                if tid in templates_by_id
+            ]
     matched = [templates_by_id[tid] for tid in matched_ids]
 
     translations_by_template = {}
