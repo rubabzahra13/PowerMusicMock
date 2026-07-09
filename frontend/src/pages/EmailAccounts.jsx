@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Mail, Link2, Unlink, Trash2, Pencil, Plus } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { getUserTimeZoneLabel } from '../utils/dateTime';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClassNarrow } from '../utils/responsiveLayout';
 import DottedScroll from '../components/ui/DottedScroll';
@@ -183,7 +184,7 @@ export default function GmailAccounts() {
         description={
           loading
             ? 'Loading connected inboxes…'
-            : `${connectedAccounts.length} of ${MAX_CONNECTED_INBOXES} inboxes connected`
+            : `${connectedAccounts.length} of ${MAX_CONNECTED_INBOXES} inboxes connected · Times in ${getUserTimeZoneLabel()}`
         }
         className="mb-4 shrink-0"
         actions={(

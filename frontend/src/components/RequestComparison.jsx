@@ -15,15 +15,6 @@ function getDirectoryStatus(record) {
   return 'In directory';
 }
 
-function getTriggerSummary(rows) {
-  const diffRows = rows.filter((row) => row.hasDiffs);
-  if (diffRows.length === 0) {
-    const directoryRow = rows.find((row) => row.key === 'directory');
-    return directoryRow ? `${directoryRow.shortLabel} · No difference found` : 'No difference found';
-  }
-  return diffRows.map((row) => row.shortLabel).join(' · ');
-}
-
 function ComparisonSideBySideModal({
   isOpen,
   onClose,
@@ -36,31 +27,42 @@ function ComparisonSideBySideModal({
   const fields = differingFields(match);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={title} wide belowDrawer>
-      {description ? (
-        <p className="mb-4 text-sm leading-relaxed text-[var(--color-text-secondary)]">{description}</p>
-      ) : null}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {[leftTitle, rightTitle].map((heading, index) => (
-          <div
-            key={heading}
-            className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/70 p-4"
-          >
-            <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
-              {heading}
-            </p>
-            <dl className="mt-3 space-y-3">
-              {fields.map((field) => (
-                <div key={`${heading}-${field.field}`}>
-                  <dt className="text-[11px] font-medium text-[var(--color-text-muted)]">{field.label}</dt>
-                  <dd className="mt-0.5 break-words text-sm font-semibold text-[var(--color-text-primary)]">
-                    {(index === 0 ? field.leftValue : field.rightValue) || '—'}
-                  </dd>
+    <Modal isOpen={isOpen} onClose={onClose} title={title} wide>
+      <div className="space-y-5">
+        {description ? (
+          <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">{description}</p>
+        ) : null}
+
+        <div className="space-y-3">
+          {fields.map((field) => (
+            <article
+              key={field.field}
+              className="overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
+            >
+              <header className="border-b border-[var(--color-border-default)]/70 bg-[var(--color-surface-panel)]/50 px-4 py-2.5">
+                <p className="text-xs font-semibold text-[var(--color-text-primary)]">{field.label}</p>
+              </header>
+              <div className="grid grid-cols-1 sm:grid-cols-2 sm:divide-x divide-[var(--color-border-default)]/70">
+                <div className="px-4 py-3.5">
+                  <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+                    {leftTitle}
+                  </p>
+                  <p className="break-words text-sm font-medium leading-relaxed text-[var(--color-text-primary)]">
+                    {field.leftValue || '—'}
+                  </p>
                 </div>
-              ))}
-            </dl>
-          </div>
-        ))}
+                <div className="border-t border-[var(--color-border-default)]/70 bg-[var(--color-tag-review-mismatch-bg)]/20 px-4 py-3.5 sm:border-t-0">
+                  <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-tag-review-mismatch-text)]">
+                    {rightTitle}
+                  </p>
+                  <p className="break-words text-sm font-semibold leading-relaxed text-[var(--color-text-primary)]">
+                    {field.rightValue || '—'}
+                  </p>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
       </div>
     </Modal>
   );
@@ -70,7 +72,7 @@ function ExistingUserModal({ isOpen, onClose, directoryRecord, match, requestPer
   const fields = differingFields(match);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Data difference with directory" wide belowDrawer>
+    <Modal isOpen={isOpen} onClose={onClose} title="Data difference with directory" wide>
       <p className="mb-4 text-sm leading-relaxed text-[var(--color-text-secondary)]">
         View details of the difference in data between the directory record and this request.
       </p>
@@ -143,7 +145,7 @@ function ComparisonRow({ titleTag, status, hasDiffs: showDiffDetails, onAction, 
       <span className="block">
         <Tag variant={titleTag.variant} label={titleTag.label} prefix={titleTag.prefix} compact={titleTag.compact ?? compact} />
       </span>
-      {status ? (
+      {showDiffDetails && status ? (
         <span
           className={`mt-0.5 block whitespace-normal break-words text-[var(--color-text-secondary)] ${statusClass}`}
         >
@@ -181,58 +183,6 @@ function ComparisonStack({ children, compact, className }) {
   );
 }
 
-function ComparisonTrigger({ rows, onOpen, className }) {
-  const hasAnyDiffs = rows.some((row) => row.hasDiffs);
-  const summary = getTriggerSummary(rows);
-  const badgeClass = hasAnyDiffs
-    ? 'bg-[var(--color-tag-review-mismatch-bg)] text-[var(--color-tag-review-mismatch-text)] ring-[var(--color-tag-review-mismatch-border)]'
-    : 'bg-[var(--color-tag-added-bg)] text-[var(--color-tag-added-text)] ring-emerald-200';
-
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        onOpen();
-      }}
-      className={`flex min-h-[36px] w-full items-center gap-2 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-1.5 text-left shadow-[0_1px_2px_rgba(26,26,46,0.04)] transition-colors hover:border-[var(--color-text-muted)]/60 hover:bg-[var(--color-surface-panel)] ${className}`.trim()}
-      aria-label="View comparison details"
-    >
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[11px] font-bold text-[var(--color-text-primary)]">
-          View comparison
-        </span>
-        <span className="block truncate text-[10px] font-semibold text-[var(--color-text-secondary)]">
-          {summary}
-        </span>
-      </span>
-      <span className={`inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ring-1 ${badgeClass}`}>
-        {hasAnyDiffs ? 'Review' : 'OK'}
-      </span>
-    </button>
-  );
-}
-
-function ComparisonOverviewModal({ isOpen, onClose, rows }) {
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Comparison" wide belowDrawer>
-      <ComparisonStack compact={false}>
-        {rows.map((row) => (
-          <ComparisonRow
-            key={row.key}
-            titleTag={{ ...row.titleTag, compact: false }}
-            status={row.status}
-            hasDiffs={row.hasDiffs}
-            actionLabel={row.actionLabel}
-            onAction={row.onAction}
-            compact={false}
-          />
-        ))}
-      </ComparisonStack>
-    </Modal>
-  );
-}
-
 export default function RequestComparison({
   intakeMatch,
   directoryMatch,
@@ -243,7 +193,6 @@ export default function RequestComparison({
 }) {
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(false);
-  const [overviewOpen, setOverviewOpen] = useState(false);
   const compact = variant === 'table';
 
   const directoryRecord = useMemo(
@@ -262,29 +211,19 @@ export default function RequestComparison({
           status: getMatchStatusLabel(directoryMatch, !directoryHasDiffs, 'directory'),
           match: directoryMatch,
           hasDiffs: directoryHasDiffs,
-          shortLabel: directoryHasDiffs ? 'DB differs' : `${getDirectoryStatus(directoryRecord)} in DB`,
           actionLabel: 'View details of data difference between directory record and this request',
-          onAction: () => {
-            setOverviewOpen(false);
-            setDirectoryOpen(true);
-          },
+          onAction: () => setDirectoryOpen(true),
         }
       : null,
-    intakeMatch
+    intakeHasDiffs
       ? {
           key: 'email',
-          titleTag: intakeHasDiffs
-            ? intakeMismatchReviewTag(compact)
-            : { variant: 'auto-mail', label: 'Auto Mail', prefix: '', compact },
-          status: getMatchStatusLabel(intakeMatch, !intakeHasDiffs, 'intake'),
+          titleTag: intakeMismatchReviewTag(compact),
+          status: getMatchStatusLabel(intakeMatch, false, 'intake'),
           match: intakeMatch,
-          hasDiffs: intakeHasDiffs,
-          shortLabel: intakeHasDiffs ? 'Auto Mail differs' : 'Auto Mail',
+          hasDiffs: true,
           actionLabel: 'View details of data difference between manager request and Auto Mail',
-          onAction: () => {
-            setOverviewOpen(false);
-            setIntakeOpen(true);
-          },
+          onAction: () => setIntakeOpen(true),
         }
       : null,
   ].filter(Boolean);
@@ -297,29 +236,19 @@ export default function RequestComparison({
 
   return (
     <>
-      {compact ? (
-        <ComparisonTrigger rows={rows} onOpen={() => setOverviewOpen(true)} className={className} />
-      ) : (
-        <ComparisonStack compact={compact} className={className}>
-          {rows.map((row) => (
-            <ComparisonRow
-              key={row.key}
-              titleTag={row.titleTag}
-              status={row.status}
-              hasDiffs={row.hasDiffs}
-              actionLabel={row.actionLabel}
-              onAction={row.onAction}
-              compact={compact}
-            />
-          ))}
-        </ComparisonStack>
-      )}
-
-      <ComparisonOverviewModal
-        isOpen={overviewOpen}
-        onClose={() => setOverviewOpen(false)}
-        rows={rows}
-      />
+      <ComparisonStack compact={compact} className={className}>
+        {rows.map((row) => (
+          <ComparisonRow
+            key={row.key}
+            titleTag={row.titleTag}
+            status={row.status}
+            hasDiffs={row.hasDiffs}
+            actionLabel={row.actionLabel}
+            onAction={row.onAction}
+            compact={compact}
+          />
+        ))}
+      </ComparisonStack>
 
       {intakeHasDiffs ? (
         <ComparisonSideBySideModal

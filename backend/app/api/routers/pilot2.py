@@ -99,6 +99,19 @@ def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         if row.account_email in connected_emails
     ]
     flagged_emails = len(flagged_rows)
+
+    by_inbox: dict[str, list] = {}
+    for row in flagged_rows:
+        by_inbox.setdefault(row.account_email, []).append(row)
+
+    flagged_alert_rows: list = []
+    for account in sorted(connected_accounts, key=lambda acc: (acc.title or acc.email).lower()):
+        inbox_rows = by_inbox.get(account.email, [])
+        inbox_rows.sort(
+            key=lambda row: row.received_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        flagged_alert_rows.extend(inbox_rows[:2])
     if connected_emails:
         templates_active = (
             db.query(models.EmailTemplate)
@@ -110,13 +123,37 @@ def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         )
     else:
         templates_active = 0
-    activity = (
-        db.query(models.ProcessingLog)
-        .filter(models.ProcessingLog.type == "template_updated")
-        .order_by(models.ProcessingLog.timestamp.desc())
-        .limit(8)
-        .all()
-    )
+
+    templates_by_inbox: dict[str, list] = {}
+    if connected_emails:
+        for tmpl in (
+            db.query(models.EmailTemplate)
+            .filter(
+                models.EmailTemplate.account_email.in_(connected_emails),
+                models.EmailTemplate.status.in_(["Active", "Draft"]),
+            )
+            .all()
+        ):
+            templates_by_inbox.setdefault(tmpl.account_email, []).append(tmpl)
+
+    activity_rows: list = []
+    for account in sorted(connected_accounts, key=lambda acc: (acc.title or acc.email).lower()):
+        inbox_rows = templates_by_inbox.get(account.email, [])
+        inbox_rows.sort(
+            key=lambda row: row.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        for tmpl in inbox_rows[:2]:
+            activity_rows.append(
+                {
+                    "id": tmpl.id,
+                    "timestamp": tmpl.created_at,
+                    "type": "template_created",
+                    "description": tmpl.name,
+                    "emailId": tmpl.id,
+                    "inboxTitle": inbox_titles.get(account.email, account.email),
+                }
+            )
     flagged_alerts = [
         {
             "id": row.id,
@@ -125,13 +162,13 @@ def get_overview(db: Session = Depends(get_db), _admin=Depends(require_admin)):
             "inboxTitle": inbox_titles.get(row.account_email, row.account_email),
             "timestamp": row.received_at.isoformat() if row.received_at else None,
         }
-        for row in flagged_rows[:2]
+        for row in flagged_alert_rows
     ]
     return {
         "newEmails": new_emails,
         "flaggedEmails": flagged_emails,
         "templatesActive": templates_active,
-        "activity": activity,
+        "activity": activity_rows,
         "flaggedAlerts": flagged_alerts,
     }
 

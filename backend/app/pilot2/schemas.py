@@ -440,11 +440,20 @@ class DistillResultOut(BaseModel):
     suggestionsCreated: int
 
 
+class OverviewActivityOut(BaseModel):
+    id: str
+    timestamp: datetime
+    type: str
+    description: str
+    emailId: Optional[str] = None
+    inboxTitle: Optional[str] = None
+
+
 class Pilot2OverviewOut(BaseModel):
     newEmails: int
     flaggedEmails: int
     templatesActive: int
-    activity: List[ProcessingLogOut]
+    activity: List[OverviewActivityOut]
     flaggedAlerts: List[dict] = Field(default_factory=list)
 
 

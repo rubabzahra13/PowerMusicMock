@@ -4,7 +4,7 @@ import { format, parseISO } from 'date-fns';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClassNarrow } from '../utils/responsiveLayout';
 import DottedScroll from '../components/ui/DottedScroll';
-import { Toast, useToast, CardListSkeleton, SelectDropdown } from '../components/ui';
+import { Toast, useToast, CardListSkeleton, SelectDropdown, Modal } from '../components/ui';
 import {
   clearCache,
   createIgnoreRule,
@@ -40,11 +40,24 @@ export default function IgnoreList() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState(null);
 
   const inboxOptions = useMemo(
     () => inboxes.map((row) => ({ value: row.email, label: row.title || row.email })),
     [inboxes],
   );
+
+  const ignoreCounts = useMemo(() => ({
+    emails: rules.filter((row) => row.kind === 'email').length,
+    domains: rules.filter((row) => row.kind === 'domain').length,
+  }), [rules]);
+
+  const headerDescription = useMemo(() => {
+    if (loading) return 'Loading ignore list…';
+    if (!selectedInbox) return 'Connect an inbox to manage ignore rules.';
+    const { emails, domains } = ignoreCounts;
+    return `${emails} email${emails === 1 ? '' : 's'} ignored · ${domains} domain${domains === 1 ? '' : 's'} ignored`;
+  }, [loading, selectedInbox, ignoreCounts]);
 
   const loadRules = useCallback((inbox) => {
     if (!inbox) {
@@ -115,6 +128,7 @@ export default function IgnoreList() {
       setRules((prev) => prev.filter((row) => row.id !== rule.id));
       clearCache('pilot2_workspace');
       clearCache(`ignore_list_${selectedInbox}`);
+      setPendingRemove(null);
       showToast('Removed from ignore list.', 'success');
     } catch (err) {
       showToast(`Remove failed: ${err.message}`, 'error');
@@ -127,64 +141,62 @@ export default function IgnoreList() {
     <div className={adminPageShellClassNarrow}>
       <Toast />
       <PageHeader
+        section="Customer support"
         title="Ignore list"
-        subtitle="Hide senders from Email responses without deleting their messages."
+        description={headerDescription}
       />
 
       <DottedScroll className="flex-1 min-h-0">
         <div className="space-y-6 pb-8">
           <section className="rounded-xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="min-w-0 flex-1">
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                  Inbox
-                </label>
-                {inboxOptions.length ? (
-                  <SelectDropdown
-                    value={selectedInbox}
-                    onChange={handleInboxChange}
-                    options={inboxOptions}
-                    className="w-full max-w-sm"
-                  />
-                ) : (
-                  <p className="text-sm text-[var(--color-text-secondary)]">
-                    Connect an inbox under Email accounts to manage ignore rules.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {selectedInbox && (
-              <form onSubmit={handleAdd} className="mt-5 flex flex-col gap-3 sm:flex-row">
-                <div className="min-w-0 flex-1">
-                  <label htmlFor="ignore-pattern" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                    Email or domain
-                  </label>
-                  <input
-                    id="ignore-pattern"
-                    type="text"
-                    value={pattern}
-                    onChange={(event) => setPattern(event.target.value)}
-                    placeholder="noreply@company.com or @marketing.com"
-                    className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
-                  />
-                  <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
-                    Use a full address or a domain like <span className="font-medium">@company.com</span>.
-                  </p>
+            {inboxOptions.length ? (
+              <form onSubmit={handleAdd} className="space-y-2">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="min-w-0 sm:w-44 lg:w-52 shrink-0">
+                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                      Inbox
+                    </label>
+                    <SelectDropdown
+                      value={selectedInbox}
+                      onChange={handleInboxChange}
+                      options={inboxOptions}
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <label htmlFor="ignore-pattern" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                      Email or domain
+                    </label>
+                    <input
+                      id="ignore-pattern"
+                      type="text"
+                      value={pattern}
+                      onChange={(event) => setPattern(event.target.value)}
+                      placeholder="noreply@company.com or @marketing.com"
+                      className="w-full h-10 rounded-lg border border-[var(--color-border-default)] px-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={adding || !pattern.trim() || !selectedInbox}
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] px-4 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50 sm:self-end"
+                  >
+                    {adding ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    Add
+                  </button>
                 </div>
-                <button
-                  type="submit"
-                  disabled={adding || !pattern.trim()}
-                  className="inline-flex h-10 shrink-0 items-center justify-center gap-2 self-end rounded-lg bg-[var(--color-brand-primary)] px-4 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50"
-                >
-                  {adding ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Plus className="h-4 w-4" aria-hidden="true" />
-                  )}
-                  Add
-                </button>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Use a full address or a domain like <span className="font-medium">@company.com</span>.
+                </p>
               </form>
+            ) : (
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                Connect an inbox under Email accounts to manage ignore rules.
+              </p>
             )}
           </section>
 
@@ -220,7 +232,7 @@ export default function IgnoreList() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => handleRemove(rule)}
+                      onClick={() => setPendingRemove(rule)}
                       disabled={busyId === rule.id}
                       className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                       aria-label={`Remove ${formatPattern(rule)}`}
@@ -238,6 +250,39 @@ export default function IgnoreList() {
           </section>
         </div>
       </DottedScroll>
+
+      <Modal
+        isOpen={pendingRemove != null}
+        onClose={() => !busyId && setPendingRemove(null)}
+        confirm
+        title="Remove from ignore list"
+        footer={(
+          <>
+            <button
+              type="button"
+              onClick={() => setPendingRemove(null)}
+              disabled={busyId != null}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium text-[var(--color-text-primary)] hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => pendingRemove && handleRemove(pendingRemove)}
+              disabled={busyId != null}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-md bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              {busyId ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+              Remove
+            </button>
+          </>
+        )}
+      >
+        <p>
+          Remove <strong>{pendingRemove ? formatPattern(pendingRemove) : ''}</strong> from the ignore list?
+          Messages from this {pendingRemove?.kind === 'domain' ? 'domain' : 'sender'} will show up again in Email responses.
+        </p>
+      </Modal>
     </div>
   );
 }

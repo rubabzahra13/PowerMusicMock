@@ -1,16 +1,4 @@
-import { format, parseISO, isToday, isYesterday } from 'date-fns';
-
-function formatListTime(iso) {
-  if (!iso) return '';
-  try {
-    const d = parseISO(iso);
-    if (isToday(d)) return format(d, 'h:mm a');
-    if (isYesterday(d)) return 'Yesterday';
-    return format(d, 'd MMM');
-  } catch {
-    return iso;
-  }
-}
+import { formatListTime } from '../../utils/dateTime';
 
 function getPreviewLine(body) {
   if (!body) return '';

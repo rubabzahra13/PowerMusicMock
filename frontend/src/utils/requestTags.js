@@ -71,7 +71,7 @@ export function directoryReviewTag(directoryRecord, compact = true) {
   const isRemoved = directoryRecord?.status === 'Removed';
   return {
     variant: isRemoved ? 'review-removed' : 'review-exists',
-    label: isRemoved ? 'Already removed in DB' : 'Already added in DB',
+    label: isRemoved ? 'Already removed in DB' : 'User already exists',
     prefix: '⚠ ',
     compact,
   };

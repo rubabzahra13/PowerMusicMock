@@ -67,6 +67,40 @@ const fmtListDate = (iso) => {
 // ─── Template List Item ────────────────────────────────────────────────────────
 const TEMPLATE_CATEGORIES = ['Membership', 'Payments', 'Events', 'General Enquiries', 'Other'];
 const CATEGORY_ORDER = TEMPLATE_CATEGORIES.filter((c) => c !== 'All Categories');
+const INTENT_TYPE_MAX_LENGTH = 100;
+const TEMPLATE_NAME_MAX_LENGTH = 200;
+const TEMPLATE_SUBJECT_MAX_LENGTH = 500;
+
+function validateIntentType(value) {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return 'Intent type is required.';
+  if (trimmed.length > INTENT_TYPE_MAX_LENGTH) {
+    return `Intent type must be at most ${INTENT_TYPE_MAX_LENGTH} characters.`;
+  }
+  return null;
+}
+
+function validateTemplateName(value) {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return 'Template name is required.';
+  if (trimmed.length > TEMPLATE_NAME_MAX_LENGTH) {
+    return `Template name must be at most ${TEMPLATE_NAME_MAX_LENGTH} characters.`;
+  }
+  return null;
+}
+
+function validateTemplateSubject(value) {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return 'Template subject line is required.';
+  if (trimmed.length > TEMPLATE_SUBJECT_MAX_LENGTH) {
+    return `Template subject line must be at most ${TEMPLATE_SUBJECT_MAX_LENGTH} characters.`;
+  }
+  return null;
+}
+
+function normalizeIntentType(value) {
+  return String(value ?? '').trim().slice(0, INTENT_TYPE_MAX_LENGTH);
+}
 
 const LIBRARY_TABS = [
   { id: 'templates', label: 'Templates', status: 'Active' },
@@ -879,6 +913,9 @@ export default function TemplateManagement() {
   const [search, setSearch] = useState('');
   const [sortMode, setSortMode] = useState('created-desc');
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
+  const [intentTypeTouched, setIntentTypeTouched] = useState(false);
+  const [templateNameTouched, setTemplateNameTouched] = useState(false);
+  const [templateSubjectTouched, setTemplateSubjectTouched] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
@@ -953,6 +990,9 @@ export default function TemplateManagement() {
     setIsEditing(false);
     setEditForm(null);
     setIsDirty(false);
+    setIntentTypeTouched(false);
+    setTemplateNameTouched(false);
+    setTemplateSubjectTouched(false);
     discardNewRef.current = false;
     draftAutoSaveIdRef.current = null;
   }, []);
@@ -973,7 +1013,7 @@ export default function TemplateManagement() {
       name: form.name?.trim() || 'Untitled draft',
       subject: form.subject?.trim() || '(No subject)',
       body: form.body || DEFAULT_NEW_BODY,
-      category: form.category || 'Membership',
+      category: normalizeIntentType(form.category) || 'General Enquiries',
       status: 'Draft',
     };
     const existingId = draftAutoSaveIdRef.current;
@@ -1240,6 +1280,21 @@ export default function TemplateManagement() {
     [categories]
   );
 
+  const intentTypeError = useMemo(
+    () => (intentTypeTouched ? validateIntentType(editForm?.category) : null),
+    [intentTypeTouched, editForm?.category],
+  );
+
+  const templateNameError = useMemo(
+    () => (templateNameTouched ? validateTemplateName(editForm?.name) : null),
+    [templateNameTouched, editForm?.name],
+  );
+
+  const templateSubjectError = useMemo(
+    () => (templateSubjectTouched ? validateTemplateSubject(editForm?.subject) : null),
+    [templateSubjectTouched, editForm?.subject],
+  );
+
   useEffect(() => {
     if (!sortOpen) return;
     const onClickOutside = (e) => {
@@ -1463,9 +1518,12 @@ export default function TemplateManagement() {
       subject: '',
       body: DEFAULT_NEW_BODY,
       language: 'English',
-      category: 'Membership',
+      category: '',
       status: libraryTab === 'templates' ? 'Active' : 'Draft',
     });
+    setIntentTypeTouched(false);
+    setTemplateNameTouched(false);
+    setTemplateSubjectTouched(false);
   };
 
   // ── Language switch ──
@@ -1501,10 +1559,17 @@ export default function TemplateManagement() {
     if (!editForm) return;
 
     if (isCreatingNew) {
-      if (!editForm.name.trim() || !editForm.subject.trim()) {
-        showToast('Please fill in the template name and subject.', 'error');
+      const categoryError = validateIntentType(editForm.category);
+      const nameError = validateTemplateName(editForm.name);
+      const subjectError = validateTemplateSubject(editForm.subject);
+      if (categoryError || nameError || subjectError) {
+        setIntentTypeTouched(true);
+        setTemplateNameTouched(true);
+        setTemplateSubjectTouched(true);
+        showToast(categoryError || nameError || subjectError, 'error');
         return;
       }
+      const category = normalizeIntentType(editForm.category);
       try {
         const targetStatus = editForm.status || 'Active';
         let created;
@@ -1513,7 +1578,7 @@ export default function TemplateManagement() {
             name: editForm.name.trim(),
             subject: editForm.subject.trim(),
             body: editForm.body,
-            category: editForm.category || 'Membership',
+            category,
             intent: null,
             status: targetStatus,
           });
@@ -1524,7 +1589,7 @@ export default function TemplateManagement() {
             name: editForm.name.trim(),
             subject: editForm.subject.trim(),
             body: editForm.body,
-            category: editForm.category || 'Membership',
+            category,
             status: targetStatus,
           });
           commitTemplates((prev) => [...prev, created]);
@@ -1597,7 +1662,22 @@ export default function TemplateManagement() {
       showToast('Add a name, subject, or edit the body before saving a draft.', 'error');
       return;
     }
-    await persistNewDraft(editForm);
+    const categoryError = validateIntentType(editForm.category);
+    const nameError = validateTemplateName(editForm.name);
+    const subjectError = validateTemplateSubject(editForm.subject);
+    if (categoryError || nameError || subjectError) {
+      setIntentTypeTouched(true);
+      setTemplateNameTouched(true);
+      setTemplateSubjectTouched(true);
+      showToast(categoryError || nameError || subjectError, 'error');
+      return;
+    }
+    await persistNewDraft({
+      ...editForm,
+      name: editForm.name.trim(),
+      subject: editForm.subject.trim(),
+      category: normalizeIntentType(editForm.category),
+    });
   };
 
   const handleDiscardNew = () => {
@@ -2374,31 +2454,55 @@ export default function TemplateManagement() {
                         {isCreatingNew ? (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1.5 min-w-0">
-                              <TemplateFieldLabel htmlFor="template-category">Category</TemplateFieldLabel>
-                              <div className="relative min-w-0">
-                                <select
-                                  id="template-category"
-                                  value={editForm?.category || 'Membership'}
-                                  onChange={(e) => handleFieldChange('category', e.target.value)}
-                                  className={`${TEMPLATE_FIELD_INPUT} w-full appearance-none pr-8 cursor-pointer`}
-                                >
-                                  {['Membership', 'Payments', 'Events', 'General Enquiries', 'Other'].map((c) => (
-                                    <option key={c} value={c}>{c}</option>
-                                  ))}
-                                </select>
-                                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-text-muted)] pointer-events-none" aria-hidden="true" />
-                              </div>
+                              <TemplateFieldLabel
+                                htmlFor="template-intent-type"
+                                hint="e.g. Membership, Payments, Events"
+                              >
+                                Intent type
+                              </TemplateFieldLabel>
+                              <input
+                                id="template-intent-type"
+                                type="text"
+                                required
+                                maxLength={INTENT_TYPE_MAX_LENGTH}
+                                value={editForm?.category || ''}
+                                onChange={(e) => handleFieldChange('category', e.target.value)}
+                                onBlur={() => setIntentTypeTouched(true)}
+                                aria-invalid={intentTypeError ? true : undefined}
+                                className={`${TEMPLATE_FIELD_INPUT} w-full ${
+                                  intentTypeError
+                                    ? 'border-red-500 focus:border-red-500 focus:ring-red-100'
+                                    : ''
+                                }`}
+                                placeholder="e.g. Membership"
+                                autoComplete="off"
+                              />
+                              {intentTypeError && (
+                                <p className="text-[11px] text-red-600">{intentTypeError}</p>
+                              )}
                             </div>
                             <div className="space-y-1.5 min-w-0">
                               <TemplateFieldLabel htmlFor="template-name">Template name</TemplateFieldLabel>
                               <input
                                 id="template-name"
                                 type="text"
+                                required
+                                maxLength={TEMPLATE_NAME_MAX_LENGTH}
                                 value={editForm?.name || ''}
                                 onChange={(e) => handleFieldChange('name', e.target.value)}
-                                className={`${TEMPLATE_FIELD_INPUT} w-full`}
+                                onBlur={() => setTemplateNameTouched(true)}
+                                aria-invalid={templateNameError ? true : undefined}
+                                className={`${TEMPLATE_FIELD_INPUT} w-full ${
+                                  templateNameError
+                                    ? 'border-red-500 focus:border-red-500 focus:ring-red-100'
+                                    : ''
+                                }`}
                                 placeholder="e.g. Membership enquiry"
+                                autoComplete="off"
                               />
+                              {templateNameError && (
+                                <p className="text-[11px] text-red-600">{templateNameError}</p>
+                              )}
                             </div>
                           </div>
                         ) : (
@@ -2449,15 +2553,27 @@ export default function TemplateManagement() {
                         </h4>
 
                         <div className="space-y-1.5">
-                          <TemplateFieldLabel htmlFor="template-subject">Subject line</TemplateFieldLabel>
+                          <TemplateFieldLabel htmlFor="template-subject">Template subject line</TemplateFieldLabel>
                           <input
                             id="template-subject"
                             type="text"
+                            required
+                            maxLength={TEMPLATE_SUBJECT_MAX_LENGTH}
                             value={editForm?.subject || ''}
                             onChange={(e) => handleFieldChange('subject', e.target.value)}
-                            className={TEMPLATE_FIELD_INPUT}
+                            onBlur={() => setTemplateSubjectTouched(true)}
+                            aria-invalid={templateSubjectError ? true : undefined}
+                            className={`${TEMPLATE_FIELD_INPUT} ${
+                              templateSubjectError
+                                ? 'border-red-500 focus:border-red-500 focus:ring-red-100'
+                                : ''
+                            }`}
                             placeholder="Re: Your enquiry"
+                            autoComplete="off"
                           />
+                          {templateSubjectError && (
+                            <p className="text-[11px] text-red-600">{templateSubjectError}</p>
+                          )}
                         </div>
 
                         <div className="space-y-2">

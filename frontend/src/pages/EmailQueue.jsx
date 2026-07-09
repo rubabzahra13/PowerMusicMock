@@ -5,8 +5,9 @@ import {
   ChevronLeft, ChevronRight, Mail, MailOpen, Sparkles, SlidersHorizontal,
   SortAsc, Archive, X, Pencil, Trash2, RotateCcw, Link2, Unlink, Forward, PenSquare
 } from 'lucide-react';
-import { format, parseISO, isToday, isYesterday } from 'date-fns';
+import { parseISO } from 'date-fns';
 import { sendEmail, sendReplyAll, sendForward, composeMessage, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache, refreshCache, patchCache, getPilot2Workspace } from '../utils/pilot2Api';
+import { formatListTime, formatDetailTime, getDateGroupLabel } from '../utils/dateTime';
 import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton, DraftCreatingPanel } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClass } from '../utils/responsiveLayout';
@@ -161,6 +162,19 @@ function buildDraft(email, inboxes) {
   return `Hi ${recipientName},\n\nWe've received your message. A member of our team will review your enquiry and respond shortly.\n\n${signature}`;
 }
 
+function hasManualDraftEdit(email, draftEdits, inboxes) {
+  const edited = draftEdits[email.id];
+  if (edited == null) return false;
+  return edited.trim() !== buildDraft(email, inboxes).trim();
+}
+
+function isFlaggedReplySendAllowed(email, draftEdits, inboxes, isEditingDraft) {
+  if (!email.flagged || email.templateUsed) return true;
+  if (isEditingDraft) return true;
+  if (hasManualDraftEdit(email, draftEdits, inboxes)) return true;
+  return !isDraftPending(email) && email.draftStatus !== 'Sent';
+}
+
 // Gmail-style forward body: two blank lines for Andrea to add commentary,
 // then a "---------- Forwarded message ---------" header, then the quoted
 // original. Kept as plain text so it round-trips cleanly through the send
@@ -193,36 +207,6 @@ function isDraftPending(email) {
     email.draftStatus === 'Processing' ||
     email.draftStatus === 'Drafting'
   );
-}
-
-function formatListTime(iso) {
-  try {
-    const d = parseISO(iso);
-    if (isToday(d)) return format(d, 'h:mm a');
-    if (isYesterday(d)) return 'Yesterday';
-    return format(d, 'd MMM');
-  } catch {
-    return iso;
-  }
-}
-
-function getDateGroupLabel(iso) {
-  try {
-    const d = parseISO(iso);
-    if (isToday(d)) return 'Today';
-    if (isYesterday(d)) return 'Yesterday';
-    return format(d, 'EEEE, d MMMM');
-  } catch {
-    return 'Earlier';
-  }
-}
-
-function formatDetailTime(iso) {
-  try {
-    return format(parseISO(iso), 'EEE, d MMM yyyy · HH:mm');
-  } catch {
-    return iso;
-  }
 }
 
 function resolveMailboxForEmail(email, mailboxFromUrl) {
@@ -523,6 +507,12 @@ export default function EmailQueue() {
 
   const selectedEmail = emails.find((e) => e.id === selectedId) ?? null;
   const selectedDraftPending = selectedEmail ? isDraftPending(selectedEmail) : false;
+  const selectedFlaggedReplySendAllowed = useMemo(
+    () => (selectedEmail
+      ? isFlaggedReplySendAllowed(selectedEmail, draftEdits, inboxes, isEditingDraft)
+      : true),
+    [selectedEmail, draftEdits, inboxes, isEditingDraft],
+  );
 
   // The thread the selected email belongs to (built from the full email set
   // so the detail pane sees follow-ups even if they've been filtered out of
@@ -1097,8 +1087,8 @@ export default function EmailQueue() {
       await handleForwardSend();
       return;
     }
-    if (selectedEmail.flagged && !selectedEmail.templateUsed) {
-      showToast('Resolve the flag before sending this reply.', 'error');
+    if (selectedEmail.flagged && !selectedEmail.templateUsed && !isFlaggedReplySendAllowed(selectedEmail, draftEdits, inboxes, isEditingDraft)) {
+      showToast('Wait until the reply draft is ready, or edit the draft before sending.', 'error');
       return;
     }
     const body = getDraftForEmail(selectedEmail);
@@ -2116,7 +2106,7 @@ export default function EmailQueue() {
                         <button
                           type="button"
                           onClick={handleSend}
-                          disabled={composerMode !== 'forward' && selectedEmail.flagged && !selectedEmail.templateUsed}
+                          disabled={composerMode !== 'forward' && !selectedFlaggedReplySendAllowed}
                           className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                         >
                           <Send className="w-4 h-4" />

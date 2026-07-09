@@ -25,7 +25,7 @@ const ALERT_LIST_SCROLL_CLASS = 'max-h-[15.5rem] overflow-y-scroll scrollbar-hid
 const ACTIVITY_LIST_SCROLL_CLASS = 'max-h-[12.75rem] overflow-y-scroll scrollbar-hide pr-5';
 import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
 
-const CUSTOMER_ACTIVITY_TYPES = new Set(['template_updated']);
+const CUSTOMER_ACTIVITY_TYPES = new Set(['template_created', 'template_updated']);
 const PARTNER_ACTIVITY_TYPES = new Set([
   'request_submitted',
   'tag_applied',
@@ -87,6 +87,7 @@ function getActivityMeta(type) {
     marked_removed: UserMinus,
     marked_added: UserPlus,
     template_updated: FileText,
+    template_created: FileText,
     default: Clock
   };
 
@@ -122,18 +123,22 @@ function KpiCard({ label, value, hint, icon: Icon, onClick, theme }) {
   );
 }
 
-function groupAlertsByPartition(alerts) {
+function groupByPartition(items) {
   const groups = [];
-  for (const alert of alerts) {
-    const label = alert.partitionLabel || null;
+  for (const item of items) {
+    const label = item.partitionLabel || null;
     const last = groups[groups.length - 1];
     if (last && last.label === label) {
-      last.items.push(alert);
+      last.items.push(item);
     } else {
-      groups.push({ label, items: [alert] });
+      groups.push({ label, items: [item] });
     }
   }
   return groups;
+}
+
+function groupAlertsByPartition(alerts) {
+  return groupByPartition(alerts);
 }
 
 function ServiceColumn({
@@ -260,18 +265,28 @@ function ServiceColumn({
 
           <DottedScroll
             scrollClassName={ACTIVITY_LIST_SCROLL_CLASS}
-            contentClassName="space-y-0 p-3"
+            contentClassName="space-y-3 p-3"
           >
             {activityLoading ? (
               <ActivitySkeleton rows={PANEL_VISIBLE_ITEMS} />
             ) : activities.length === 0 ? (
               <p className="text-sm text-[var(--color-text-muted)] text-center py-4">{activityEmptyText}</p>
             ) : (
-              activities.map((activity, index) => {
+              groupByPartition(activities).map((group) => (
+                <section key={group.label || group.items[0]?.id} className="space-y-0">
+                  {group.label && (
+                    <div className="flex items-center gap-2 px-1 pb-2">
+                      <h4 className="text-[11px] font-medium text-[var(--color-text-secondary)] shrink-0">
+                        {group.label}
+                      </h4>
+                      <div className="flex-1 h-px bg-[var(--color-border-default)]/80" aria-hidden="true" />
+                    </div>
+                  )}
+                  {group.items.map((activity, index) => {
                 const isClickable = Boolean(activity.link);
                 const meta = getActivityMeta(activity.type);
                 const Icon = meta.icon;
-                const isLast = index === activities.length - 1;
+                const isLast = index === group.items.length - 1;
 
                 return (
                   <button
@@ -312,7 +327,9 @@ function ServiceColumn({
                     </div>
                   </button>
                 );
-              })
+                  })}
+                </section>
+              ))
             )}
           </DottedScroll>
         </div>
@@ -356,6 +373,7 @@ export default function Home() {
           timestamp: entry.timestamp,
           type: entry.type,
           description: entry.description,
+          partitionLabel: entry.inboxTitle || null,
           link: entry.emailId ? `/templates?id=${encodeURIComponent(entry.emailId)}` : null,
         })),
       );
@@ -441,7 +459,8 @@ export default function Home() {
     .map((a) => ({
       ...a,
       link: a.linkedRequestId ? `/new-requests?id=${a.linkedRequestId}` : null
-    }));
+    }))
+    .slice(0, 2);
 
   return (
     <div className={`${adminPageShellClass} select-none`}>
@@ -464,14 +483,16 @@ export default function Home() {
             { label: 'Flagged', value: liveCustomerKpis.flaggedEmails, hint: 'All inboxes', icon: Flag, onClick: () => navigate('/email-responses?mailbox=flagged') },
             { label: 'Active Templates', value: liveCustomerKpis.templatesActive, hint: 'All inboxes', icon: FileText, onClick: () => navigate('/templates') }
           ]}
-          alertsTitle="Flagged recently"
-          alertsSubtitle={flaggedEmailAlerts.length ? 'Latest across connected inboxes' : 'All clear'}
+          alertsTitle="New flags"
+          alertsSubtitle={flaggedEmailAlerts.length ? 'For all inboxes' : 'All clear'}
           alerts={flaggedEmailAlerts}
           alertEmptyText="No flagged emails to review."
           showAlertCount={false}
           onAlertClick={goToFlaggedEmail}
           activities={customerActivity}
-          activityEmptyText="No recent template activity."
+          activityTitle="New templates"
+          activitySubtitle={customerActivity.length ? 'For all inboxes' : 'Latest templates'}
+          activityEmptyText="No new templates."
           formatActivityDate={formatActivityDate}
           onActivityClick={handleActivityClick}
         />
@@ -494,7 +515,7 @@ export default function Home() {
           onAlertClick={handlePartnerAlertClick}
           activities={partnerActivity}
           activityTitle="Recent Requests"
-          activitySubtitle="Latest requests"
+          activitySubtitle="Latest user management requests"
           activityEmptyText="No recent partner activity."
           formatActivityDate={formatActivityDate}
           onActivityClick={handleActivityClick}
