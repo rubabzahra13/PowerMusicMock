@@ -16,6 +16,14 @@ from app.pilot2 import config
 
 logger = logging.getLogger(__name__)
 
+
+def fence_untrusted(content: str) -> str:
+    """Wrap untrusted, public email content so the model treats it strictly as
+    data to analyse — not as instructions. Strips any attempt in the content to
+    close the fence early and inject its own directives."""
+    safe = (content or "").replace("</untrusted_email>", "").replace("<untrusted_email>", "")
+    return f"<untrusted_email>\n{safe}\n</untrusted_email>"
+
 _client = None
 
 
