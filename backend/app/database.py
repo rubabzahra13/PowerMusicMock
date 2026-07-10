@@ -147,7 +147,13 @@ def create_db_engine():
 
 
 engine = create_db_engine()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# expire_on_commit=False: committing mid-request (e.g. to release the DB backend
+# before a slow LLM call) must NOT expire already-loaded ORM objects, or the next
+# attribute access would re-query per object. Lets us end the transaction during
+# LLM calls without a reload storm.
+SessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, expire_on_commit=False, bind=engine
+)
 
 Base = declarative_base()
 

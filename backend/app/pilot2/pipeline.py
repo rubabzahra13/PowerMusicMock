@@ -254,6 +254,10 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
     )
 
     known_before = known_intent_names(db)
+    # Release the DB backend during the classify LLM call — holding a
+    # transaction idle while waiting on the model starves other requests (e.g.
+    # the dashboard's /workspace) of a pooled connection.
+    db.commit()
     classification = classifier.classify(
         email.from_name,
         email.from_email,
@@ -306,6 +310,10 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
     #    model was down).
     # 3. Pure lexical keyword overlap — last-resort, still no model needed.
     from app.pilot2.ai import embeddings
+
+    # Persist the classification and release the backend before the embedding
+    # call (another model round-trip) for the same reason as classify.
+    db.commit()
 
     # Semantic match requires a CLEAR winner (see embeddings.semantic_match), so
     # a strong match is used even for a newly-named intent ("Order Timing" ->
