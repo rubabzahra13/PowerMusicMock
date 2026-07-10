@@ -117,6 +117,10 @@ BACKFILL_MAX_MESSAGES_PER_QUERY = int(os.getenv("PILOT2_BACKFILL_MAX_MESSAGES", 
 GMAIL_API_PAUSE_SECONDS = float(os.getenv("PILOT2_GMAIL_API_PAUSE", "0.08"))
 AI_BATCH_SIZE = int(os.getenv("PILOT2_AI_BATCH_SIZE", "5"))
 AI_JOB_INTERVAL_SECONDS = int(os.getenv("PILOT2_AI_JOB_INTERVAL_SECONDS", "15"))
+# Time budget for AI processing inside the push webhook, so ingest stays fast
+# and the request never approaches the serverless timeout. Leftover queued mail
+# drains on the next push/poll.
+AI_BATCH_TIME_BUDGET_SECONDS = int(os.getenv("PILOT2_AI_BATCH_TIME_BUDGET_SECONDS", "40"))
 
 SIGNATURE = os.getenv("PILOT2_SIGNATURE", build_signature("Power Music"))
 

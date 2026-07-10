@@ -501,13 +501,16 @@ def _apply_label_change(
 _ai_batch_lock = threading.Lock()
 
 
-def process_ai_batch(db: Session) -> int:
-    """Run classifier + composer for imported messages (rate-limited batch).
+def process_ai_batch(db: Session, *, deadline: Optional[float] = None) -> int:
+    """Drain the AI queue: classify + compose imported messages.
 
-    Also reclaims rows stuck in "Processing"/"Drafting": the lock guarantees
-    only one batch runs per process, so any committed Processing/Drafting row
-    seen here was orphaned by an interrupted run (restart/serverless freeze) and
-    must be retried — otherwise it shows "drafting" in the UI forever.
+    The "queue" is just the emails in Imported/Processing/Drafting state; this
+    drains up to AI_BATCH_SIZE of them. `deadline` (a time.monotonic() value)
+    time-boxes the drain so it can run inside the push webhook without ever
+    blowing the serverless timeout — whatever is left stays queued and drains on
+    the next push or poll. Also reclaims rows orphaned by an interrupted run
+    (the lock guarantees one batch per process, so a committed Processing/
+    Drafting row seen here was interrupted and must be retried).
     """
     if not _ai_batch_lock.acquire(blocking=False):
         return 0
@@ -521,6 +524,9 @@ def process_ai_batch(db: Session) -> int:
         )
         processed = 0
         for email in rows:
+            if deadline is not None and time.monotonic() >= deadline:
+                logger.info("AI batch hit time budget after %d emails; rest stay queued", processed)
+                break
             email.draft_status = "Processing"
             db.commit()
             try:
@@ -629,11 +635,13 @@ def handle_push_notification(
         logger.info("Push notification for unknown/disconnected inbox %s", email_address)
         return 0
 
+    # Ingest first (fast) so the mail is safely queued; then drain the AI queue
+    # within a time budget so the webhook never approaches the serverless
+    # timeout under a burst. Whatever doesn't fit stays queued and drains on the
+    # next push/poll.
     changes = sync_account_history(db, account)
-    # Draft replies right away so the new mail shows a ready draft, not a
-    # "composing" spinner, by the time Andrea looks.
     try:
-        process_ai_batch(db)
+        process_ai_batch(db, deadline=time.monotonic() + config.AI_BATCH_TIME_BUDGET_SECONDS)
     except Exception:
         logger.exception("AI batch after push failed for %s", email_address)
 
