@@ -635,14 +635,26 @@ export default function EmailQueue() {
     [paginatedThreads],
   );
 
+  // Group by day, then by intent type within each day. New intents the AI
+  // creates (e.g. "Order Timing", "Job Application") appear as their own groups
+  // automatically since we key on the email's intent string.
   const listGroups = useMemo(() => {
-    const dateMap = new Map();
+    const dateMap = new Map(); // dateLabel -> Map(intent -> threads[])
     for (const thread of paginatedThreads) {
-      const label = getDateGroupLabel(thread.latestMessage?.receivedAt);
-      if (!dateMap.has(label)) dateMap.set(label, []);
-      dateMap.get(label).push(thread);
+      const dateLabel = getDateGroupLabel(thread.latestMessage?.receivedAt);
+      const intent = thread.latestMessage?.intent || 'Uncategorized';
+      if (!dateMap.has(dateLabel)) dateMap.set(dateLabel, new Map());
+      const intentMap = dateMap.get(dateLabel);
+      if (!intentMap.has(intent)) intentMap.set(intent, []);
+      intentMap.get(intent).push(thread);
     }
-    return Array.from(dateMap.entries()).map(([dateLabel, threads]) => ({ dateLabel, threads }));
+    return Array.from(dateMap.entries()).map(([dateLabel, intentMap]) => ({
+      dateLabel,
+      count: Array.from(intentMap.values()).reduce((n, threads) => n + threads.length, 0),
+      intentGroups: Array.from(intentMap.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([intent, threads]) => ({ intent, threads })),
+    }));
   }, [paginatedThreads]);
 
   const accountOptions = useMemo(
@@ -1709,36 +1721,46 @@ export default function EmailQueue() {
                 )}
               </div>
             ) : (
-              listGroups.map(({ dateLabel, threads }) => (
+              listGroups.map(({ dateLabel, count, intentGroups }) => (
                 <section key={dateLabel}>
                   <div className="sticky top-0 z-20 flex items-center justify-between gap-2 px-4 py-1.5 bg-white/95 backdrop-blur-sm border-b border-[var(--color-border-default)] shadow-[inset_0_-1px_0_0_var(--color-brand-primary)]/20">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-primary)]/75">{dateLabel}</p>
                     <span className="text-[10px] font-medium tabular-nums text-[var(--color-text-muted)]">
-                      {threads.length}
+                      {count}
                     </span>
                   </div>
-                  {threads.map((thread) => {
-                    const threadIds = thread.messages.map((m) => m.id);
-                    const allChecked = threadIds.every((id) => checkedIds.has(id));
-                    return (
-                      <ThreadListItem
-                        key={thread.key}
-                        thread={thread}
-                        selected={selectedThread?.key === thread.key}
-                        checked={allChecked}
-                        // eslint-disable-next-line react-hooks/refs -- onClick handlers run outside render; the ref inside `track` is only touched on click.
-                        onClick={() => handleSelectThread(thread)}
-                        onCheck={() => {
-                          setCheckedIds((prev) => {
-                            const next = new Set(prev);
-                            if (allChecked) threadIds.forEach((id) => next.delete(id));
-                            else threadIds.forEach((id) => next.add(id));
-                            return next;
-                          });
-                        }}
-                      />
-                    );
-                  })}
+                  {intentGroups.map(({ intent, threads }) => (
+                    <div key={intent}>
+                      <div className="flex items-center justify-between gap-2 px-4 py-1 bg-[var(--color-bg-subtle)] border-b border-[var(--color-border-default)]/60">
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">{intent}</span>
+                        <span className="text-[10px] font-medium tabular-nums text-[var(--color-text-muted)]">
+                          {threads.length}
+                        </span>
+                      </div>
+                      {threads.map((thread) => {
+                        const threadIds = thread.messages.map((m) => m.id);
+                        const allChecked = threadIds.every((id) => checkedIds.has(id));
+                        return (
+                          <ThreadListItem
+                            key={thread.key}
+                            thread={thread}
+                            selected={selectedThread?.key === thread.key}
+                            checked={allChecked}
+                            // eslint-disable-next-line react-hooks/refs -- onClick handlers run outside render; the ref inside `track` is only touched on click.
+                            onClick={() => handleSelectThread(thread)}
+                            onCheck={() => {
+                              setCheckedIds((prev) => {
+                                const next = new Set(prev);
+                                if (allChecked) threadIds.forEach((id) => next.delete(id));
+                                else threadIds.forEach((id) => next.add(id));
+                                return next;
+                              });
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  ))}
                 </section>
               ))
             )}
