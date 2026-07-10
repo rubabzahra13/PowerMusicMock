@@ -64,7 +64,7 @@ export default function RecipientField({
         <input
           ref={inputRef}
           type="text"
-          value={value}
+          value={value ?? ''}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 120)}

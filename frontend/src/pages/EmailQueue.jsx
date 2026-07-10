@@ -347,13 +347,15 @@ function BulkActionChip({ icon: Icon, label, onClick, variant = 'default', disab
 export default function EmailQueue() {
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const mailboxFromUrl = searchParams.get('mailbox');
   const emailIdFromUrl = searchParams.get('emailId');
   const consumedEmailDeepLinkRef = useRef(null);
   const applyingEmailDeepLinkRef = useRef(false);
   const skipSelectionResetRef = useRef(false);
   const scrollDeepLinkRef = useRef(false);
+  const emailsRef = useRef([]);
+  const sendInFlightRef = useRef(false);
   const [emails, setEmails] = useState([]);
   const [inboxes, setInboxes] = useState([]);
   const [mailbox, setMailbox] = useState(() =>
@@ -382,6 +384,7 @@ export default function EmailQueue() {
   // Gmail-style Compose window for a brand-new message (no AI, no thread).
   const [composeOpen, setComposeOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [isSending, setIsSending] = useState(false);
 
   useEffect(() => {
     if (composerMode === 'forward') setComposerMode('reply');
@@ -518,6 +521,7 @@ export default function EmailQueue() {
   }, [sortOpen]);
 
   const selectedEmail = emails.find((e) => e.id === selectedId) ?? null;
+  emailsRef.current = emails;
   const selectedDraftPending = selectedEmail ? isDraftPending(selectedEmail) : false;
   const selectedFlaggedReplySendAllowed = useMemo(
     () => (selectedEmail
@@ -748,7 +752,7 @@ export default function EmailQueue() {
       return;
     }
     if (emailIdFromUrl) {
-      const target = emails.find((row) => row.id === emailIdFromUrl);
+      const target = emailsRef.current.find((row) => row.id === emailIdFromUrl);
       if (target) {
         if (applyingEmailDeepLinkRef.current) {
           if (!emailMatchesQueueView(target, mailbox, inboxFilter, archivedIds)) {
@@ -764,8 +768,13 @@ export default function EmailQueue() {
         }
       }
     }
-    setSelectedId(null);
-  }, [mailbox, inboxFilter, intentFilter, readFilter, search, dateFrom, dateTo, sortOrder, emailIdFromUrl, emails, archivedIds]);
+    setSelectedId((prev) => {
+      if (!prev) return null;
+      const email = emailsRef.current.find((row) => row.id === prev);
+      if (!email) return null;
+      return emailMatchesQueueView(email, mailbox, inboxFilter, archivedIds) ? prev : null;
+    });
+  }, [mailbox, inboxFilter, intentFilter, readFilter, search, dateFrom, dateTo, sortOrder, emailIdFromUrl, archivedIds]);
 
   useLayoutEffect(() => {
     if (!scrollDeepLinkRef.current || !emailIdFromUrl) return;
@@ -821,6 +830,7 @@ export default function EmailQueue() {
     const target = thread.activeReplyTarget || thread.latestMessage;
     if (!target) return;
     const isNewSelection = selectedId !== target.id;
+    clearEmailDeepLinkFromUrl();
     setSelectedId(target.id);
     setIsEditingDraft(false);
     if (isNewSelection) setComposerMode('reply');
@@ -855,6 +865,7 @@ export default function EmailQueue() {
   };
 
   const handleSelectReplyTarget = (messageId) => {
+    clearEmailDeepLinkFromUrl();
     setSelectedId(messageId);
     setIsEditingDraft(false);
     setComposerMode('reply');
@@ -1123,9 +1134,22 @@ export default function EmailQueue() {
     });
   };
 
+  const clearEmailDeepLinkFromUrl = useCallback(() => {
+    if (!searchParams.get('emailId')) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('emailId');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const getReplyAllDraft = useCallback((email) => {
     if (!email) return { to: '', cc: '' };
-    return replyAllEdits[email.id] ?? seedReplyAllRecipients(email);
+    const seeded = seedReplyAllRecipients(email);
+    const stored = replyAllEdits[email.id];
+    if (!stored) return seeded;
+    return {
+      to: stored.to ?? seeded.to ?? '',
+      cc: stored.cc ?? seeded.cc ?? '',
+    };
   }, [replyAllEdits]);
 
   const updateReplyAllDraft = (email, patch) => {
@@ -1147,16 +1171,24 @@ export default function EmailQueue() {
         [selectedEmail.id]: { to: '', cc: '', body: buildForwardDraft(selectedEmail) },
       }));
     }
-    if (mode === 'reply-all' && selectedEmail && !replyAllEdits[selectedEmail.id]) {
-      setReplyAllEdits((prev) => ({
-        ...prev,
-        [selectedEmail.id]: seedReplyAllRecipients(selectedEmail),
-      }));
+    if (mode === 'reply-all' && selectedEmail) {
+      setReplyAllEdits((prev) => {
+        const seeded = seedReplyAllRecipients(selectedEmail);
+        const existing = prev[selectedEmail.id];
+        return {
+          ...prev,
+          [selectedEmail.id]: {
+            to: existing?.to ?? seeded.to,
+            cc: existing?.cc ?? seeded.cc,
+          },
+        };
+      });
     }
   };
 
   const handleSend = async () => {
-    if (!selectedEmail) return;
+    if (!selectedEmail || sendInFlightRef.current) return;
+    if (selectedEmail.draftStatus === 'Sent') return;
     if (composerMode === 'forward') {
       await handleForwardSend();
       return;
@@ -1171,26 +1203,33 @@ export default function EmailQueue() {
       inboxTitle,
       getFirstName(getReplyRecipientName(selectedEmail)),
     );
+    if (composerMode === 'reply-all') {
+      const { to, cc } = getReplyAllDraft(selectedEmail);
+      const toList = parseRecipientList(to);
+      const ccList = parseRecipientList(cc);
+      if (toList.length === 0) {
+        showToast('Add at least one recipient in To.', 'error');
+        return;
+      }
+      const badTo = toList.find((addr) => !isValidEmail(addr));
+      if (badTo) {
+        showToast(`Invalid To address: ${badTo}`, 'error');
+        return;
+      }
+      const badCc = ccList.find((addr) => !isValidEmail(addr));
+      if (badCc) {
+        showToast(`Invalid Cc address: ${badCc}`, 'error');
+        return;
+      }
+    }
+    sendInFlightRef.current = true;
+    setIsSending(true);
     try {
       let updated;
       if (composerMode === 'reply-all') {
         const { to, cc } = getReplyAllDraft(selectedEmail);
         const toList = parseRecipientList(to);
         const ccList = parseRecipientList(cc);
-        if (toList.length === 0) {
-          showToast('Add at least one recipient in To.', 'error');
-          return;
-        }
-        const badTo = toList.find((addr) => !isValidEmail(addr));
-        if (badTo) {
-          showToast(`Invalid To address: ${badTo}`, 'error');
-          return;
-        }
-        const badCc = ccList.find((addr) => !isValidEmail(addr));
-        if (badCc) {
-          showToast(`Invalid Cc address: ${badCc}`, 'error');
-          return;
-        }
         updated = await track(sendReplyAll(selectedEmail.id, body, toList, ccList));
         const ccNote = ccList.length ? ` (Cc: ${ccList.join(', ')})` : '';
         showToast(`Reply-all sent to ${toList.join(', ')}${ccNote} via Gmail.`, 'success');
@@ -1206,12 +1245,20 @@ export default function EmailQueue() {
       setComposerMode('reply');
       setMailbox('sent');
     } catch (err) {
+      if (/already sent/i.test(err.message)) {
+        revalidate();
+        return;
+      }
       showToast(`Send failed: ${err.message}`, 'error');
+    } finally {
+      sendInFlightRef.current = false;
+      setIsSending(false);
     }
   };
 
   const handleForwardSend = async () => {
-    if (!selectedEmail) return;
+    if (!selectedEmail || sendInFlightRef.current) return;
+    if (selectedEmail.draftStatus === 'Sent') return;
     const forward = getForwardDraft(selectedEmail);
     const to = parseRecipientList(forward.to);
     const cc = parseRecipientList(forward.cc);
@@ -1236,6 +1283,8 @@ export default function EmailQueue() {
       showToast('Cannot forward to the same inbox that owns the message.', 'error');
       return;
     }
+    sendInFlightRef.current = true;
+    setIsSending(true);
     try {
       const updated = await track(sendForward(selectedEmail.id, forward.body, to, cc));
       notePendingPatches([updated.id], { draftStatus: updated.draftStatus });
@@ -1250,7 +1299,14 @@ export default function EmailQueue() {
       setComposerMode('reply');
       setMailbox('sent');
     } catch (err) {
+      if (/already sent/i.test(err.message)) {
+        revalidate();
+        return;
+      }
       showToast(`Forward failed: ${err.message}`, 'error');
+    } finally {
+      sendInFlightRef.current = false;
+      setIsSending(false);
     }
   };
 
@@ -2195,15 +2251,20 @@ export default function EmailQueue() {
                         <button
                           type="button"
                           onClick={handleSend}
-                          disabled={composerMode !== 'forward' && !selectedFlaggedReplySendAllowed}
+                          disabled={
+                            isSending
+                            || (composerMode !== 'forward' && !selectedFlaggedReplySendAllowed)
+                          }
                           className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                         >
                           <Send className="w-4 h-4" />
-                          {composerMode === 'forward'
-                            ? 'Forward'
-                            : composerMode === 'reply-all'
-                              ? 'Send reply-all'
-                              : 'Send'}
+                          {isSending
+                            ? 'Sending…'
+                            : composerMode === 'forward'
+                              ? 'Forward'
+                              : composerMode === 'reply-all'
+                                ? 'Send reply-all'
+                                : 'Send'}
                         </button>
                       </div>
                     )}

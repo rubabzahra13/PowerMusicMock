@@ -69,8 +69,6 @@ function ComparisonSideBySideModal({
 }
 
 function ExistingUserModal({ isOpen, onClose, directoryRecord, match, requestPerson }) {
-  const fields = differingFields(match);
-
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Data difference with directory" wide>
       <p className="mb-4 text-sm leading-relaxed text-[var(--color-text-secondary)]">
@@ -113,24 +111,24 @@ function ExistingUserModal({ isOpen, onClose, directoryRecord, match, requestPer
           <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
             Current request
           </p>
-          <dl className="mt-3 space-y-3">
-            {fields.map((field) => (
-              <div key={field.field}>
-                <dt className="text-[11px] font-medium text-[var(--color-text-muted)]">{field.label}</dt>
-                <dd className="mt-0.5 break-words text-sm font-semibold text-[var(--color-text-primary)]">
-                  {field.rightValue || '—'}
-                </dd>
-                <p className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
-                  Directory: {field.leftValue || '—'}
-                </p>
-              </div>
-            ))}
-          </dl>
           {requestPerson ? (
-            <p className="mt-4 text-[11px] text-[var(--color-text-muted)]">
-              Request person: {requestPerson.firstName} {requestPerson.lastName}
-            </p>
-          ) : null}
+            <dl className="mt-3 space-y-2 text-sm">
+              <div>
+                <dt className="text-[11px] text-[var(--color-text-muted)]">Name</dt>
+                <dd className="font-semibold">{requestPerson.firstName} {requestPerson.lastName}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] text-[var(--color-text-muted)]">Email</dt>
+                <dd className="font-medium break-all">{requestPerson.email || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] text-[var(--color-text-muted)]">Location</dt>
+                <dd className="font-medium">{requestPerson.location || '—'}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="mt-3 text-sm text-[var(--color-text-muted)]">Request details unavailable.</p>
+          )}
         </div>
       </div>
     </Modal>
