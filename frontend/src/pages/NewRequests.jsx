@@ -1,11 +1,10 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
-import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL } from '../components/ui';
-import RequestDetailDrawer from '../components/RequestDetailDrawer';
+import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs } from '../components/ui';
 import RequestComparison from '../components/RequestComparison';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageScrollClass } from '../utils/responsiveLayout';
@@ -29,7 +28,7 @@ import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 
 const REQUESTS_POLL_MS = 10000;
-import { TAG_ALREADY_EXISTS, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission } from '../utils/requestTags';
+import { TAG_ALREADY_EXISTS, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, directoryStatusTag } from '../utils/requestTags';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
 import { formGridClass } from '../utils/responsiveLayout';
 import {
@@ -268,6 +267,7 @@ function NewRequestsMobileList({
         const manager = getManagerColumnContent(row);
         const isAdd = row.action === 'Add';
         const sentViaTags = sentViaTableRequestTags(row.tags || []);
+        const directoryStatus = directoryStatusTag(row);
 
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
@@ -284,6 +284,12 @@ function NewRequestsMobileList({
                         {formatRequestDisplayId(row.displayId)}
                       </span>
                       <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={row.action} compact />
+                      <Tag
+                        variant={directoryStatus.variant}
+                        label={directoryStatus.label}
+                        prefix={directoryStatus.prefix}
+                        compact
+                      />
                       {sentViaTags.map((tag) => (
                         <Tag key={tag} variant={requestTagVariant(tag)} label={requestTagLabel(tag)} compact />
                       ))}
@@ -345,6 +351,7 @@ function NewRequestsMobileList({
                   directory={directory}
                   requestPerson={row.person}
                   variant="table"
+                  onViewDetails={() => onOpenRequest(row)}
                 />
               </div>
 
@@ -415,8 +422,9 @@ const emptyManagerForm = () => ({
 export default function Requests() {
   const { showToast } = useToast();
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkRequestId = searchParams.get('id');
   const consumedDeepLinkRef = useRef(null);
   const adminDisplayName = profile?.full_name?.trim() || 'Power Music Admin';
@@ -440,7 +448,7 @@ export default function Requests() {
   const handleOpenRequest = (row) => {
     markRequestViewed(row.id);
     bumpHighlights();
-    setSelectedNewRequest(row);
+    navigate(`/new-requests/${encodeURIComponent(row.id)}`);
   };
 
   useEffect(() => {
@@ -449,13 +457,12 @@ export default function Requests() {
   }, [location.key]);
 
   useEffect(() => {
-    if (!deepLinkRequestId || !newRequests.length) return;
+    if (!deepLinkRequestId) return;
     if (consumedDeepLinkRef.current === deepLinkRequestId) return;
-    const row = newRequests.find((request) => request.id === deepLinkRequestId);
-    if (!row) return;
     consumedDeepLinkRef.current = deepLinkRequestId;
-    handleOpenRequest(row);
-  }, [deepLinkRequestId, newRequests]);
+    setSearchParams({}, { replace: true });
+    navigate(`/new-requests/${encodeURIComponent(deepLinkRequestId)}`, { replace: true });
+  }, [deepLinkRequestId, navigate, setSearchParams]);
 
   const applyRequestsPage = useCallback((data, isStale) => {
     if (Array.isArray(data.requests)) {
@@ -526,7 +533,6 @@ export default function Requests() {
   const [filterOpen, setFilterOpen] = useState(true);
 
   // ── Drawer / Modal states ──
-  const [selectedNewRequest, setSelectedNewRequest] = useState(null);
   const [confirmActionRequest, setConfirmActionRequest] = useState(null);
   const [showAddManualModal, setShowAddManualModal] = useState(false);
 
@@ -783,7 +789,6 @@ export default function Requests() {
     const handledAt = new Date().toISOString();
 
     setConfirmActionRequest(null);
-    setSelectedNewRequest(null);
     removeRequestHighlight(req.id);
     bumpHighlights();
 
@@ -894,6 +899,25 @@ export default function Requests() {
       render: (val) => <Tag variant={val === 'Add' ? 'add-action' : 'remove-action'} label={val} />
     },
     {
+      key: 'status',
+      label: 'Status',
+      width: '110px',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle whitespace-nowrap text-center px-1',
+      render: (_, row) => {
+        const status = directoryStatusTag(row);
+        return (
+          <Tag
+            variant={status.variant}
+            label={status.label}
+            prefix={status.prefix}
+            compact
+          />
+        );
+      },
+    },
+    {
       key: 'person',
       label: 'Person',
       width: '17%',
@@ -976,7 +1000,7 @@ export default function Requests() {
       label: 'Needs review',
       width: '22%',
       headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left px-2 py-1.5',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-center px-2 py-1.5',
       render: (_, row) => (
         <RequestComparison
           intakeMatch={row.intakeMatch}
@@ -984,6 +1008,7 @@ export default function Requests() {
           directory={liveDirectory}
           requestPerson={row.person}
           variant="table"
+          onViewDetails={() => handleOpenRequest(row)}
         />
       )
     },
@@ -1053,32 +1078,15 @@ export default function Requests() {
           </button>
         }
         footer={
-            <div className="flex max-w-full w-full items-center overflow-x-auto bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] sm:w-fit">
-            {[
+          <CountTabs
+            value={actionTab}
+            onChange={handleActionTabSwitch}
+            tabs={[
               { key: 'All', label: 'All', count: allCount },
               { key: 'Add', label: 'Add', count: addCount },
-              { key: 'Remove', label: 'Remove', count: removeCount }
-            ].map(({ key, label, count }) => (
-              <button
-                key={key}
-                onClick={() => handleActionTabSwitch(key)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
-                  actionTab === key
-                    ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] shadow-sm'
-                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                }`}
-              >
-                {label}
-                <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                  actionTab === key
-                    ? 'bg-[var(--color-brand-primary)] text-white'
-                    : 'bg-[var(--color-surface-highlight)] text-[var(--color-text-secondary)]'
-                }`}>
-                  {count}
-                </span>
-              </button>
-            ))}
-            </div>
+              { key: 'Remove', label: 'Remove', count: removeCount },
+            ]}
+          />
         }
       />
 
@@ -1349,11 +1357,10 @@ export default function Requests() {
         </form>
       </Modal>
 
-      {/* ── Confirm action modal (list + drawer) ── */}
+      {/* ── Confirm action modal ── */}
       <Modal
         isOpen={confirmActionRequest !== null}
         onClose={() => setConfirmActionRequest(null)}
-        belowDrawer={selectedNewRequest !== null}
         confirm
         title="Confirm action"
         footer={
@@ -1392,15 +1399,6 @@ export default function Requests() {
           </p>
         )}
       </Modal>
-
-      {/* ── New Request Detail Drawer ── */}
-      <RequestDetailDrawer
-        request={selectedNewRequest}
-        isOpen={selectedNewRequest !== null}
-        onClose={() => setSelectedNewRequest(null)}
-        directory={liveDirectory}
-        onConfirmAction={(req, adminNote) => setConfirmActionRequest({ request: req, adminNote: adminNote || '' })}
-      />
 
     </div>
   );

@@ -1,7 +1,7 @@
 import { isAwaitingManagerSubmission } from './requestTags';
 
 export const AWAITING_MANAGER_LABEL = 'Awaiting partner request';
-export const AWAITING_MANAGER_HINT = 'PureGym notification only';
+export const AWAITING_MANAGER_HINT = 'Automated notification only';
 
 export const isManualEntry = (submittedBy) => submittedBy?.club === 'Manual entry';
 

@@ -48,6 +48,17 @@ from app.manager_request_stats import (
     increment_manager_request_stats,
 )
 from app.partner_requests_realtime import notify_admin_requests_changed
+from app.dashboard_insights import build_dashboard_insights
+from app.partner_allowlists import (
+    assert_manager_email_allowed,
+    create_automated_source,
+    create_manager_domain,
+    delete_automated_source,
+    delete_manager_domain,
+    list_automated_sources,
+    list_manager_domain_strings,
+    list_manager_domains,
+)
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
     TAG_AUTO_MAIL,
@@ -245,14 +256,15 @@ def get_dashboard(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         .all()
     )
     hydrate_request_display(pending)
-    users = len(roster_snapshot_rows(db, limit=10_000))
+    insights = build_dashboard_insights(db, pending=pending)
     return {
         "kpis": {
             "pendingRequests": len(pending),
-            "usersInLedger": users,
+            "usersInLedger": insights["usersAdded"],
         },
         "pendingRequests": requests_to_api_dicts(db, pending),
-        "activity": list_partner_activity(db, limit=10),
+        "activity": list_partner_activity(db, limit=8),
+        "insights": insights,
     }
 
 @router.get("/api/activity", response_model=List[schemas.ActivityOut])
@@ -260,13 +272,14 @@ def get_activity(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     return list_partner_activity(db, limit=10)
 
 
-def _assert_manager_submitter(submitted_by: schemas.SubmittedBy, manager) -> None:
+def _assert_manager_submitter(submitted_by: schemas.SubmittedBy, manager, db: Session) -> None:
     sub_email = (submitted_by.email or "").strip()
     if auth_is_required() and sub_email.lower() != manager.email.lower():
         raise HTTPException(
             status_code=403,
             detail="Submitter email must match your signed-in account.",
         )
+    assert_manager_email_allowed(db, sub_email or manager.email)
 
 
 def _manager_id_for_submitter(
@@ -306,7 +319,7 @@ def create_request(
     db: Session = Depends(get_db),
     manager=Depends(_limit_submit),
 ):
-    _assert_manager_submitter(req_in.submittedBy, manager)
+    _assert_manager_submitter(req_in.submittedBy, manager, db)
 
     new_request = _create_manager_request_row(
         db,
@@ -336,7 +349,7 @@ def create_requests_batch(
     db: Session = Depends(get_db),
     manager=Depends(_limit_submit),
 ):
-    _assert_manager_submitter(req_in.submittedBy, manager)
+    _assert_manager_submitter(req_in.submittedBy, manager, db)
 
     job = enqueue_manager_batch(db, manager_id=manager.id, req_in=req_in)
     invalidate_manager_request_summary(manager.id)
@@ -714,3 +727,64 @@ def search_persons_for_manager(
     capped = min(max(limit, 1), 25)
     people = _search_people(db, query, limit=capped)
     return [_person_search_row(person) for person in people]
+
+
+# ── Partner allowlists (manager domains + automated roster sources) ──
+
+
+@router.get("/api/manager/allowed-domains", response_model=schemas.ManagerAllowedDomainsPublicOut)
+def public_manager_allowed_domains(db: Session = Depends(get_db)):
+    """Public list used by the manager signup / login UI."""
+    return {"domains": list_manager_domain_strings(db)}
+
+
+@router.get("/api/admin/manager-domains", response_model=List[schemas.ManagerAllowedDomainOut])
+def admin_list_manager_domains(
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return list_manager_domains(db)
+
+
+@router.post("/api/admin/manager-domains", response_model=schemas.ManagerAllowedDomainOut)
+def admin_create_manager_domain(
+    payload: schemas.ManagerAllowedDomainCreateIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return create_manager_domain(db, payload.domain)
+
+
+@router.delete("/api/admin/manager-domains/{domain_id}")
+def admin_delete_manager_domain(
+    domain_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return {"deleted": delete_manager_domain(db, domain_id)}
+
+
+@router.get("/api/admin/automated-sources", response_model=List[schemas.AutomatedRosterSourceOut])
+def admin_list_automated_sources(
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return list_automated_sources(db)
+
+
+@router.post("/api/admin/automated-sources", response_model=schemas.AutomatedRosterSourceOut)
+def admin_create_automated_source(
+    payload: schemas.AutomatedRosterSourceCreateIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return create_automated_source(db, payload.pattern)
+
+
+@router.delete("/api/admin/automated-sources/{source_id}")
+def admin_delete_automated_source(
+    source_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return {"deleted": delete_automated_source(db, source_id)}

@@ -42,7 +42,7 @@ export function ManagerAuthLoading() {
   );
 }
 
-export default function ManagerAuthShell({ children, wide = false, footnote = 'PureGym managers only.' }) {
+export default function ManagerAuthShell({ children, wide = false, footnote = 'Partner managers only.' }) {
   useAuthPageCanvas();
 
   return (
@@ -64,7 +64,7 @@ export default function ManagerAuthShell({ children, wide = false, footnote = 'P
                 Power Music Ops
               </h1>
               <p className="mt-1 text-xs text-[var(--color-text-secondary)] sm:text-sm">
-                Request adding or removing PureGym users
+                Request adding or removing partner users
               </p>
             </div>
 

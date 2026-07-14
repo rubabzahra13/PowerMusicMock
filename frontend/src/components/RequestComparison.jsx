@@ -1,183 +1,158 @@
-import { useMemo, useState } from 'react';
-import Modal from './ui/Modal';
-import Tag from './ui/Tag';
+import { useMemo } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { formatAdminDate } from '../utils/requestDisplayId';
 import {
-  differingFields,
-  getMatchStatusLabel,
-  hasDiffs,
+  hasAnyDataDiffs,
+  hasComparisonContext,
 } from '../utils/requestComparison';
-import { directoryReviewTag, intakeMismatchReviewTag } from '../utils/requestTags';
 
-function getDirectoryStatus(record) {
-  const status = record?.status;
-  if (status === 'Added' || status === 'Removed') return status;
-  return 'In directory';
-}
+const norm = (value) => (value || '').trim().toLowerCase();
 
-function ComparisonSideBySideModal({
-  isOpen,
-  onClose,
-  title,
-  description,
-  leftTitle,
-  rightTitle,
-  match,
-}) {
-  const fields = differingFields(match);
+const FIELD_ROWS = [
+  { key: 'name', label: 'Name' },
+  { key: 'email', label: 'Email', mono: true },
+  { key: 'location', label: 'Location' },
+];
+
+/**
+ * One matrix: fields as rows, sources as columns.
+ * The "This request" column is the anchor; cells that differ from it are highlighted.
+ */
+function ComparisonMatrix({ sources, embedded = false }) {
+  const rows = FIELD_ROWS.filter(({ key }) =>
+    sources.some((source) => source.values[key]),
+  );
+
+  const anchor = sources[0];
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={title} wide>
-      <div className="space-y-5">
-        {description ? (
-          <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">{description}</p>
-        ) : null}
+    <div
+      className={
+        embedded
+          ? 'overflow-hidden bg-white'
+          : 'overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white'
+      }
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[40rem] border-collapse text-sm">
+          <caption className="sr-only">
+            Person details from each source. Highlighted values differ from this request.
+          </caption>
+          <thead>
+            <tr className="border-b border-[var(--color-border-default)] bg-white">
+              <th
+                scope="col"
+                className="sticky left-0 z-[1] w-28 bg-white px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
+              >
+                Field
+              </th>
+              {sources.map((source) => (
+                <th
+                  key={source.key}
+                  scope="col"
+                  className="bg-white px-4 py-3 text-left align-top"
+                >
+                  <span className="block text-[13px] font-semibold text-[var(--color-text-primary)]">
+                    {source.title}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] font-normal normal-case text-[var(--color-text-secondary)]">
+                    {source.caption}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--color-border-default)]">
+            {rows.map(({ key, label, mono }) => {
+              const presentValues = sources
+                .map((s) => s.values[key])
+                .filter((v) => (v || '').trim() !== '');
+              const conflict =
+                presentValues.length > 1 &&
+                new Set(presentValues.map(norm)).size > 1;
 
-        <div className="space-y-3">
-          {fields.map((field) => (
-            <article
-              key={field.field}
-              className="overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
-            >
-              <header className="border-b border-[var(--color-border-default)]/70 bg-[var(--color-surface-panel)]/50 px-4 py-2.5">
-                <p className="text-xs font-semibold text-[var(--color-text-primary)]">{field.label}</p>
-              </header>
-              <div className="grid grid-cols-1 sm:grid-cols-2 sm:divide-x divide-[var(--color-border-default)]/70">
-                <div className="px-4 py-3.5">
-                  <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
-                    {leftTitle}
-                  </p>
-                  <p className="break-words text-sm font-medium leading-relaxed text-[var(--color-text-primary)]">
-                    {field.leftValue || '—'}
-                  </p>
-                </div>
-                <div className="border-t border-[var(--color-border-default)]/70 bg-[var(--color-tag-review-mismatch-bg)]/20 px-4 py-3.5 sm:border-t-0">
-                  <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-tag-review-mismatch-text)]">
-                    {rightTitle}
-                  </p>
-                  <p className="break-words text-sm font-semibold leading-relaxed text-[var(--color-text-primary)]">
-                    {field.rightValue || '—'}
-                  </p>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
+              return (
+                <tr key={key}>
+                  <th
+                    scope="row"
+                    className="sticky left-0 z-[1] bg-white px-4 py-3.5 text-left align-top text-sm font-medium text-[var(--color-text-secondary)]"
+                  >
+                    {label}
+                    {conflict ? (
+                      <span className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-[#92400e]">
+                        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                        Conflict
+                      </span>
+                    ) : null}
+                  </th>
+                  {sources.map((source, i) => {
+                    const value = source.values[key];
+                    const differs =
+                      conflict &&
+                      i !== 0 &&
+                      (value || '').trim() !== '' &&
+                      norm(value) !== norm(anchor.values[key]);
+
+                    return (
+                      <td
+                        key={`${source.key}-${key}`}
+                        className={`px-4 py-3.5 align-top ${
+                          differs ? 'bg-[#fef3c7]' : 'bg-white'
+                        }`}
+                      >
+                        <span
+                          className={`break-words ${
+                            mono ? 'font-mono text-[13px]' : ''
+                          } ${
+                            differs
+                              ? 'font-semibold text-[#92400e]'
+                              : 'font-medium text-[var(--color-text-primary)]'
+                          }`}
+                        >
+                          {value || <span className="text-[var(--color-text-muted)]">—</span>}
+                          {differs ? (
+                            <span className="sr-only"> (differs from this request)</span>
+                          ) : null}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
-    </Modal>
+    </div>
   );
 }
 
-function ExistingUserModal({ isOpen, onClose, directoryRecord, match, requestPerson }) {
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Data difference with directory" wide>
-      <p className="mb-4 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-        View details of the difference in data between the directory record and this request.
-      </p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/70 p-4">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
-            Existing user
-          </p>
-          {directoryRecord ? (
-            <dl className="mt-3 space-y-2 text-sm">
-              <div>
-                <dt className="text-[11px] text-[var(--color-text-muted)]">Name</dt>
-                <dd className="font-semibold">{directoryRecord.firstName} {directoryRecord.lastName}</dd>
-              </div>
-              <div>
-                <dt className="text-[11px] text-[var(--color-text-muted)]">Email</dt>
-                <dd className="font-medium break-all">{directoryRecord.email}</dd>
-              </div>
-              <div>
-                <dt className="text-[11px] text-[var(--color-text-muted)]">Location</dt>
-                <dd className="font-medium">{directoryRecord.location || '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-[11px] text-[var(--color-text-muted)]">Status</dt>
-                <dd className="font-medium">{getDirectoryStatus(directoryRecord)}</dd>
-              </div>
-              <div>
-                <dt className="text-[11px] text-[var(--color-text-muted)]">Handled</dt>
-                <dd className="font-medium">{formatAdminDate(directoryRecord.dateAdded)}</dd>
-              </div>
-            </dl>
-          ) : (
-            <p className="mt-3 text-sm text-[var(--color-text-muted)]">Directory record unavailable.</p>
-          )}
-        </div>
+function TableReviewCell({ hasDiffs: showYes, onViewDetails }) {
+  if (!showYes) {
+    return (
+      <span className="block text-center text-xs font-medium text-[var(--color-text-muted)]">No</span>
+    );
+  }
 
-        <div className="rounded-xl border border-[var(--color-border-default)] bg-white p-4">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
-            Current request
-          </p>
-          {requestPerson ? (
-            <dl className="mt-3 space-y-2 text-sm">
-              <div>
-                <dt className="text-[11px] text-[var(--color-text-muted)]">Name</dt>
-                <dd className="font-semibold">{requestPerson.firstName} {requestPerson.lastName}</dd>
-              </div>
-              <div>
-                <dt className="text-[11px] text-[var(--color-text-muted)]">Email</dt>
-                <dd className="font-medium break-all">{requestPerson.email || '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-[11px] text-[var(--color-text-muted)]">Location</dt>
-                <dd className="font-medium">{requestPerson.location || '—'}</dd>
-              </div>
-            </dl>
-          ) : (
-            <p className="mt-3 text-sm text-[var(--color-text-muted)]">Request details unavailable.</p>
-          )}
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function ComparisonRow({ titleTag, status, hasDiffs: showDiffDetails, onAction, actionLabel, compact }) {
-  const statusClass = compact ? 'text-[10px] leading-tight' : 'text-[11px] leading-tight';
-
-  const body = (
-    <span className="block min-w-0">
-      <span className="block">
-        <Tag variant={titleTag.variant} label={titleTag.label} prefix={titleTag.prefix} compact={titleTag.compact ?? compact} />
-      </span>
-      {showDiffDetails && status ? (
-        <span
-          className={`mt-0.5 block whitespace-normal break-words text-[var(--color-text-secondary)] ${statusClass}`}
-        >
-          {status}
-        </span>
-      ) : null}
-    </span>
-  );
-
-  if (showDiffDetails) {
+  if (onViewDetails) {
     return (
       <button
         type="button"
-        onClick={onAction}
-        aria-label={actionLabel}
-        className="block w-full min-w-0 rounded-md px-0.5 py-0.5 text-left hover:bg-[var(--color-surface-panel)]/80"
+        onClick={(event) => {
+          event.stopPropagation();
+          onViewDetails();
+        }}
+        className="mx-auto block text-center text-xs font-semibold text-[var(--color-brand-secondary)] hover:underline"
       >
-        {body}
+        Yes · View details
       </button>
     );
   }
 
-  return <div className="min-w-0 px-0.5 py-0.5">{body}</div>;
-}
-
-function ComparisonStack({ children, compact, className }) {
   return (
-    <div
-      className={`${compact ? 'space-y-0.5' : 'space-y-1.5'} min-w-0 ${className}`.trim()}
-      onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
-    >
-      {children}
-    </div>
+    <span className="block text-center text-xs font-semibold text-[var(--color-text-primary)]">
+      Yes · View details
+    </span>
   );
 }
 
@@ -187,88 +162,98 @@ export default function RequestComparison({
   directory = [],
   requestPerson,
   variant = 'table',
+  onViewDetails,
   className = '',
+  embedded = false,
 }) {
-  const [intakeOpen, setIntakeOpen] = useState(false);
-  const [directoryOpen, setDirectoryOpen] = useState(false);
-  const compact = variant === 'table';
-
   const directoryRecord = useMemo(
     () => directory.find((record) => record.id === directoryMatch?.directoryId) || null,
     [directory, directoryMatch?.directoryId],
   );
 
-  const intakeHasDiffs = Boolean(intakeMatch && hasDiffs(intakeMatch));
-  const directoryHasDiffs = Boolean(directoryMatch && hasDiffs(directoryMatch));
+  const anyDiffs = hasAnyDataDiffs(intakeMatch, directoryMatch);
+  const hasContext = hasComparisonContext(intakeMatch, directoryMatch);
 
-  const rows = [
-    directoryMatch
+  if (variant === 'table') {
+    return (
+      <div
+        className={`flex min-w-0 justify-center ${className}`.trim()}
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <TableReviewCell hasDiffs={anyDiffs} onViewDetails={onViewDetails} />
+      </div>
+    );
+  }
+
+  if (!hasContext) return null;
+
+  const intakeField = (field, side) =>
+    intakeMatch?.fields?.find((f) => f.field === field)?.[side] || '';
+
+  const sources = [
+    requestPerson
       ? {
-          key: 'directory',
-          titleTag: directoryReviewTag(directoryRecord, compact),
-          status: getMatchStatusLabel(directoryMatch, !directoryHasDiffs, 'directory'),
-          match: directoryMatch,
-          hasDiffs: directoryHasDiffs,
-          actionLabel: 'View details of data difference between directory record and this request',
-          onAction: () => setDirectoryOpen(true),
+          key: 'request',
+          title: 'This request',
+          caption: 'Being reviewed',
+          values: {
+            name: `${requestPerson.firstName || ''} ${requestPerson.lastName || ''}`.trim(),
+            email: requestPerson.email,
+            location: requestPerson.location,
+          },
         }
       : null,
-    intakeHasDiffs
+    intakeMatch?.fields?.length
       ? {
-          key: 'email',
-          titleTag: intakeMismatchReviewTag(compact),
-          status: getMatchStatusLabel(intakeMatch, false, 'intake'),
-          match: intakeMatch,
-          hasDiffs: true,
-          actionLabel: 'View details of data difference between manager request and Auto Mail',
-          onAction: () => setIntakeOpen(true),
+          key: 'partner',
+          title: 'Manager form',
+          caption: 'Entered by manager',
+          values: {
+            name: intakeField('name', 'leftValue'),
+            email: intakeField('email', 'leftValue'),
+            location: intakeField('location', 'leftValue'),
+          },
+        }
+      : null,
+    intakeMatch?.fields?.length
+      ? {
+          key: 'auto',
+          title: 'Automated email',
+          caption: 'From roster email',
+          values: {
+            name: intakeField('name', 'rightValue'),
+            email: intakeField('email', 'rightValue'),
+            location: intakeField('location', 'rightValue'),
+          },
+        }
+      : null,
+    directoryRecord || directoryMatch
+      ? {
+          key: 'directory',
+          title: 'Directory',
+          caption: directoryRecord?.dateAdded
+            ? `Added ${formatAdminDate(directoryRecord.dateAdded)}`
+            : 'Existing record',
+          values: directoryRecord
+            ? {
+                name: `${directoryRecord.firstName || ''} ${directoryRecord.lastName || ''}`.trim(),
+                email: directoryRecord.email,
+                location: directoryRecord.location,
+              }
+            : {
+                name: directoryMatch?.directoryName || '',
+                email: directoryMatch?.fields?.find((f) => f.field === 'email')?.rightValue || '',
+                location:
+                  directoryMatch?.fields?.find((f) => f.field === 'location')?.rightValue || '',
+              },
         }
       : null,
   ].filter(Boolean);
 
-  if (rows.length === 0) {
-    return compact ? (
-      <span className={`text-[11px] text-[var(--color-text-muted)] ${className}`.trim()}>No review needed.</span>
-    ) : null;
-  }
-
   return (
-    <>
-      <ComparisonStack compact={compact} className={className}>
-        {rows.map((row) => (
-          <ComparisonRow
-            key={row.key}
-            titleTag={row.titleTag}
-            status={row.status}
-            hasDiffs={row.hasDiffs}
-            actionLabel={row.actionLabel}
-            onAction={row.onAction}
-            compact={compact}
-          />
-        ))}
-      </ComparisonStack>
-
-      {intakeHasDiffs ? (
-        <ComparisonSideBySideModal
-          isOpen={intakeOpen}
-          onClose={() => setIntakeOpen(false)}
-          title="Data difference between requests"
-          description="View how the manager request and Auto Mail data differ."
-          leftTitle="Manager request"
-          rightTitle="Auto Mail data"
-          match={intakeMatch}
-        />
-      ) : null}
-
-      {directoryHasDiffs ? (
-        <ExistingUserModal
-          isOpen={directoryOpen}
-          onClose={() => setDirectoryOpen(false)}
-          directoryRecord={directoryRecord}
-          match={directoryMatch}
-          requestPerson={requestPerson}
-        />
-      ) : null}
-    </>
+    <div className={className}>
+      <ComparisonMatrix sources={sources} embedded={embedded} />
+    </div>
   );
 }

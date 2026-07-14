@@ -8,6 +8,8 @@ export default {
     extend: {
       colors: {
         'brand-primary': 'var(--color-brand-primary)',
+        'brand-secondary': 'var(--color-brand-secondary)',
+        'brand-secondary-muted': 'var(--color-brand-secondary-muted)',
         'brand-accent': 'var(--color-brand-accent)',
         'surface-bg': 'var(--color-surface-bg)',
         'surface-card': 'var(--color-surface-card)',

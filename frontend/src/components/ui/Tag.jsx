@@ -21,6 +21,11 @@ export default function Tag({ variant, label, compact = false, prefix: prefixOve
       extraClass = 'ring-1 ring-inset ring-[var(--color-tag-review-exists-border)]';
       if (prefixOverride == null) prefix = '⚠ ';
       break;
+    case 'new-person':
+      bgClass = 'bg-[var(--color-tag-added-bg)]';
+      textClass = 'text-[var(--color-tag-added-text)]';
+      extraClass = 'ring-1 ring-inset ring-[var(--color-tag-added-text)]/20';
+      break;
     case 'add-action':
       bgClass = 'bg-[var(--color-tag-add-action-bg)]';
       textClass = 'text-[var(--color-tag-add-action-text)]';

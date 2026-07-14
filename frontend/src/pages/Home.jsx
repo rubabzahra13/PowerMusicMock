@@ -1,364 +1,397 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { format, isToday, isYesterday, parseISO } from 'date-fns';
 import {
   AlertTriangle,
   ArrowRight,
-  CheckCircle,
-  Clock,
-  FileText,
-  Flag,
+  CheckCircle2,
   Inbox,
   Mail,
   UserMinus,
   UserPlus,
-  Users
+  Users,
 } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
-import { loadWithCache, refreshCache, getDashboard, getPilot2Overview, getPilot2Workspace, getTemplatesForConnectedInboxes } from '../utils/pilot2Api';
-import { countInboxTabAcrossConnectedInboxes, countFlaggedAcrossConnectedInboxes, buildFlaggedDashboardAlerts, buildTemplateDashboardActivities } from '../utils/emailMailboxCounts';
-import DottedScroll from '../components/ui/DottedScroll';
-import { PanelListSkeleton, ActivitySkeleton } from '../components/ui';
-
-const PANEL_VISIBLE_ITEMS = 3;
-const ALERT_LIST_SCROLL_CLASS = 'overflow-visible xl:max-h-[15.5rem] xl:overflow-y-auto xl:scrollbar-hide xl:pr-5';
-const ACTIVITY_LIST_SCROLL_CLASS = 'overflow-visible xl:max-h-[12.75rem] xl:overflow-y-auto xl:scrollbar-hide xl:pr-5';
+import { loadWithCache, getDashboard } from '../utils/pilot2Api';
+import { PanelListSkeleton } from '../components/ui';
 import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
 
-const CUSTOMER_ACTIVITY_TYPES = new Set(['template_created', 'template_updated']);
-const HANDLED_ACTIVITY_TYPES = new Set(['marked_added', 'marked_removed']);
-
-const PANEL = 'bg-white border border-[var(--color-border-default)]';
-
-function readPmSessionCache(key) {
-  try {
-    const cached = sessionStorage.getItem(`pm_cache_${key}`);
-    if (!cached) return null;
-    return JSON.parse(cached);
-  } catch {
-    return null;
-  }
-}
-
-function readCachedTemplatesForInboxes(inboxes) {
-  const connected = (inboxes ?? []).filter((inbox) => inbox.status === 'Connected');
-  const byId = new Map();
-  for (const inbox of connected) {
-    const batch = readPmSessionCache(`templates_${inbox.email}`);
-    if (!Array.isArray(batch)) continue;
-    for (const row of batch) byId.set(row.id, row);
-  }
-  return [...byId.values()];
-}
-
-function applyDashboardTemplateActivities(inboxes, setLiveCustomerActivity) {
-  const cached = readCachedTemplatesForInboxes(inboxes);
-  if (cached.length > 0) {
-    setLiveCustomerActivity(buildTemplateDashboardActivities(cached, inboxes));
-    return true;
-  }
-  return false;
-}
-
-const COLUMN_THEMES = {
-  customer: {
-    shell: 'bg-white border-[var(--color-border-default)]',
-    panelHeader: 'bg-[#edf4fc] border-[#c5daf3]',
-    panelTitle: 'text-[var(--color-text-primary)]',
-    panelSubtitle: 'text-[var(--color-text-secondary)]',
-    panelIconWell: 'bg-[var(--color-surface-highlight)]',
-    panelIconColor: 'text-[var(--color-text-muted)]',
-    kpiIconWell: 'bg-[var(--color-surface-highlight)]',
-    kpiIconColor: 'text-[var(--color-text-muted)]',
-    iconWell: 'bg-[var(--color-surface-highlight)]',
-    iconColor: 'text-[var(--color-text-muted)]',
-    badge: 'bg-[var(--color-brand-accent)]',
-    kpiValueHover: 'group-hover:text-[#4a7eb8]',
-    kpiCardHover: 'hover:border-[#c5daf3] hover:bg-[#f5f9fd]',
-    alertCardHover: 'hover:border-[#c5daf3] hover:bg-[#f5f9fd]',
-    activityHover: 'group-hover:bg-[#f5f9fd]',
-    alertBorder: {
-      critical: 'border-l-[#4a7eb8]',
-      warning: 'border-l-[#8bb8e0]'
-    }
-  },
-  partner: {
-    shell: 'bg-white border-[#9fc0e3]',
-    panelHeader: 'bg-[var(--color-surface-sidebar)] border-white/10',
-    panelTitle: 'text-white',
-    panelSubtitle: 'text-white/65',
-    panelIconWell: 'bg-white/10',
-    panelIconColor: 'text-white',
-    kpiIconWell: 'bg-[var(--color-surface-highlight)]',
-    iconWell: 'bg-[#b8d4f0]',
-    iconColor: 'text-[#1e558f]',
-    badge: 'bg-[var(--color-brand-accent)]',
-    kpiValueHover: 'group-hover:text-[#1e558f]',
-    kpiCardHover: 'hover:border-[#9fc0e3] hover:bg-[#edf4fc]',
-    alertCardHover: 'hover:border-[#9fc0e3] hover:bg-[#edf4fc]',
-    activityHover: 'group-hover:bg-[#edf4fc]',
-    alertBorder: {
-      critical: 'border-l-[#1e558f]',
-      warning: 'border-l-[#2f5f94]'
-    }
-  }
+const CHART = {
+  pink: '#e94560',
+  pinkSoft: 'rgba(233, 69, 96, 0.18)',
+  blue: '#3b6ea5',
+  blueSoft: 'rgba(59, 110, 165, 0.18)',
+  grey: '#9ca3af',
+  greySoft: 'rgba(156, 163, 175, 0.22)',
+  track: '#e8eaef',
 };
 
-function getActivityMeta(type) {
-  const icons = {
-    request_submitted: Inbox,
-    tag_applied: AlertTriangle,
-    marked_removed: UserMinus,
-    marked_added: UserPlus,
-    template_updated: FileText,
-    template_created: FileText,
-    default: Clock
-  };
+const EMPTY_INSIGHTS = {
+  pendingAdd: 0,
+  pendingRemove: 0,
+  awaitingPartner: 0,
+  duplicates: 0,
+  autoMail: 0,
+  partnerReq: 0,
+  usersAdded: 0,
+  usersRemoved: 0,
+  handledThisWeek: 0,
+  receivedThisWeek: 0,
+  weeklyTrend: [],
+};
 
-  return { icon: icons[type] || icons.default };
+function formatActivityDate(isoString) {
+  try {
+    const date = parseISO(isoString);
+    if (isToday(date)) return `Today, ${format(date, 'HH:mm')}`;
+    if (isYesterday(date)) return `Yesterday, ${format(date, 'HH:mm')}`;
+    return format(date, 'dd MMM, HH:mm');
+  } catch {
+    return isoString;
+  }
 }
 
-function KpiCard({ label, value, hint, icon: Icon, onClick, theme }) {
+function InsightCard({ label, value, hint, icon: Icon, accent, onClick }) {
+  const accents = {
+    pink: { well: 'bg-[var(--color-brand-accent)]/10', icon: 'text-[var(--color-brand-accent)]' },
+    blue: { well: 'bg-[#3b6ea5]/10', icon: 'text-[#3b6ea5]' },
+    grey: { well: 'bg-[var(--color-surface-highlight)]', icon: 'text-[var(--color-text-secondary)]' },
+  };
+  const tone = accents[accent] || accents.grey;
   const Tag = onClick ? 'button' : 'div';
 
   return (
     <Tag
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`${PANEL} rounded-xl p-3.5 flex items-center justify-between shadow-sm w-full text-left transition-colors ${
-        onClick ? `cursor-pointer group ${theme.kpiCardHover}` : ''
+      className={`h-full rounded-2xl border border-[var(--color-border-default)] bg-white p-3.5 text-left shadow-sm transition-colors sm:p-4 ${
+        onClick ? 'cursor-pointer hover:border-[#c5daf3] hover:bg-[#f7fafc]' : ''
       }`}
     >
-      <div>
-        <h3 className="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">{label}</h3>
-        <p className={`text-xl font-bold text-[var(--color-text-primary)] mt-0.5 tabular-nums ${
-          onClick ? `${theme.kpiValueHover} transition-colors` : ''
-        }`}>
-          {value}
-        </p>
-        {hint && (
-          <p className="text-[10px] font-medium text-[var(--color-text-muted)] mt-0.5">{hint}</p>
-        )}
-      </div>
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${theme.kpiIconWell || theme.iconWell}`}>
-        <Icon className={`w-5 h-5 ${theme.kpiIconColor || theme.iconColor}`} />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+            {label}
+          </p>
+          <p className="mt-1 text-xl font-bold tabular-nums text-[var(--color-text-primary)] sm:text-2xl">
+            {value}
+          </p>
+          {hint && (
+            <p className="mt-0.5 text-xs text-[var(--color-text-secondary)] leading-snug">{hint}</p>
+          )}
+        </div>
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${tone.well}`}>
+          <Icon className={`h-4 w-4 ${tone.icon}`} aria-hidden="true" />
+        </div>
       </div>
     </Tag>
   );
 }
 
-function groupByPartition(items) {
-  const groups = [];
-  for (const item of items) {
-    const label = item.partitionLabel || null;
-    const last = groups[groups.length - 1];
-    if (last && last.label === label) {
-      last.items.push(item);
-    } else {
-      groups.push({ label, items: [item] });
-    }
+function ChartCard({ title, subtitle, legend, children, className = '' }) {
+  return (
+    <section
+      className={`flex h-full min-h-0 flex-col rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm ${className}`}
+    >
+      <div className="mb-4 shrink-0 space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="min-w-0 text-sm font-bold text-[var(--color-text-primary)]">{title}</h2>
+          {legend ? <div className="shrink-0">{legend}</div> : null}
+        </div>
+        {subtitle ? (
+          <p className="text-xs leading-snug text-[var(--color-text-secondary)]">{subtitle}</p>
+        ) : null}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+    </section>
+  );
+}
+
+function PanelHeader({ title, subtitle, action }) {
+  return (
+    <div className="mb-3 flex shrink-0 items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h2 className="text-sm font-bold text-[var(--color-text-primary)]">{title}</h2>
+        {subtitle ? (
+          <p className="mt-0.5 text-xs leading-snug text-[var(--color-text-secondary)]">{subtitle}</p>
+        ) : null}
+      </div>
+      {action ? <div className="shrink-0 pt-0.5">{action}</div> : null}
+    </div>
+  );
+}
+
+function QueueLink({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="whitespace-nowrap text-xs font-semibold text-[#3b6ea5] hover:underline"
+    >
+      Open queue
+    </button>
+  );
+}
+
+function LegendDot({ color, label }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+function niceTicks(maxValue, count = 3) {
+  const capped = Math.max(1, maxValue);
+  const rough = capped / Math.max(1, count - 1);
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  const normalized = rough / magnitude;
+  const stepBase = normalized <= 1.5 ? 1 : normalized <= 3 ? 2 : normalized <= 7 ? 5 : 10;
+  const step = stepBase * magnitude;
+  const top = Math.ceil(capped / step) * step;
+  const ticks = [];
+  for (let value = 0; value <= top + 1e-9; value += step) {
+    ticks.push(Math.round(value));
   }
-  return groups;
+  if (ticks[ticks.length - 1] !== top) ticks.push(top);
+  return { ticks, top: Math.max(top, 1) };
 }
 
-function groupAlertsByPartition(alerts) {
-  return groupByPartition(alerts);
-}
-
-function ServiceColumn({
-  title,
-  description,
-  kpis,
-  alertsTitle,
-  alertsSubtitle,
-  alerts,
-  alertEmptyText,
-  onAlertClick,
-  showAlertCount = true,
-  activities,
-  activityTitle = 'Recent activity',
-  activitySubtitle = 'Latest events',
-  activityEmptyText,
-  formatActivityDate,
-  onActivityClick,
-  themeKey,
-  alertsLoading = false,
-  activityLoading = false,
-}) {
-  const theme = COLUMN_THEMES[themeKey];
+function WeeklyTrendChart({ days }) {
+  const rawMax = Math.max(1, ...days.flatMap((d) => [d.received, d.handled]));
+  const { ticks, top } = niceTicks(rawMax, 4);
+  const chartH = 110;
+  const topPad = 6;
+  const leftPad = 36;
+  const bottomPad = 24;
+  const barW = 10;
+  const gap = 14;
+  const groupW = barW * 2 + 4;
+  const plotW = Math.max(days.length * (groupW + gap), 260);
+  const width = leftPad + plotW;
+  const height = chartH + topPad + bottomPad;
 
   return (
-    <div className={`relative flex w-full min-w-0 flex-col gap-3 rounded-2xl border p-4 sm:p-5 xl:h-full xl:min-h-0 xl:overflow-hidden ${theme.shell}`}>
-      <div className="shrink-0">
-        <h2 className="text-base font-bold uppercase tracking-wide text-[var(--color-text-primary)]">{title}</h2>
-        <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">{description}</p>
-      </div>
-
-      <div className={`grid w-full min-w-0 shrink-0 gap-2.5 ${kpis.length >= 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
-        {kpis.map((kpi) => (
-          <KpiCard key={kpi.label} {...kpi} theme={theme} />
-        ))}
-      </div>
-
-      <div className="flex flex-col gap-3 xl:flex-1 xl:min-h-0">
-        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col shrink-0`}>
-          <div className={`px-3.5 py-2.5 border-b flex items-center justify-between gap-3 shrink-0 ${theme.panelHeader}`}>
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.panelIconWell}`}>
-                <AlertTriangle className={`w-4 h-4 ${theme.panelIconColor}`} />
-              </div>
-              <div className="min-w-0">
-                <h3 className={`text-sm font-bold ${theme.panelTitle}`}>{alertsTitle}</h3>
-                <p className={`text-xs truncate ${theme.panelSubtitle}`}>{alertsSubtitle}</p>
-              </div>
-            </div>
-            {showAlertCount && alerts.length > 0 && (
-              <span className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full text-white ${theme.badge}`}>
-                {alerts.length}
-              </span>
-            )}
-          </div>
-
-          <DottedScroll
-            scrollClassName={ALERT_LIST_SCROLL_CLASS}
-            contentClassName="space-y-2.5 p-2.5"
-          >
-            {alertsLoading ? (
-              <PanelListSkeleton rows={PANEL_VISIBLE_ITEMS} />
-            ) : alerts.length === 0 ? (
-              <div className="min-h-[72px] flex flex-col items-center justify-center text-center px-3 py-4">
-                <CheckCircle className="w-7 h-7 text-[var(--color-signal-green)] mb-1.5" />
-                <p className="text-sm font-medium text-[var(--color-text-secondary)]">{alertEmptyText}</p>
-              </div>
-            ) : (
-              groupAlertsByPartition(alerts).map((group) => (
-                <section key={group.label || group.items[0]?.id} className="space-y-1.5">
-                  {group.label && (
-                    <div className="flex items-center gap-2 px-1 pb-0.5">
-                      <h4 className="text-[11px] font-medium text-[var(--color-text-secondary)] shrink-0">
-                        {group.label}
-                      </h4>
-                      <div className="flex-1 h-px bg-[var(--color-border-default)]/80" aria-hidden="true" />
-                    </div>
-                  )}
-                  {group.items.map((alert) => {
-                const isClickable = Boolean(onAlertClick);
-                const alertBorder = theme.alertBorder[alert.type] || theme.alertBorder.warning;
-                const AlertIcon = alert.type === 'critical' ? Flag : Users;
-
-                return (
-                  <button
-                    key={alert.id}
-                    type="button"
-                    onClick={isClickable ? () => onAlertClick(alert) : undefined}
-                    className={`w-full text-left rounded-lg border border-[var(--color-border-default)] bg-white p-2.5 transition-all border-l-[3px] ${alertBorder} ${
-                      isClickable
-                        ? `cursor-pointer group ${theme.alertCardHover}`
-                        : 'cursor-default'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell}`}>
-                        <AlertIcon className={`w-4 h-4 ${theme.iconColor}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-[var(--color-text-primary)]">{alert.title}</p>
-                        <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 leading-relaxed">{alert.subtitle}</p>
-                        <p className="text-[10px] font-semibold text-[var(--color-text-muted)] mt-1.5">{alert.time}</p>
-                      </div>
-                    </div>
-                  </button>
-                );
-                  })}
-                </section>
-              ))
-            )}
-          </DottedScroll>
-        </div>
-
-        <div className={`${PANEL} rounded-xl shadow-[var(--shadow-card)] overflow-hidden flex flex-col shrink-0`}>
-          <div className={`px-3.5 py-2.5 border-b flex items-center gap-2.5 shrink-0 ${theme.panelHeader}`}>
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.panelIconWell}`}>
-              <Clock className={`w-4 h-4 ${theme.panelIconColor}`} />
-            </div>
-            <div>
-              <h3 className={`text-sm font-bold ${theme.panelTitle}`}>{activityTitle}</h3>
-              <p className={`text-xs ${theme.panelSubtitle}`}>{activitySubtitle}</p>
-            </div>
-          </div>
-
-          <DottedScroll
-            scrollClassName={ACTIVITY_LIST_SCROLL_CLASS}
-            contentClassName="space-y-3 p-3"
-          >
-            {activityLoading ? (
-              <ActivitySkeleton rows={PANEL_VISIBLE_ITEMS} />
-            ) : activities.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)] text-center py-4">{activityEmptyText}</p>
-            ) : (
-              groupByPartition(activities).map((group) => (
-                <section key={group.label || group.items[0]?.id} className="space-y-0">
-                  {group.label && (
-                    <div className="flex items-center gap-2 px-1 pb-2">
-                      <h4 className="text-[11px] font-medium text-[var(--color-text-secondary)] shrink-0">
-                        {group.label}
-                      </h4>
-                      <div className="flex-1 h-px bg-[var(--color-border-default)]/80" aria-hidden="true" />
-                    </div>
-                  )}
-                  {group.items.map((activity, index) => {
-                const isClickable = Boolean(activity.link);
-                const meta = getActivityMeta(activity.type);
-                const Icon = meta.icon;
-                const isLast = index === group.items.length - 1;
-
-                return (
-                  <button
-                    key={activity.id}
-                    type="button"
-                    onClick={isClickable ? () => onActivityClick(activity) : undefined}
-                    disabled={!isClickable}
-                    className={`relative flex gap-2.5 w-full text-left ${
-                      isLast ? '' : 'pb-3'
-                    } ${
-                      isClickable
-                        ? `cursor-pointer group ${theme.alertCardHover} rounded-lg border border-transparent px-1 -mx-1`
-                        : 'cursor-default'
-                    }`}
-                  >
-                    {!isLast && (
-                      <div className="absolute left-[15px] top-8 bottom-0 w-px bg-[var(--color-border-default)]" />
-                    )}
-                    <div className={`relative z-10 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${theme.iconWell} ${
-                      isClickable ? 'group-hover:ring-2 group-hover:ring-[rgba(26,26,46,0.06)] transition-shadow' : ''
-                    }`}>
-                      <Icon className={`w-4 h-4 ${theme.iconColor}`} />
-                    </div>
-                    <div className={`flex-1 min-w-0 rounded-lg px-2 py-1 transition-colors ${
-                      isClickable ? theme.activityHover : ''
-                    }`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-semibold text-[var(--color-text-primary)] leading-snug">
-                          {activity.description}
-                        </p>
-                        {isClickable && (
-                          <ArrowRight className={`w-3.5 h-3.5 shrink-0 opacity-0 group-hover:opacity-100 transition-all ${theme.iconColor}`} />
-                        )}
-                      </div>
-                      <p className="text-xs font-medium text-[var(--color-text-muted)] mt-0.5">
-                        {formatActivityDate(activity.timestamp)}
-                      </p>
-                    </div>
-                  </button>
-                );
-                  })}
-                </section>
-              ))
-            )}
-          </DottedScroll>
-        </div>
-      </div>
+    <div className="flex h-full w-full min-h-[9.5rem] items-end">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-[9.5rem] w-full"
+        role="img"
+        aria-label="Weekly received versus handled requests"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {ticks.map((tick) => {
+          const y = topPad + chartH - (tick / top) * chartH;
+          return (
+            <g key={tick}>
+              <line
+                x1={leftPad}
+                x2={width}
+                y1={y}
+                y2={y}
+                stroke={CHART.track}
+                strokeWidth="1"
+              />
+              <text
+                x={leftPad - 8}
+                y={y + 3}
+                textAnchor="end"
+                className="fill-[var(--color-text-muted)]"
+                style={{ fontSize: 10, fontWeight: 600 }}
+              >
+                {tick}
+              </text>
+            </g>
+          );
+        })}
+        <line
+          x1={leftPad}
+          x2={leftPad}
+          y1={topPad}
+          y2={topPad + chartH}
+          stroke={CHART.track}
+          strokeWidth="1"
+        />
+        {days.map((day, index) => {
+          const x = leftPad + index * (groupW + gap) + 6;
+          const receivedH = (day.received / top) * chartH;
+          const handledH = (day.handled / top) * chartH;
+          const receivedY = topPad + chartH - receivedH;
+          const handledY = topPad + chartH - handledH;
+          return (
+            <g key={day.date}>
+              <rect
+                x={x}
+                y={receivedY}
+                width={barW}
+                height={Math.max(receivedH, day.received ? 3 : 0)}
+                rx="3"
+                fill={CHART.blue}
+              >
+                <title>{`${day.label}: ${day.received} received`}</title>
+              </rect>
+              <rect
+                x={x + barW + 3}
+                y={handledY}
+                width={barW}
+                height={Math.max(handledH, day.handled ? 3 : 0)}
+                rx="3"
+                fill={CHART.pink}
+              >
+                <title>{`${day.label}: ${day.handled} handled`}</title>
+              </rect>
+              <text
+                x={x + groupW / 2 - 1}
+                y={topPad + chartH + 16}
+                textAnchor="middle"
+                className="fill-[var(--color-text-muted)]"
+                style={{ fontSize: 10, fontWeight: 600 }}
+              >
+                {day.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
     </div>
+  );
+}
+
+function DonutChart({ segments, centerLabel, centerValue }) {
+  const size = 128;
+  const stroke = 14;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const total = segments.reduce((sum, s) => sum + s.value, 0) || 1;
+
+  let offset = 0;
+  const arcs = segments.map((segment) => {
+    const length = (segment.value / total) * circumference;
+    const arc = {
+      ...segment,
+      dasharray: `${length} ${circumference - length}`,
+      dashoffset: -offset,
+    };
+    offset += length;
+    return arc;
+  });
+
+  return (
+    <div className="flex h-full min-h-[9.5rem] flex-col items-center justify-center gap-4 sm:flex-row sm:justify-center sm:gap-8">
+      <div className="relative shrink-0">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={centerLabel}>
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={CHART.track}
+            strokeWidth={stroke}
+          />
+          {arcs.map((arc) => (
+            <circle
+              key={arc.label}
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              stroke={arc.color}
+              strokeWidth={stroke}
+              strokeDasharray={arc.dasharray}
+              strokeDashoffset={arc.dashoffset}
+              strokeLinecap="butt"
+              transform={`rotate(-90 ${size / 2} ${size / 2})`}
+            />
+          ))}
+        </svg>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <p className="text-xl font-bold tabular-nums text-[var(--color-text-primary)]">{centerValue}</p>
+          <p className="text-[10px] font-medium text-[var(--color-text-muted)]">{centerLabel}</p>
+        </div>
+      </div>
+      <ul className="w-full max-w-[9rem] space-y-2.5">
+        {segments.map((segment) => (
+          <li key={segment.label} className="flex items-center justify-between gap-3 text-sm">
+            <span className="inline-flex items-center gap-2 text-[var(--color-text-secondary)]">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
+              {segment.label}
+            </span>
+            <span className="font-semibold tabular-nums text-[var(--color-text-primary)]">
+              {segment.value}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue }) {
+  const total = Math.max(partnerReq + autoMail, 1);
+  const rows = [
+    {
+      key: 'partner',
+      label: 'Partner requests',
+      detail: `${Math.round((partnerReq / total) * 100)}% of pending`,
+      value: partnerReq,
+      pct: (partnerReq / total) * 100,
+      color: CHART.blue,
+      Icon: Inbox,
+      accent: 'border-l-[#3b6ea5]',
+      well: 'bg-[#3b6ea5]/10',
+      iconClass: 'text-[#3b6ea5]',
+    },
+    {
+      key: 'auto',
+      label: 'Automated email',
+      detail: `${Math.round((autoMail / total) * 100)}% of pending`,
+      value: autoMail,
+      pct: (autoMail / total) * 100,
+      color: CHART.pink,
+      Icon: Mail,
+      accent: 'border-l-[var(--color-brand-accent)]',
+      well: 'bg-[var(--color-brand-accent)]/10',
+      iconClass: 'text-[var(--color-brand-accent)]',
+    },
+  ];
+
+  return (
+    <ul className="flex min-h-0 flex-1 flex-col justify-start space-y-1.5">
+      {rows.map((row) => {
+        const Icon = row.Icon;
+        return (
+          <li key={row.key}>
+            <button
+              type="button"
+              onClick={onOpenQueue}
+              className={`flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] ${row.accent} bg-white px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-surface-panel)]`}
+            >
+              <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${row.well}`}>
+                <Icon className={`h-3.5 w-3.5 ${row.iconClass}`} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+                    {row.label}
+                  </p>
+                  <p className="shrink-0 text-sm font-bold tabular-nums text-[var(--color-text-primary)]">
+                    {row.value}
+                  </p>
+                </div>
+                <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">{row.detail}</p>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--color-surface-highlight)]">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${row.pct}%`, backgroundColor: row.color }}
+                  />
+                </div>
+              </div>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -366,73 +399,25 @@ export default function Home() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [livePendingRequests, setLivePendingRequests] = useState([]);
-  const [liveKpis, setLiveKpis] = useState({ pendingRequests: 0, usersInLedger: 0 });
-  const [livePartnerActivity, setLivePartnerActivity] = useState([]);
-  const [liveCustomerKpis, setLiveCustomerKpis] = useState({
-    newEmails: 0,
-    flaggedEmails: 0,
-    templatesActive: 0,
-  });
-  const [liveCustomerActivity, setLiveCustomerActivity] = useState([]);
-  const [liveFlaggedAlerts, setLiveFlaggedAlerts] = useState([]);
-  const [inboxEmailTotal, setInboxEmailTotal] = useState(0);
-  const [workspaceReady, setWorkspaceReady] = useState(false);
-  const [templatesReady, setTemplatesReady] = useState(false);
-  const [partnerReady, setPartnerReady] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [kpis, setKpis] = useState({ pendingRequests: 0, usersInLedger: 0 });
+  const [insights, setInsights] = useState(EMPTY_INSIGHTS);
+  const [activity, setActivity] = useState([]);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const applyDashboard = (data) => {
-      setLivePendingRequests(data.pendingRequests);
-      setLiveKpis(data.kpis);
-      setLivePartnerActivity(data.activity);
-      setPartnerReady(true);
-    };
-    const applyCustomerOverview = (data) => {
-      setLiveCustomerKpis({
-        newEmails: data.newEmails ?? 0,
-        flaggedEmails: data.flaggedEmails ?? 0,
-        templatesActive: data.templatesActive ?? 0,
-      });
-    };
-    const refreshDashboardTemplates = (inboxes) => {
-      const hadCached = applyDashboardTemplateActivities(inboxes, setLiveCustomerActivity);
-      if (hadCached) setTemplatesReady(true);
-
-      refreshCache(
-        'home_dashboard_templates',
-        () => getTemplatesForConnectedInboxes(inboxes),
-        (templates) => {
-          setLiveCustomerActivity(buildTemplateDashboardActivities(templates, inboxes));
-          setTemplatesReady(true);
-        },
-      ).catch((err) => {
-        console.error(err);
-        if (!hadCached) {
-          setLiveCustomerActivity(buildTemplateDashboardActivities([], inboxes));
-        }
-        setTemplatesReady(true);
-      });
-    };
-    const applyWorkspaceCustomerData = (data) => {
-      const emails = data.emails ?? [];
-      const inboxes = data.inboxes ?? [];
-      setInboxEmailTotal(countInboxTabAcrossConnectedInboxes(emails, inboxes));
-      setLiveFlaggedAlerts(buildFlaggedDashboardAlerts(emails, inboxes));
-      setLiveCustomerKpis((prev) => ({
-        ...prev,
-        flaggedEmails: countFlaggedAcrossConnectedInboxes(emails, inboxes),
-      }));
-      refreshDashboardTemplates(inboxes);
-      setWorkspaceReady(true);
+      setPendingRequests(data.pendingRequests || []);
+      setKpis(data.kpis || { pendingRequests: 0, usersInLedger: 0 });
+      setInsights(data.insights || EMPTY_INSIGHTS);
+      setActivity(data.activity || []);
+      setReady(true);
     };
     const load = () => {
-      loadWithCache('home_dashboard', getDashboard, applyDashboard)
-        .catch((err) => console.error(err));
-      loadWithCache('home_customer_overview', getPilot2Overview, applyCustomerOverview)
-        .catch((err) => console.error(err));
-      loadWithCache('pilot2_workspace', getPilot2Workspace, applyWorkspaceCustomerData)
-        .catch((err) => console.error(err));
+      loadWithCache('home_dashboard_v2', getDashboard, applyDashboard).catch((err) => {
+        console.error(err);
+        setReady(true);
+      });
     };
     load();
     const refresh = () => { if (!document.hidden) load(); };
@@ -440,126 +425,238 @@ export default function Home() {
     return () => window.removeEventListener('focus', refresh);
   }, [location.key]);
 
-  const formatActivityDate = (isoString) => {
-    try {
-      const date = parseISO(isoString);
-      if (isToday(date)) return `Today, ${format(date, 'HH:mm')}`;
-      if (isYesterday(date)) return `Yesterday, ${format(date, 'HH:mm')}`;
-      return format(date, 'dd MMM yyyy, HH:mm');
-    } catch {
-      return isoString;
-    }
+  const duplicateAlerts = useMemo(
+    () => (Array.isArray(pendingRequests) ? pendingRequests : [])
+      .filter((req) => req.tags?.includes(TAG_ALREADY_EXISTS))
+      .sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt))
+      .slice(0, 4),
+    [pendingRequests],
+  );
+
+  const recentActivity = useMemo(
+    () => (Array.isArray(activity) ? activity : []).slice(0, 5),
+    [activity],
+  );
+
+  const actionSegments = [
+    { label: 'Add', value: insights.pendingAdd, color: CHART.blue },
+    { label: 'Remove', value: insights.pendingRemove, color: CHART.pink },
+  ];
+
+  const trendDays = insights.weeklyTrend?.length
+    ? insights.weeklyTrend
+    : Array.from({ length: 7 }, (_, i) => ({
+        date: `d${i}`,
+        label: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i],
+        received: 0,
+        handled: 0,
+      }));
+
+  const activityIcon = (type) => {
+    if (type === 'marked_added') return UserPlus;
+    if (type === 'marked_removed') return UserMinus;
+    if (type === 'automated_email') return Mail;
+    if (type === 'tag_applied') return AlertTriangle;
+    return Inbox;
   };
-
-  const goToFlaggedEmail = (alert) => {
-    if (alert?.id) {
-      navigate(`/email-responses?mailbox=flagged&emailId=${encodeURIComponent(alert.id)}`);
-      return;
-    }
-    navigate('/email-responses?mailbox=flagged');
-  };
-
-  const handleActivityClick = (activity) => {
-    if (activity.link) navigate(activity.link);
-  };
-
-  const handlePartnerAlertClick = (alert) => {
-    if (alert?.id) {
-      navigate(`/new-requests?id=${encodeURIComponent(alert.id)}`);
-      return;
-    }
-    navigate('/new-requests');
-  };
-
-  const duplicateAlerts = (Array.isArray(livePendingRequests) ? livePendingRequests : [])
-    .filter((req) => req.tags?.includes(TAG_ALREADY_EXISTS))
-    .sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt))
-    .slice(0, 2)
-    .map((req) => ({
-      id: req.id,
-      title: `${req.person.firstName} ${req.person.lastName}`.trim(),
-      subtitle: req.person.email,
-      time: formatActivityDate(req.receivedAt),
-      type: 'warning',
-      isNew: true
-    }));
-
-  const flaggedEmailAlerts = liveFlaggedAlerts.map((alert) => ({
-    ...alert,
-    time: alert.timestamp ? formatActivityDate(alert.timestamp) : '',
-  }));
-  const hasFlaggedAlerts = flaggedEmailAlerts.length > 0;
-
-  const customerActivity = liveCustomerActivity
-    .filter((a) => CUSTOMER_ACTIVITY_TYPES.has(a.type));
-
-  const partnerActivity = (Array.isArray(livePartnerActivity) ? livePartnerActivity : [])
-    .filter((a) => HANDLED_ACTIVITY_TYPES.has(a.type))
-    .map((a) => ({
-      ...a,
-      link: a.linkedRequestId ? `/directory?id=${encodeURIComponent(a.linkedRequestId)}` : null,
-    }))
-    .slice(0, 2);
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto xl:overflow-hidden select-none">
+    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto overscroll-contain select-none">
       <PageHeader
         section="Overview"
         title="Hello Andrea."
-        description="Here's your operational overview for today."
-        className="mb-4 shrink-0"
+        description="A live view of partner requests, ledger health, and what needs your attention."
+        className="mb-3 shrink-0"
       />
 
-      <div className="grid w-full min-w-0 grid-cols-1 gap-4 pb-2 xl:grid-cols-2 xl:flex-1 xl:min-h-0 xl:grid-rows-1 xl:items-stretch xl:pb-0">
-        <ServiceColumn
-          themeKey="customer"
-          title="Customer Support"
-          description="Totals across all connected inboxes."
-          alertsLoading={!workspaceReady}
-          activityLoading={!templatesReady}
-          kpis={[
-            { label: 'In inboxes', value: inboxEmailTotal, hint: 'All inboxes', icon: Mail, onClick: () => navigate('/email-responses') },
-            { label: 'Flagged', value: liveCustomerKpis.flaggedEmails, hint: 'All inboxes', icon: Flag, onClick: () => navigate('/email-responses?mailbox=flagged') },
-            { label: 'Active Templates', value: liveCustomerKpis.templatesActive, hint: 'All inboxes', icon: FileText, onClick: () => navigate('/templates') }
-          ]}
-          alertsTitle="New flags"
-          alertsSubtitle={hasFlaggedAlerts ? 'For all inboxes' : 'All clear'}
-          alerts={flaggedEmailAlerts}
-          alertEmptyText="No flagged emails to review."
-          showAlertCount={false}
-          onAlertClick={goToFlaggedEmail}
-          activities={customerActivity}
-          activityTitle="New templates"
-          activitySubtitle={customerActivity.length ? 'For all inboxes' : 'Latest templates'}
-          activityEmptyText="No new templates."
-          formatActivityDate={formatActivityDate}
-          onActivityClick={handleActivityClick}
-        />
+      {!ready ? (
+        <div className="space-y-4 pb-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[0, 1, 2, 3].map((key) => (
+              <div key={key} className="h-24 animate-pulse rounded-2xl bg-[var(--color-surface-highlight)]" />
+            ))}
+          </div>
+          <PanelListSkeleton rows={3} />
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col gap-3 pb-4 xl:overflow-hidden">
+          <div className="grid shrink-0 grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+            <InsightCard
+              label="Pending requests"
+              value={kpis.pendingRequests}
+              hint={`${insights.awaitingPartner} awaiting partner confirmation`}
+              icon={Inbox}
+              accent="blue"
+              onClick={() => navigate('/new-requests')}
+            />
+            <InsightCard
+              label="Users in ledger"
+              value={kpis.usersInLedger}
+              hint={`${insights.usersRemoved} removed on record`}
+              icon={Users}
+              accent="grey"
+              onClick={() => navigate('/directory')}
+            />
+            <InsightCard
+              label="Handled this week"
+              value={insights.handledThisWeek}
+              hint={`${insights.receivedThisWeek} new requests received`}
+              icon={CheckCircle2}
+              accent="pink"
+              onClick={() => navigate('/directory')}
+            />
+            <InsightCard
+              label="Needs review"
+              value={insights.duplicates}
+              hint="Possible duplicates in the queue"
+              icon={AlertTriangle}
+              accent="pink"
+              onClick={() => navigate('/new-requests')}
+            />
+          </div>
 
-        <ServiceColumn
-          themeKey="partner"
-          title="Partner Support"
-          description="New user requests and the partner user ledger."
-          alertsLoading={!partnerReady}
-          activityLoading={!partnerReady}
-          kpis={[
-            { label: 'Pending requests', value: liveKpis.pendingRequests, icon: Inbox, onClick: () => navigate('/new-requests') },
-            { label: 'Users in ledger', value: liveKpis.usersInLedger, icon: Users, onClick: () => navigate('/directory') }
-          ]}
-          alertsTitle="New priority alerts"
-          alertsSubtitle={duplicateAlerts.length ? 'Latest potential duplicates' : 'No alerts'}
-          alerts={duplicateAlerts}
-          alertEmptyText="No alerts"
-          showAlertCount={false}
-          onAlertClick={handlePartnerAlertClick}
-          activities={partnerActivity}
-          activityTitle="Handled requests"
-          activitySubtitle={partnerActivity.length ? 'Recently marked in directory' : 'No handled requests'}
-          activityEmptyText="No handled requests."
-          formatActivityDate={formatActivityDate}
-          onActivityClick={handleActivityClick}
-        />
-      </div>
+          <div className="grid min-h-0 shrink-0 grid-cols-1 gap-3 xl:grid-cols-5">
+            <div className="min-h-[16rem] xl:col-span-3">
+              <ChartCard
+                title="This week’s flow"
+                subtitle="Requests received vs requests you handled"
+                legend={(
+                  <div className="flex items-center gap-3">
+                    <LegendDot color={CHART.blue} label="Received" />
+                    <LegendDot color={CHART.pink} label="Handled" />
+                  </div>
+                )}
+              >
+                <WeeklyTrendChart days={trendDays} />
+              </ChartCard>
+            </div>
+
+            <div className="min-h-[16rem] xl:col-span-2">
+              <ChartCard
+                title="Pending by action"
+                subtitle="What’s waiting in New requests"
+              >
+                <DonutChart
+                  segments={actionSegments}
+                  centerValue={kpis.pendingRequests}
+                  centerLabel="pending"
+                />
+              </ChartCard>
+            </div>
+          </div>
+
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-3 lg:items-stretch">
+            <section className="flex min-h-[18rem] flex-col rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:h-full">
+              <PanelHeader
+                title="How pending requests arrived"
+                subtitle="Partner form vs automated email"
+                action={<QueueLink onClick={() => navigate('/new-requests')} />}
+              />
+              <ArrivalSourceList
+                partnerReq={insights.partnerReq}
+                autoMail={insights.autoMail}
+                onOpenQueue={() => navigate('/new-requests')}
+              />
+            </section>
+
+            <section className="flex min-h-[18rem] flex-col rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:h-full">
+              <PanelHeader
+                title="Priority alerts"
+                subtitle={duplicateAlerts.length ? 'Possible duplicate people' : 'All clear'}
+                action={<QueueLink onClick={() => navigate('/new-requests')} />}
+              />
+              {duplicateAlerts.length === 0 ? (
+                <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl bg-[var(--color-surface-panel)] px-3 py-4 text-center">
+                  <CheckCircle2 className="mb-1.5 h-6 w-6 text-[var(--color-signal-green)]" />
+                  <p className="text-sm font-medium text-[var(--color-text-secondary)]">No duplicate alerts</p>
+                </div>
+              ) : (
+                <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
+                  {duplicateAlerts.map((req) => (
+                    <li key={req.id}>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/new-requests/${encodeURIComponent(req.id)}`)}
+                        className="flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--color-brand-accent)] bg-white px-2.5 py-2 text-left transition-colors hover:bg-[#fff7f8]"
+                      >
+                        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-brand-accent)]/10">
+                          <AlertTriangle className="h-3.5 w-3.5 text-[var(--color-brand-accent)]" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+                            {`${req.person?.firstName || ''} ${req.person?.lastName || ''}`.trim() || 'Unknown'}
+                          </p>
+                          <p className="truncate text-xs text-[var(--color-text-secondary)]">{req.person?.email}</p>
+                          <p className="mt-0.5 text-[10px] font-semibold text-[var(--color-text-muted)]">
+                            {formatActivityDate(req.receivedAt)}
+                          </p>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="flex min-h-[18rem] flex-col rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:h-full">
+              <PanelHeader
+                title="Recent activity"
+                subtitle="Latest request events"
+                action={<QueueLink onClick={() => navigate('/new-requests')} />}
+              />
+              {recentActivity.length === 0 ? (
+                <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl bg-[var(--color-surface-panel)] px-3 py-4 text-center">
+                  <p className="text-sm font-medium text-[var(--color-text-secondary)]">No recent activity</p>
+                </div>
+              ) : (
+                <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
+                  {recentActivity.map((item) => {
+                    const Icon = activityIcon(item.type);
+                    const clickable = Boolean(item.linkedRequestId);
+                    return (
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          disabled={!clickable}
+                          onClick={() => {
+                            if (!item.linkedRequestId) return;
+                            const handled = item.type === 'marked_added' || item.type === 'marked_removed';
+                            navigate(
+                              handled
+                                ? `/directory?id=${encodeURIComponent(item.linkedRequestId)}`
+                                : `/new-requests/${encodeURIComponent(item.linkedRequestId)}`,
+                            );
+                          }}
+                          className={`flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] bg-white px-2.5 py-2 text-left transition-colors ${
+                            clickable ? 'cursor-pointer hover:bg-[var(--color-surface-panel)]' : 'cursor-default'
+                          }`}
+                        >
+                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-highlight)]">
+                            <Icon className="h-3.5 w-3.5 text-[#3b6ea5]" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="truncate text-sm font-semibold leading-snug text-[var(--color-text-primary)]">
+                                {item.description}
+                              </p>
+                              {clickable ? (
+                                <ArrowRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
+                              ) : null}
+                            </div>
+                            <p className="mt-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
+                              {formatActivityDate(item.timestamp)}
+                            </p>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,28 +1,34 @@
 :root {
   /* Brand */
   --color-brand-primary: #1a1a2e;
+  /* Mid blue for section chrome / info — stronger contrast than grey panels on the light bg */
+  --color-brand-secondary: #2c5f8f;
+  --color-brand-secondary-hover: #234c73;
+  --color-brand-secondary-muted: #e8f1f8;
+  --color-brand-secondary-border: #9bb8d4;
   --color-brand-accent: #e94560;
   --color-brand-accent-hover: #c73652;
 
-  /* Surface */
-  --color-surface-bg: #f8f9fb;
+  /* Surface — neutral app canvas + white cards (Stripe / GitHub pattern).
+     Soft cool grey, not tinted blue. Cards stay pure white. */
+  --color-surface-bg: #f6f8fa;
   --color-surface-card: #ffffff;
   --color-surface-sidebar: #1a1a2e;
   --color-surface-sidebar-hover: #252542;
   --color-surface-sidebar-active: rgba(255, 255, 255, 0.1);
-  --color-surface-panel: #f7f8fc;
-  --color-surface-highlight: #eceef6;
-  --color-surface-highlight-strong: #dfe3f0;
+  --color-surface-panel: #eef1f4;
+  --color-surface-highlight: #e8ebef;
+  --color-surface-highlight-strong: #dde2e8;
   --color-surface-highlight-text: #1a1a2e;
 
   /* Text */
   --color-text-primary: #1a1a2e;
-  --color-text-secondary: #6b7280;
+  --color-text-secondary: #57606a;
   --color-text-inverse: #ffffff;
-  --color-text-muted: #9ca3af;
+  --color-text-muted: #6e7781;
 
   /* Border */
-  --color-border-default: #e5e7eb;
+  --color-border-default: #d0d7de;
   --color-border-focus: #e94560;
 
   /* Tags / Status — GREEN = add/added, RED = remove/removed */

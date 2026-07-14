@@ -7,8 +7,11 @@ import {
   isManagerAccountExistsMessage,
   validateManagerSignupFields,
   validateManagerEmail,
+  ensureManagerAllowedDomains,
+  getCachedManagerAllowedDomains,
   MANAGER_ACCOUNT_EXISTS_MESSAGE,
   MANAGER_ACCOUNT_NOT_FOUND_MESSAGE,
+  MANAGER_DOMAINS_UNAVAILABLE_MESSAGE,
   isManagerAccountNotFoundMessage,
   isPasswordStrongEnough,
 } from '../utils/managerAuth';
@@ -73,6 +76,27 @@ export default function Signup() {
   const signInInFlightRef = useRef(false);
   const forgotInFlightRef = useRef(false);
   const resendInFlightRef = useRef(false);
+  const [allowedDomains, setAllowedDomains] = useState(() => getCachedManagerAllowedDomains());
+  const [domainsReady, setDomainsReady] = useState(() => Boolean(getCachedManagerAllowedDomains()));
+  const domainHint = managerEmailDomainHint(allowedDomains);
+
+  useEffect(() => {
+    let active = true;
+    ensureManagerAllowedDomains()
+      .then((domains) => {
+        if (!active) return;
+        setAllowedDomains(domains);
+        setDomainsReady(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAllowedDomains(null);
+        setDomainsReady(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (location.state?.passwordUpdated) {
@@ -158,9 +182,15 @@ export default function Signup() {
 
     const validated = validateManagerSignupFields(formData, {
       enforceDomain: appConfig.enforceDomainCheck,
+      allowedDomains,
     });
     if (!validated.ok) {
       setErrorMsg(validated.error);
+      return;
+    }
+
+    if (appConfig.enforceDomainCheck && !domainsReady) {
+      setErrorMsg(MANAGER_DOMAINS_UNAVAILABLE_MESSAGE);
       return;
     }
 
@@ -264,9 +294,15 @@ export default function Signup() {
 
     const emailResult = validateManagerEmail(signInEmail, {
       enforceDomain: appConfig.enforceDomainCheck,
+      allowedDomains,
     });
     if (!emailResult.ok) {
       setErrorMsg(emailResult.error);
+      return;
+    }
+
+    if (appConfig.enforceDomainCheck && !domainsReady) {
+      setErrorMsg(MANAGER_DOMAINS_UNAVAILABLE_MESSAGE);
       return;
     }
 
@@ -310,9 +346,15 @@ export default function Signup() {
 
     const emailResult = validateManagerEmail(forgotEmail, {
       enforceDomain: appConfig.enforceDomainCheck,
+      allowedDomains,
     });
     if (!emailResult.ok) {
       setErrorMsg(emailResult.error);
+      return;
+    }
+
+    if (appConfig.enforceDomainCheck && !domainsReady) {
+      setErrorMsg(MANAGER_DOMAINS_UNAVAILABLE_MESSAGE);
       return;
     }
 
@@ -473,7 +515,7 @@ export default function Signup() {
         <form onSubmit={handleForgotPasswordSubmit} className="space-y-4" noValidate>
           <div>
             <label htmlFor={forgotEmailId} className={labelClass}>
-              Email{appConfig.enforceDomainCheck ? ` (${managerEmailDomainHint()})` : ''}
+              Email{appConfig.enforceDomainCheck ? ` (${domainHint})` : ''}
             </label>
             <input
               id={forgotEmailId}
@@ -566,7 +608,7 @@ export default function Signup() {
         <form onSubmit={handleSignInSubmit} className="space-y-4" noValidate>
           <div>
             <label htmlFor={signInEmailId} className={labelClass}>
-              Email{appConfig.enforceDomainCheck ? ` (${managerEmailDomainHint()})` : ''}
+              Email{appConfig.enforceDomainCheck ? ` (${domainHint})` : ''}
             </label>
             <input
               id={signInEmailId}
@@ -705,7 +747,7 @@ export default function Signup() {
 
         <div>
           <label htmlFor="signup-email" className={labelClass}>
-            Email{appConfig.enforceDomainCheck ? ` (${managerEmailDomainHint()})` : ''}
+            Email{appConfig.enforceDomainCheck ? ` (${domainHint})` : ''}
           </label>
           <input
             id="signup-email"

@@ -81,6 +81,7 @@ export default function Modal({
   belowDrawer = false,
   stableHeight = false,
   flushBody = false,
+  brandChrome = false,
 }) {
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -166,11 +167,21 @@ export default function Modal({
         className={`relative z-[1] flex w-full max-h-[100dvh] flex-col overflow-hidden border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-modal)] rounded-none sm:rounded-2xl ${
           stableHeight ? 'h-[100dvh] sm:h-[min(90dvh,calc(100dvh-2rem))]' : 'max-h-[100dvh] sm:max-h-[min(90dvh,calc(100dvh-2rem))]'
         } ${
-          extraWide ? 'sm:max-w-[720px]' : wide ? 'sm:max-w-[560px]' : 'sm:max-w-[480px]'
+          extraWide ? 'sm:max-w-[840px]' : wide ? 'sm:max-w-[560px]' : 'sm:max-w-[480px]'
         }`}
       >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/60 px-4 py-3 sm:gap-4 sm:px-5 sm:py-4">
-          <h3 className="min-w-0 truncate text-sm font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-base">
+        <div
+          className={`flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:gap-4 sm:px-5 sm:py-4 ${
+            brandChrome
+              ? 'border-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]'
+              : 'border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/60'
+          }`}
+        >
+          <h3
+            className={`min-w-0 truncate text-sm font-semibold tracking-tight sm:text-base ${
+              brandChrome ? 'text-white' : 'text-[var(--color-text-primary)]'
+            }`}
+          >
             {title}
           </h3>
           <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
@@ -178,7 +189,11 @@ export default function Modal({
             <button
               type="button"
               onClick={onClose}
-              className={closeButtonClass}
+              className={
+                brandChrome
+                  ? 'rounded-lg p-1.5 text-white/75 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30'
+                  : closeButtonClass
+              }
               aria-label="Close modal"
             >
               <X className="w-4 h-4" />
@@ -187,15 +202,21 @@ export default function Modal({
         </div>
 
         <div
-          className={`flex min-h-0 flex-1 flex-col overscroll-contain bg-white text-sm leading-relaxed text-[var(--color-text-primary)] ${
-            flushBody ? 'p-0' : 'p-4 sm:p-6'
+          className={`flex min-h-0 flex-1 flex-col overscroll-contain text-sm leading-relaxed text-[var(--color-text-primary)] ${
+            flushBody ? 'bg-[#f6f3ee] p-0' : 'bg-white p-4 sm:p-6'
           } ${stableHeight ? 'overflow-hidden' : 'overflow-y-auto'}`}
         >
           {children}
         </div>
 
         {footer && (
-          <div className="flex shrink-0 flex-col-reverse items-stretch gap-2.5 border-t border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-end sm:px-6 sm:py-4 sm:pb-4">
+          <div
+            className={`flex shrink-0 flex-col-reverse items-stretch gap-2.5 border-t px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-end sm:px-6 sm:py-4 sm:pb-4 ${
+              brandChrome
+                ? 'border-[var(--color-brand-primary)] bg-[var(--color-brand-primary)]'
+                : 'border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40'
+            }`}
+          >
             {footer}
           </div>
         )}

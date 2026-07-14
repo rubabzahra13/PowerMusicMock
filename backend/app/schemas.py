@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.input_validation import (
     normalize_email,
@@ -314,10 +314,32 @@ class KpiOut(BaseModel):
     usersInLedger: int
 
 
+class DashboardTrendDayOut(BaseModel):
+    date: str
+    label: str
+    received: int
+    handled: int
+
+
+class DashboardInsightsOut(BaseModel):
+    pendingAdd: int = 0
+    pendingRemove: int = 0
+    awaitingPartner: int = 0
+    duplicates: int = 0
+    autoMail: int = 0
+    partnerReq: int = 0
+    usersAdded: int = 0
+    usersRemoved: int = 0
+    handledThisWeek: int = 0
+    receivedThisWeek: int = 0
+    weeklyTrend: List[DashboardTrendDayOut] = Field(default_factory=list)
+
+
 class DashboardOut(BaseModel):
     kpis: KpiOut
     pendingRequests: List[RequestOut]
     activity: List[ActivityOut]
+    insights: DashboardInsightsOut = Field(default_factory=DashboardInsightsOut)
 
 
 class NewRequestsPageOut(BaseModel):
@@ -414,3 +436,32 @@ class PersonSearchOut(BaseModel):
 
 class PersonMatchCandidateOut(PersonSearchOut):
     matchReasons: List[str] = Field(default_factory=list)
+
+
+class ManagerAllowedDomainOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: str
+    domain: str
+    createdAt: datetime = Field(validation_alias="created_at")
+
+
+class ManagerAllowedDomainCreateIn(BaseModel):
+    domain: str
+
+
+class ManagerAllowedDomainsPublicOut(BaseModel):
+    domains: List[str] = Field(default_factory=list)
+
+
+class AutomatedRosterSourceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: str
+    kind: str
+    pattern: str
+    createdAt: datetime = Field(validation_alias="created_at")
+
+
+class AutomatedRosterSourceCreateIn(BaseModel):
+    pattern: str

@@ -1,4 +1,5 @@
 import { isAdminEmail } from './adminAccess';
+import { fetchJson } from './api';
 
 const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 const HTML_TAG = /<[^>]+>/;
@@ -7,14 +8,66 @@ const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M}\s'.-]{0,99}$/u;
 const CLUB_LOCATION_RE = /^[\p{L}\p{M}]+(?: [\p{L}\p{M}]+)*$/u;
 const MIN_CLUB_LOCATION_LENGTH = 2;
 
-/** Allowed manager email domains — expand before production lock-down. */
-export const MANAGER_ALLOWED_EMAIL_DOMAINS = ['@puregym.com', '@gmail.com', '@googlemail.com'];
+/** @type {string[] | null} */
+let cachedManagerDomains = null;
+/** @type {Promise<string[]> | null} */
+let managerDomainsLoadPromise = null;
+
+/** Normalize API domain list to `@example.com` suffixes. */
+export function normalizeAllowedDomainSuffixes(domains) {
+  return (domains || [])
+    .map((d) => String(d || '').trim().toLowerCase())
+    .filter(Boolean)
+    .map((d) => (d.startsWith('@') ? d : `@${d}`));
+}
+
+export function getCachedManagerAllowedDomains() {
+  return cachedManagerDomains;
+}
+
+export function clearManagerAllowedDomainsCache() {
+  cachedManagerDomains = null;
+  managerDomainsLoadPromise = null;
+}
+
+export function setManagerAllowedDomainsCache(domains) {
+  cachedManagerDomains = normalizeAllowedDomainSuffixes(domains);
+  return cachedManagerDomains;
+}
+
+/** Fetch allowed manager domains from the API (cached). */
+export async function ensureManagerAllowedDomains({ force = false } = {}) {
+  if (!force && cachedManagerDomains) {
+    return cachedManagerDomains;
+  }
+  if (!force && managerDomainsLoadPromise) {
+    return managerDomainsLoadPromise;
+  }
+
+  managerDomainsLoadPromise = fetchJson('/api/manager/allowed-domains')
+    .then((data) => {
+      cachedManagerDomains = normalizeAllowedDomainSuffixes(data?.domains);
+      return cachedManagerDomains;
+    })
+    .catch((err) => {
+      managerDomainsLoadPromise = null;
+      throw err;
+    });
+
+  return managerDomainsLoadPromise;
+}
+
+/** @deprecated Prefer ensureManagerAllowedDomains(); kept for display fallbacks. */
+export const MANAGER_ALLOWED_EMAIL_DOMAINS = ['@puregym.com'];
 
 export const MANAGER_ACCOUNT_EXISTS_MESSAGE =
   'An account with this email already exists. Please sign in instead.';
 
 export const MANAGER_ACCOUNT_NOT_FOUND_MESSAGE =
   "We couldn't find an account for this email. Please create an account first.";
+
+export const MANAGER_DOMAINS_UNAVAILABLE_MESSAGE =
+  'Could not verify allowed email domains. Check that the server is running and try again.';
 
 export function isManagerAccountExistsMessage(message) {
   const msg = (message || '').toLowerCase();
@@ -34,14 +87,17 @@ export function isManagerAccountNotFoundMessage(message) {
   );
 }
 
-export function isAllowedManagerEmailDomain(email) {
+export function isAllowedManagerEmailDomain(email, allowedDomains = cachedManagerDomains) {
+  if (!allowedDomains || allowedDomains.length === 0) return false;
   const lower = (email || '').trim().toLowerCase();
-  return MANAGER_ALLOWED_EMAIL_DOMAINS.some((domain) => lower.endsWith(domain));
+  return allowedDomains.some((domain) => lower.endsWith(domain));
 }
 
-export function managerEmailDomainHint() {
-  const labels = MANAGER_ALLOWED_EMAIL_DOMAINS.map((d) => d.slice(1));
-  if (labels.length <= 1) return labels[0] || '';
+export function managerEmailDomainHint(allowedDomains = cachedManagerDomains) {
+  const domains = allowedDomains || [];
+  const labels = domains.map((d) => (d.startsWith('@') ? d.slice(1) : d));
+  if (labels.length === 0) return 'allowed partner';
+  if (labels.length === 1) return labels[0];
   return `${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}`;
 }
 
@@ -70,17 +126,28 @@ export function normalizeManagerEmail(raw) {
   return { ok: true, value: cleaned };
 }
 
-export function validateManagerEmail(raw, { enforceDomain = true } = {}) {
+export function validateManagerEmail(raw, { enforceDomain = true, allowedDomains = cachedManagerDomains } = {}) {
   const normalized = normalizeManagerEmail(raw);
   if (!normalized.ok) return normalized;
 
   const email = normalized.value;
 
-  if (enforceDomain && !isAllowedManagerEmailDomain(email)) {
-    return {
-      ok: false,
-      error: `Manager accounts must use a ${managerEmailDomainHint()} email address.`,
-    };
+  if (enforceDomain) {
+    if (!allowedDomains) {
+      return { ok: false, error: MANAGER_DOMAINS_UNAVAILABLE_MESSAGE };
+    }
+    if (allowedDomains.length === 0) {
+      return {
+        ok: false,
+        error: 'Manager portal access is not configured. Contact your administrator.',
+      };
+    }
+    if (!isAllowedManagerEmailDomain(email, allowedDomains)) {
+      return {
+        ok: false,
+        error: `Manager accounts must use a ${managerEmailDomainHint(allowedDomains)} email address.`,
+      };
+    }
   }
 
   if (isAdminEmail(email)) {
@@ -317,7 +384,7 @@ export function validateClub(raw) {
 
 export function validateManagerSignupFields(
   { firstName, lastName, email, club, password, confirmPassword },
-  { enforceDomain = true } = {}
+  { enforceDomain = true, allowedDomains } = {}
 ) {
   const first = validatePersonName(firstName, 'First name');
   if (!first.ok) return first;
@@ -325,7 +392,7 @@ export function validateManagerSignupFields(
   const last = validatePersonName(lastName, 'Last name');
   if (!last.ok) return last;
 
-  const emailResult = validateManagerEmail(email, { enforceDomain });
+  const emailResult = validateManagerEmail(email, { enforceDomain, allowedDomains });
   if (!emailResult.ok) return emailResult;
 
   const clubResult = validateClub(club);

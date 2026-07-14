@@ -1,11 +1,10 @@
-"""Unit tests for PureGym automated roster email intake."""
+"""Unit tests for automated roster email intake."""
 
 from app.automated_person_intake import (
-    ADD_SUBJECT,
     PUREGYM_LEAVER_SENDER,
     classify_puregym_roster_email,
-    intake_puregym_roster_message,
     is_puregym_roster_notification,
+    make_source,
     parse_puregym_roster_email,
 )
 
@@ -22,6 +21,12 @@ Club: Witney
 Leave date: 2024-08-14
 """
 
+DEFAULT_SOURCES = [
+    make_source(kind="domain", pattern="puregym.com"),
+    make_source(kind="email", pattern=PUREGYM_LEAVER_SENDER),
+    make_source(kind="email", pattern="rubabzahra248@gmail.com"),
+]
+
 
 class TestAutomatedPersonIntake:
     def test_classifies_new_puregym_user_as_add(self):
@@ -30,6 +35,7 @@ class TestAutomatedPersonIntake:
             "New PureGym user",
             ADD_BODY,
             from_name="PureGym",
+            sources=DEFAULT_SOURCES,
         ) == "Add"
 
     def test_classifies_puregym_leaver_as_remove(self):
@@ -37,6 +43,7 @@ class TestAutomatedPersonIntake:
             PUREGYM_LEAVER_SENDER,
             "PureGym Leaver",
             REMOVE_BODY,
+            sources=DEFAULT_SOURCES,
         ) == "Remove"
 
     def test_parses_add_request_fields(self):
@@ -45,6 +52,7 @@ class TestAutomatedPersonIntake:
             ADD_BODY,
             sender_email="notifications@puregym.com",
             from_name="PureGym",
+            sources=DEFAULT_SOURCES,
         )
         assert parsed is not None
         person, action = parsed
@@ -59,6 +67,7 @@ class TestAutomatedPersonIntake:
             "PureGym Leaver",
             REMOVE_BODY,
             sender_email=PUREGYM_LEAVER_SENDER,
+            sources=DEFAULT_SOURCES,
         )
         assert parsed is not None
         person, action = parsed
@@ -74,13 +83,15 @@ class TestAutomatedPersonIntake:
             "Partnership review Q3",
             "We would like to schedule a Q3 partnership review.",
             from_name="PureGym",
+            sources=DEFAULT_SOURCES,
         )
 
     def test_ignores_wrong_sender_for_leaver(self):
         assert classify_puregym_roster_email(
-            "noreply@puregym.com",
+            "noreply@example.com",
             "PureGym Leaver",
             REMOVE_BODY,
+            sources=DEFAULT_SOURCES,
         ) is None
 
     def test_subject_normalization(self):
@@ -89,4 +100,29 @@ class TestAutomatedPersonIntake:
             "  new   PureGym   user  ",
             ADD_BODY,
             from_name="PureGym",
+            sources=DEFAULT_SOURCES,
         ) == "Add"
+
+    def test_allowlisted_gmail_add(self):
+        assert classify_puregym_roster_email(
+            "rubabzahra248@gmail.com",
+            "New user",
+            ADD_BODY,
+            sources=DEFAULT_SOURCES,
+        ) == "Add"
+
+    def test_allowlisted_gmail_remove(self):
+        assert classify_puregym_roster_email(
+            "rubabzahra248@gmail.com",
+            "Remove user",
+            REMOVE_BODY,
+            sources=DEFAULT_SOURCES,
+        ) == "Remove"
+
+    def test_rejects_non_allowlisted_sender(self):
+        assert classify_puregym_roster_email(
+            "someone@random.com",
+            "New PureGym user",
+            ADD_BODY,
+            sources=DEFAULT_SOURCES,
+        ) is None

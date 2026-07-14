@@ -161,6 +161,18 @@ export const createIgnoreRule = (inbox, pattern) =>
 export const deleteIgnoreRule = (id) =>
   request(`/api/pilot2/ignore-list/${id}`, { method: 'DELETE' });
 
+// Partner allowlists
+export const getManagerDomains = () => request('/api/admin/manager-domains');
+export const createManagerDomain = (domain) =>
+  request('/api/admin/manager-domains', { method: 'POST', body: JSON.stringify({ domain }) });
+export const deleteManagerDomain = (id) =>
+  request(`/api/admin/manager-domains/${id}`, { method: 'DELETE' });
+export const getAutomatedSources = () => request('/api/admin/automated-sources');
+export const createAutomatedSource = (pattern) =>
+  request('/api/admin/automated-sources', { method: 'POST', body: JSON.stringify({ pattern }) });
+export const deleteAutomatedSource = (id) =>
+  request(`/api/admin/automated-sources/${id}`, { method: 'DELETE' });
+
 // Emails
 export const getEmails = () => request('/api/pilot2/emails');
 export const patchEmail = (id, patch) =>

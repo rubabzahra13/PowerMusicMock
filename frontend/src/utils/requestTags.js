@@ -63,22 +63,28 @@ export function sentViaTableRequestTags(tags = []) {
   return visibleTableRequestTags(tags).filter((tag) => tag !== TAG_ALREADY_EXISTS);
 }
 
-export function intakeMismatchReviewTag(compact = true) {
-  return { variant: 'review-mismatch', label: 'Auto Mail differs', prefix: '! ', compact };
-}
-
-export function directoryReviewTag(directoryRecord, compact = true) {
-  const isRemoved = directoryRecord?.status === 'Removed';
-  return {
-    variant: isRemoved ? 'review-removed' : 'review-exists',
-    label: isRemoved ? 'Already removed in DB' : 'User already exists',
-    prefix: '⚠ ',
-    compact,
-  };
-}
-
 export function requestTagLabel(tag) {
   if (tag === TAG_PARTNER_REQUEST) return 'Manager Form';
   if (tag === TAG_AUTO_MAIL) return 'Auto Email';
   return tag;
+}
+
+/** Directory presence for New requests Status column. */
+export function directoryStatusTag(request) {
+  const inDirectory = Boolean(
+    request?.directoryMatch
+    || (request?.tags || []).includes(TAG_ALREADY_EXISTS),
+  );
+  if (inDirectory) {
+    return {
+      variant: 'already-exists',
+      label: 'Already exists',
+      prefix: '⚠ ',
+    };
+  }
+  return {
+    variant: 'new-person',
+    label: 'New',
+    prefix: '',
+  };
 }

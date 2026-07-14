@@ -171,7 +171,7 @@ def process_incoming(
         log(
             db,
             "automated_intake",
-            f"PureGym roster email → manager request from {from_email}.",
+            f"Roster email → manager request from {from_email}.",
             email.id,
         )
         db.commit()

@@ -1,19 +1,21 @@
-"""PureGym automated roster emails → manager_requests (not the email queue)."""
+"""Automated partner roster emails → manager_requests (not the email queue)."""
 
 from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
-from typing import Literal, Optional
+from datetime import datetime, timezone
+from typing import Literal, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.manager_request_intake import intake_automated_email_request
+from app.partner_allowlists import list_automated_sources, sender_matches_automated_sources
 
 logger = logging.getLogger(__name__)
 
+# Legacy PureGym constants kept for tests / docs
 PUREGYM_LEAVER_SENDER = "em@myptzone.co"
 ADD_SUBJECT = "new puregym user"
 REMOVE_SUBJECT = "puregym leaver"
@@ -42,12 +44,44 @@ def _clean_field(value: str) -> str:
     return (value or "").strip().splitlines()[0].strip().strip(".,;:")
 
 
-def _is_puregym_sender(from_email: str, from_name: str = "") -> bool:
-    email = (from_email or "").strip().lower()
-    name = (from_name or "").strip().lower()
-    if "puregym" in email or email.endswith("@puregym.com"):
-        return True
-    return name == "puregym" or "puregym" in name
+def _resolve_sources(
+    *,
+    db: Optional[Session] = None,
+    sources: Optional[Sequence[models.AutomatedRosterSource]] = None,
+) -> Sequence[models.AutomatedRosterSource]:
+    if sources is not None:
+        return sources
+    if db is not None:
+        return list_automated_sources(db)
+    return ()
+
+
+def _subject_action(subject: str) -> Optional[Literal["Add", "Remove"]]:
+    subj = _norm_subject(subject)
+    if "leaver" in subj or ("remove" in subj and "user" in subj):
+        return "Remove"
+    if "new" in subj and "user" in subj:
+        return "Add"
+    return None
+
+
+def classify_roster_email(
+    from_email: str,
+    subject: str,
+    body: str,
+    *,
+    from_name: str = "",
+    db: Optional[Session] = None,
+    sources: Optional[Sequence[models.AutomatedRosterSource]] = None,
+) -> Optional[Literal["Add", "Remove"]]:
+    """Match allowlisted senders against add/remove roster subject patterns."""
+    del body, from_name  # body parsed separately; display name not required
+    resolved = _resolve_sources(db=db, sources=sources)
+    if not resolved:
+        return None
+    if not sender_matches_automated_sources(from_email, resolved):
+        return None
+    return _subject_action(subject)
 
 
 def classify_puregym_roster_email(
@@ -56,18 +90,18 @@ def classify_puregym_roster_email(
     body: str,
     *,
     from_name: str = "",
+    db: Optional[Session] = None,
+    sources: Optional[Sequence[models.AutomatedRosterSource]] = None,
 ) -> Optional[Literal["Add", "Remove"]]:
-    """Match the two known PureGym automated notification formats."""
-    subj = _norm_subject(subject)
-    sender = (from_email or "").strip().lower()
-
-    if REMOVE_SUBJECT in subj and sender == PUREGYM_LEAVER_SENDER:
-        return "Remove"
-
-    if ADD_SUBJECT in subj and _is_puregym_sender(from_email, from_name):
-        return "Add"
-
-    return None
+    """Backward-compatible alias for classify_roster_email."""
+    return classify_roster_email(
+        from_email,
+        subject,
+        body,
+        from_name=from_name,
+        db=db,
+        sources=sources,
+    )
 
 
 def parse_labelled_roster_body(
@@ -75,6 +109,7 @@ def parse_labelled_roster_body(
     *,
     action: Literal["Add", "Remove"],
 ) -> Optional[schemas.PersonInfo]:
+    del action
     text = body or ""
     name_match = _NAME_RE.search(text)
     email_match = _EMAIL_RE.search(text)
@@ -97,22 +132,44 @@ def parse_labelled_roster_body(
     )
 
 
+def is_roster_notification(
+    from_email: str,
+    subject: str,
+    body: str,
+    *,
+    from_name: str = "",
+    db: Optional[Session] = None,
+    sources: Optional[Sequence[models.AutomatedRosterSource]] = None,
+) -> bool:
+    return classify_roster_email(
+        from_email,
+        subject,
+        body,
+        from_name=from_name,
+        db=db,
+        sources=sources,
+    ) is not None
+
+
 def is_puregym_roster_notification(
     from_email: str,
     subject: str,
     body: str,
     *,
     from_name: str = "",
+    db: Optional[Session] = None,
+    sources: Optional[Sequence[models.AutomatedRosterSource]] = None,
 ) -> bool:
-    return classify_puregym_roster_email(
+    return is_roster_notification(
         from_email,
         subject,
         body,
         from_name=from_name,
-    ) is not None
+        db=db,
+        sources=sources,
+    )
 
 
-# Backward-compatible alias used by sync.py
 def looks_like_puregym_roster_email(
     from_email: str,
     subject: str,
@@ -120,27 +177,36 @@ def looks_like_puregym_roster_email(
     *,
     is_automated: bool = False,
     from_name: str = "",
+    db: Optional[Session] = None,
+    sources: Optional[Sequence[models.AutomatedRosterSource]] = None,
 ) -> bool:
-    return is_puregym_roster_notification(
+    del is_automated
+    return is_roster_notification(
         from_email,
         subject,
         body,
         from_name=from_name,
+        db=db,
+        sources=sources,
     )
 
 
-def parse_puregym_roster_email(
+def parse_roster_email(
     subject: str,
     body: str,
     *,
     sender_email: str,
     from_name: str = "",
+    db: Optional[Session] = None,
+    sources: Optional[Sequence[models.AutomatedRosterSource]] = None,
 ) -> Optional[tuple[schemas.PersonInfo, Literal["Add", "Remove"]]]:
-    action = classify_puregym_roster_email(
+    action = classify_roster_email(
         sender_email,
         subject,
         body,
         from_name=from_name,
+        db=db,
+        sources=sources,
     )
     if action is None:
         return None
@@ -150,15 +216,34 @@ def parse_puregym_roster_email(
     return person, action
 
 
+def parse_puregym_roster_email(
+    subject: str,
+    body: str,
+    *,
+    sender_email: str,
+    from_name: str = "",
+    db: Optional[Session] = None,
+    sources: Optional[Sequence[models.AutomatedRosterSource]] = None,
+) -> Optional[tuple[schemas.PersonInfo, Literal["Add", "Remove"]]]:
+    return parse_roster_email(
+        subject,
+        body,
+        sender_email=sender_email,
+        from_name=from_name,
+        db=db,
+        sources=sources,
+    )
+
+
 def _manager_notes(subject: str, body: str, action: str) -> str:
     leave = _LEAVE_DATE_RE.search(body or "")
-    parts = [f"Automated PureGym email — {action}", f"Subject: {subject.strip()}"]
+    parts = [f"Automated roster email — {action}", f"Subject: {subject.strip()}"]
     if leave:
         parts.append(f"Leave date: {_clean_field(leave.group(1))}")
     return "\n".join(parts)
 
 
-def intake_puregym_roster_message(
+def intake_roster_message(
     db: Session,
     *,
     from_email: str,
@@ -169,16 +254,24 @@ def intake_puregym_roster_message(
     gmail_message_id: Optional[str] = None,
 ) -> bool:
     """Create a manager_request and return True if this message was consumed."""
-    parsed = parse_puregym_roster_email(
+    sources = list_automated_sources(db)
+    parsed = parse_roster_email(
         subject,
         body,
         sender_email=from_email,
         from_name=from_name,
+        sources=sources,
     )
     if parsed is None:
-        if is_puregym_roster_notification(from_email, subject, body, from_name=from_name):
+        if is_roster_notification(
+            from_email,
+            subject,
+            body,
+            from_name=from_name,
+            sources=sources,
+        ):
             logger.warning(
-                "PureGym roster notification matched but body could not be parsed (%s)",
+                "Roster notification matched but body could not be parsed (%s)",
                 subject,
             )
             return True
@@ -196,6 +289,27 @@ def intake_puregym_roster_message(
     return True
 
 
+def intake_puregym_roster_message(
+    db: Session,
+    *,
+    from_email: str,
+    from_name: str,
+    subject: str,
+    body: str,
+    received_at: Optional[datetime] = None,
+    gmail_message_id: Optional[str] = None,
+) -> bool:
+    return intake_roster_message(
+        db,
+        from_email=from_email,
+        from_name=from_name,
+        subject=subject,
+        body=body,
+        received_at=received_at,
+        gmail_message_id=gmail_message_id,
+    )
+
+
 def try_intake_automated_person_request(
     db: Session,
     email: models.Email,
@@ -203,7 +317,8 @@ def try_intake_automated_person_request(
     is_automated: bool = False,
 ) -> Optional[models.ManagerRequest]:
     """Legacy path when an emails row already exists (ingest API / re-processing)."""
-    if not intake_puregym_roster_message(
+    del is_automated
+    if not intake_roster_message(
         db,
         from_email=email.from_email,
         from_name=email.from_name,
@@ -224,4 +339,14 @@ def try_intake_automated_person_request(
         db.query(models.ManagerRequest)
         .filter(models.ManagerRequest.source_email_id == email.id)
         .first()
+    )
+
+
+def make_source(*, kind: str, pattern: str) -> models.AutomatedRosterSource:
+    """Test helper — lightweight source stand-in without DB."""
+    return models.AutomatedRosterSource(
+        id="test",
+        kind=kind,
+        pattern=pattern,
+        created_at=datetime.now(timezone.utc),
     )

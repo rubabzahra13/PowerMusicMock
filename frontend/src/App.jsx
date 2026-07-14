@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import AppLayout from './components/layout/AppLayout';
 import { AuthProvider } from './context/AuthContext';
 import { AdminRoute, ManagerRoute, ManagerGuestRoute } from './components/ProtectedRoute';
@@ -6,14 +6,21 @@ import { AdminRoute, ManagerRoute, ManagerGuestRoute } from './components/Protec
 import Home from './pages/Home';
 import ManagerForm from './pages/ManagerForm';
 import NewRequests from './pages/NewRequests';
+import RequestDetail from './pages/RequestDetail';
 import Directory from './pages/Directory';
-import TemplateManagement from './pages/TemplateLibrary';
-import EmailAccounts from './pages/EmailAccounts';
-import EmailQueue from './pages/EmailQueue';
-import IgnoreList from './pages/IgnoreList';
+import PartnerSettings from './pages/PartnerSettings';
 import AdminLogin from './pages/AdminLogin';
 import Signup from './pages/Signup';
 import AuthCallback from './pages/AuthCallback';
+
+/** Admin pages that use the persistent sidebar shell. */
+function AdminShellLayout() {
+  return (
+    <AppLayout>
+      <Outlet />
+    </AppLayout>
+  );
+}
 
 export default function App() {
   return (
@@ -37,62 +44,19 @@ export default function App() {
           </Route>
 
           <Route element={<AdminRoute />}>
-            <Route
-              path="/"
-              element={
-                <AppLayout>
-                  <Home />
-                </AppLayout>
-              }
-            />
-            <Route
-              path="/new-requests"
-              element={
-                <AppLayout>
-                  <NewRequests />
-                </AppLayout>
-              }
-            />
-            <Route
-              path="/directory"
-              element={
-                <AppLayout>
-                  <Directory />
-                </AppLayout>
-              }
-            />
-            <Route
-              path="/templates"
-              element={
-                <AppLayout>
-                  <TemplateManagement />
-                </AppLayout>
-              }
-            />
-            <Route
-              path="/email-responses"
-              element={
-                <AppLayout>
-                  <EmailQueue />
-                </AppLayout>
-              }
-            />
-            <Route
-              path="/email-accounts"
-              element={
-                <AppLayout>
-                  <EmailAccounts />
-                </AppLayout>
-              }
-            />
-            <Route
-              path="/ignore-list"
-              element={
-                <AppLayout>
-                  <IgnoreList />
-                </AppLayout>
-              }
-            />
+            {/* Existing request detail page — full viewport, no sidebar */}
+            <Route path="/new-requests/:requestId" element={<RequestDetail />} />
+
+            <Route element={<AdminShellLayout />}>
+              <Route path="/" element={<Home />} />
+              <Route path="/new-requests" element={<NewRequests />} />
+              <Route path="/directory" element={<Directory />} />
+              <Route path="/partner-settings" element={<PartnerSettings />} />
+              <Route path="/templates" element={<Navigate to="/" replace />} />
+              <Route path="/email-responses" element={<Navigate to="/" replace />} />
+              <Route path="/email-accounts" element={<Navigate to="/partner-settings" replace />} />
+              <Route path="/ignore-list" element={<Navigate to="/partner-settings" replace />} />
+            </Route>
           </Route>
 
           <Route path="*" element={<Navigate to="/submit/signup" replace />} />

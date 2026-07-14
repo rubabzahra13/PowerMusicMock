@@ -362,3 +362,24 @@ class ProcessingLog(Base):
     type = Column(String, nullable=False)
     description = Column(String, nullable=False)
     email_id = Column(String, nullable=True)
+
+
+class ManagerAllowedDomain(Base):
+    """Email domain allowed for manager portal login / signup / submit."""
+
+    __tablename__ = "manager_allowed_domains"
+
+    id = Column(String, primary_key=True)
+    domain = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class AutomatedRosterSource(Base):
+    """Sender email or domain allowed to trigger automated add/remove intake."""
+
+    __tablename__ = "automated_roster_sources"
+
+    id = Column(String, primary_key=True)
+    kind = Column(String, nullable=False)  # email | domain
+    pattern = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)

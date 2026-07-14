@@ -1,4 +1,4 @@
-export const MANAGER_NOTES_EMPTY_LABEL = 'No notes from manager.';
+export const MANAGER_NOTES_EMPTY_LABEL = 'No notes.';
 
 export function readManagerNotes(source) {
   if (!source) return '';

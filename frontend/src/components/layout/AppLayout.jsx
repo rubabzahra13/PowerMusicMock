@@ -2,8 +2,21 @@ import { useEffect, useState } from 'react';
 import { Menu } from 'lucide-react';
 import Sidebar from './Sidebar';
 
+const SIDEBAR_EXPANDED_KEY = 'adminSidebarExpanded';
+
+function readSidebarExpanded() {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_EXPANDED_KEY);
+    if (stored === null) return true;
+    return stored !== 'false';
+  } catch {
+    return true;
+  }
+}
+
 export default function AppLayout({ children }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(readSidebarExpanded);
 
   useEffect(() => {
     if (!mobileNavOpen) return undefined;
@@ -16,6 +29,23 @@ export default function AppLayout({ children }) {
     };
   }, [mobileNavOpen]);
 
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth >= 768) setMobileNavOpen(false);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const handleExpandedChange = (next) => {
+    setSidebarExpanded(next);
+    try {
+      localStorage.setItem(SIDEBAR_EXPANDED_KEY, String(next));
+    } catch {
+      // ignore storage failures
+    }
+  };
+
   return (
     <div className="h-[100dvh] overflow-hidden bg-[var(--color-surface-bg)] text-[var(--color-text-primary)] antialiased font-sans">
       {mobileNavOpen && (
@@ -27,9 +57,18 @@ export default function AppLayout({ children }) {
         />
       )}
 
-      <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+      <Sidebar
+        mobileOpen={mobileNavOpen}
+        onMobileClose={() => setMobileNavOpen(false)}
+        expanded={sidebarExpanded}
+        onExpandedChange={handleExpandedChange}
+      />
 
-      <div className="flex h-[100dvh] flex-col overflow-hidden md:ml-[240px]">
+      <div
+        className={`flex h-[100dvh] flex-col overflow-hidden transition-[margin] duration-300 ease-out ${
+          sidebarExpanded ? 'md:ml-[256px]' : 'md:ml-[72px]'
+        }`}
+      >
         <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border-default)] bg-white px-4 md:hidden">
           <button
             type="button"

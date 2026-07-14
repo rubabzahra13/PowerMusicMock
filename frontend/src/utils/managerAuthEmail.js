@@ -1,5 +1,9 @@
 import { getSupabase } from '../supabaseClient';
-import { validateManagerEmail, MANAGER_ACCOUNT_NOT_FOUND_MESSAGE } from './managerAuth';
+import {
+  validateManagerEmail,
+  ensureManagerAllowedDomains,
+  MANAGER_ACCOUNT_NOT_FOUND_MESSAGE,
+} from './managerAuth';
 import { getAuthCallbackUrl } from './authRedirect';
 import { clearAuthCache } from './authCache';
 
@@ -40,7 +44,11 @@ async function withAuthEmailTimeout(promise, timeoutMessage) {
 }
 
 async function managerAccountExists(supabase, email, { enforceDomain = true } = {}) {
-  const validated = validateManagerEmail(email, { enforceDomain });
+  let allowedDomains;
+  if (enforceDomain) {
+    allowedDomains = await ensureManagerAllowedDomains();
+  }
+  const validated = validateManagerEmail(email, { enforceDomain, allowedDomains });
   if (!validated.ok) {
     throw new Error(validated.error);
   }

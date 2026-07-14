@@ -4,6 +4,7 @@ import { isAdminEmail } from '../utils/adminAccess';
 import {
   validateManagerEmail,
   validateManagerSignupFields,
+  ensureManagerAllowedDomains,
   MANAGER_ACCOUNT_EXISTS_MESSAGE,
   MANAGER_ACCOUNT_NOT_FOUND_MESSAGE,
 } from '../utils/managerAuth';
@@ -504,7 +505,11 @@ export function AuthProvider({ children }) {
       );
     }
 
-    const validated = validateManagerEmail(email, { enforceDomain });
+    let allowedDomains;
+    if (enforceDomain) {
+      allowedDomains = await ensureManagerAllowedDomains();
+    }
+    const validated = validateManagerEmail(email, { enforceDomain, allowedDomains });
     if (!validated.ok) {
       throw new Error(validated.error);
     }
@@ -543,7 +548,11 @@ export function AuthProvider({ children }) {
       );
     }
 
-    const validated = validateManagerEmail(email, { enforceDomain });
+    let allowedDomains;
+    if (enforceDomain) {
+      allowedDomains = await ensureManagerAllowedDomains();
+    }
+    const validated = validateManagerEmail(email, { enforceDomain, allowedDomains });
     if (!validated.ok) {
       throw new Error(validated.error);
     }
@@ -576,7 +585,11 @@ export function AuthProvider({ children }) {
       );
     }
 
-    const validated = validateManagerSignupFields(fields, { enforceDomain });
+    let allowedDomains;
+    if (enforceDomain) {
+      allowedDomains = await ensureManagerAllowedDomains();
+    }
+    const validated = validateManagerSignupFields(fields, { enforceDomain, allowedDomains });
     if (!validated.ok) {
       throw new Error(validated.error);
     }

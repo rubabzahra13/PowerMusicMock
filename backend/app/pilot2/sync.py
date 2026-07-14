@@ -36,16 +36,18 @@ def _is_no_reply_sender(from_email: str) -> bool:
     return gmail.is_no_reply_address(from_email)
 
 
-def _is_puregym_roster_message(message: gmail.InboundMessage) -> bool:
+def _is_puregym_roster_message(db: Session, message: gmail.InboundMessage) -> bool:
     return is_puregym_roster_notification(
         message.from_email,
         message.subject,
         message.body,
         from_name=message.from_name,
+        db=db,
     )
 
 
 def _should_skip_import(
+    db: Session,
     account: models.EmailAccount,
     message: gmail.InboundMessage,
 ) -> bool:
@@ -56,7 +58,7 @@ def _should_skip_import(
         return True
     if message.from_email.lower() == account.email.lower():
         return True
-    if _is_puregym_roster_message(message):
+    if _is_puregym_roster_message(db, message):
         return False
     if _is_no_reply_sender(message.from_email):
         return True
@@ -72,10 +74,10 @@ def _should_skip_import(
     return False
 
 
-def _eligible_for_ai(account: models.EmailAccount, message: gmail.InboundMessage) -> bool:
-    if _is_puregym_roster_message(message):
+def _eligible_for_ai(db: Session, account: models.EmailAccount, message: gmail.InboundMessage) -> bool:
+    if _is_puregym_roster_message(db, message):
         return False
-    if _should_skip_import(account, message):
+    if _should_skip_import(db, account, message):
         return False
     labels = set(message.label_ids or [])
     if gmail.LABEL_SENT in labels:
@@ -132,7 +134,7 @@ def import_message(
         notify_admin_requests_changed("auto_mail")
         return None
 
-    if _should_skip_import(account, message):
+    if _should_skip_import(db, account, message):
         return None
 
     rules = ignore_list.load_rules_for_inbox(db, account.email)
@@ -149,7 +151,7 @@ def import_message(
         account_email=account.email,
         from_email=message.from_email,
     )
-    ai = queue_ai and _eligible_for_ai(account, message)
+    ai = queue_ai and _eligible_for_ai(db, account, message)
 
     email = models.Email(
         id=pipeline.next_id(db, models.Email, "email"),

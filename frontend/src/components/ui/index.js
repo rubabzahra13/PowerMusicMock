@@ -8,4 +8,5 @@ export { useToast } from './useToast';
 export { default as FilterBar } from './FilterBar';
 export { default as SectionLabel } from './SectionLabel';
 export { default as SelectDropdown } from './SelectDropdown';
+export { default as CountTabs } from './CountTabs';
 export { Skeleton, KpiSkeletonGrid, PanelListSkeleton, ActivitySkeleton, EmailListSkeleton, CardListSkeleton, DraftCreatingPanel } from './Skeleton';
