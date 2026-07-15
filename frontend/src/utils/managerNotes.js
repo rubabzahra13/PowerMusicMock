@@ -48,6 +48,19 @@ export function readAutomatedNotes(source) {
   return parts.filter((part) => isAutomatedNotesBlock(part)).join('\n\n').trim();
 }
 
+/** Prefer the stored email subject; fall back to a Subject: line in details. */
+export function readAutomatedSubject(source) {
+  if (!source) return '';
+  const fromMeta = String(source.automatedEmail?.subject || '').trim();
+  if (fromMeta) return fromMeta;
+
+  const details = readAutomatedNotes(source);
+  if (!details) return '';
+  const match = details.match(/(?:^|\n)\s*Subject:\s*(.+?)(?:\n|$)/i);
+  if (match) return match[1].trim();
+  return '';
+}
+
 export function readManagerNotes(source) {
   if (!source) return '';
   const raw = source.managerNotes ?? source.notes ?? '';

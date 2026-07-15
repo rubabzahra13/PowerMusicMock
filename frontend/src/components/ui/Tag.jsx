@@ -69,9 +69,11 @@ export default function Tag({ variant, label, compact = false, prefix: prefixOve
       bgClass = 'bg-gray-100';
       textClass = 'text-gray-400';
       break;
+    case 'neutral':
     default:
-      bgClass = 'bg-gray-100';
-      textClass = 'text-gray-800';
+      bgClass = 'bg-[var(--color-tag-neutral-bg)]';
+      textClass = 'text-[var(--color-tag-neutral-text)]';
+      extraClass = 'ring-1 ring-inset ring-[var(--color-tag-neutral-border)]';
       break;
   }
 
