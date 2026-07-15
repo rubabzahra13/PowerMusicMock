@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache, getDashboard } from '../utils/pilot2Api';
-import { PanelListSkeleton } from '../components/ui';
+import { AdminPageScroll, PanelListSkeleton } from '../components/ui';
 import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
 
 const CHART = {
@@ -433,6 +433,12 @@ export default function Home() {
     [pendingRequests],
   );
 
+  const needsReviewCount = useMemo(
+    () => (Array.isArray(pendingRequests) ? pendingRequests : [])
+      .filter((req) => req.tags?.includes(TAG_ALREADY_EXISTS)).length,
+    [pendingRequests],
+  );
+
   const recentActivity = useMemo(
     () => (Array.isArray(activity) ? activity : []).slice(0, 5),
     [activity],
@@ -461,12 +467,12 @@ export default function Home() {
   };
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto overscroll-contain select-none">
+    <AdminPageScroll contentClassName="flex flex-col gap-3 select-none pb-4">
       <PageHeader
         section="Overview"
         title="Hello Andrea."
         description="A live view of partner requests, ledger health, and what needs your attention."
-        className="mb-3 shrink-0"
+        className="shrink-0"
       />
 
       {!ready ? (
@@ -507,11 +513,11 @@ export default function Home() {
             />
             <InsightCard
               label="Needs review"
-              value={insights.duplicates}
+              value={needsReviewCount}
               hint="Possible duplicates in the queue"
               icon={AlertTriangle}
               accent="pink"
-              onClick={() => navigate('/new-requests')}
+              onClick={() => navigate('/new-requests?status=Already%20exists')}
             />
           </div>
 
@@ -657,6 +663,6 @@ export default function Home() {
           </div>
         </div>
       )}
-    </div>
+    </AdminPageScroll>
   );
 }

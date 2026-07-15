@@ -256,13 +256,14 @@ def get_dashboard(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         .all()
     )
     hydrate_request_display(pending)
-    insights = build_dashboard_insights(db, pending=pending)
+    pending_payloads = requests_to_api_dicts(db, pending)
+    insights = build_dashboard_insights(db, pending=pending, pending_payloads=pending_payloads)
     return {
         "kpis": {
             "pendingRequests": len(pending),
             "usersInLedger": insights["usersAdded"],
         },
-        "pendingRequests": requests_to_api_dicts(db, pending),
+        "pendingRequests": pending_payloads,
         "activity": list_partner_activity(db, limit=8),
         "insights": insights,
     }

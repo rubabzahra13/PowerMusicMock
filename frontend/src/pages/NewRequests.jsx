@@ -4,10 +4,9 @@ import {
   Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
 } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
-import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs } from '../components/ui';
+import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll } from '../components/ui';
 import RequestComparison from '../components/RequestComparison';
 import PageHeader from '../components/layout/PageHeader';
-import { adminPageScrollClass } from '../utils/responsiveLayout';
 import { getManagerColumnContent, getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 import { loadWithCache, patchCache, writeCache, refreshCache, getNewRequestsPage } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
@@ -28,7 +27,8 @@ import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 
 const REQUESTS_POLL_MS = 10000;
-import { TAG_ALREADY_EXISTS, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, directoryStatusTag } from '../utils/requestTags';
+import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, directoryStatusTag, matchesSentViaFilter, SENT_VIA_BOTH } from '../utils/requestTags';
+import { hasAnyDataDiffs } from '../utils/requestComparison';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
 import { formGridClass } from '../utils/responsiveLayout';
 import {
@@ -426,6 +426,7 @@ export default function Requests() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkRequestId = searchParams.get('id');
+  const statusDeepLink = searchParams.get('status');
   const consumedDeepLinkRef = useRef(null);
   const adminDisplayName = profile?.full_name?.trim() || 'Power Music Admin';
 
@@ -463,6 +464,17 @@ export default function Requests() {
     setSearchParams({}, { replace: true });
     navigate(`/new-requests/${encodeURIComponent(deepLinkRequestId)}`, { replace: true });
   }, [deepLinkRequestId, navigate, setSearchParams]);
+
+  useEffect(() => {
+    if (statusDeepLink !== 'New' && statusDeepLink !== 'Already exists') return;
+    setFilterStatus(statusDeepLink);
+    setFilterOpen(true);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('status');
+      return next;
+    }, { replace: true });
+  }, [statusDeepLink, setSearchParams]);
 
   const applyRequestsPage = useCallback((data, isStale) => {
     if (Array.isArray(data.requests)) {
@@ -528,7 +540,9 @@ export default function Requests() {
   const [filterDate, setFilterDate] = useState('All');
   const [filterLocation, setFilterLocation] = useState('All');
   const [filterClub, setFilterClub] = useState('All');
-  const [filterAlreadyExists, setFilterAlreadyExists] = useState('All');
+  const [filterSentVia, setFilterSentVia] = useState('All');
+  const [filterNeedsReview, setFilterNeedsReview] = useState('All');
+  const [filterStatus, setFilterStatus] = useState('All');
   const [sortPreset, setSortPreset] = useState(DEFAULT_SORT);
   const [filterOpen, setFilterOpen] = useState(true);
 
@@ -615,7 +629,9 @@ export default function Requests() {
     setFilterDate('All');
     setFilterLocation('All');
     setFilterClub('All');
-    setFilterAlreadyExists('All');
+    setFilterSentVia('All');
+    setFilterNeedsReview('All');
+    setFilterStatus('All');
     setSortPreset(DEFAULT_SORT);
     setFilterOpen(true);
   };
@@ -649,11 +665,16 @@ export default function Requests() {
         filterLocation === 'All' || req.person.location === filterLocation;
       const matchesClub =
         filterClub === 'All' || req.submittedBy?.club === filterClub;
-      const hasAlreadyExists = req.tags?.includes(TAG_ALREADY_EXISTS);
-      const matchesAlreadyExists =
-        filterAlreadyExists === 'All' ||
-        (filterAlreadyExists === 'Yes' && hasAlreadyExists) ||
-        (filterAlreadyExists === 'No' && !hasAlreadyExists);
+      const tags = req.tags || [];
+      const matchesSentVia = matchesSentViaFilter(tags, filterSentVia);
+      const needsReview = hasAnyDataDiffs(req.intakeMatch, req.directoryMatch);
+      const matchesNeedsReview =
+        filterNeedsReview === 'All' ||
+        (filterNeedsReview === 'Yes' && needsReview) ||
+        (filterNeedsReview === 'No' && !needsReview);
+      const statusLabel = directoryStatusTag(req).label;
+      const matchesStatus =
+        filterStatus === 'All' || statusLabel === filterStatus;
 
       return (
         matchesSearch &&
@@ -661,7 +682,9 @@ export default function Requests() {
         matchesDate &&
         matchesLocation &&
         matchesClub &&
-        matchesAlreadyExists
+        matchesSentVia &&
+        matchesNeedsReview &&
+        matchesStatus
       );
     });
 
@@ -712,7 +735,7 @@ export default function Requests() {
 
   const filteredRequests = useMemo(
     () => applyFilterSort(actionTabRows, 'receivedAt'),
-    [actionTabRows, searchQuery, actionTab, filterDate, filterLocation, filterClub, filterAlreadyExists, sortPreset]
+    [actionTabRows, searchQuery, actionTab, filterDate, filterLocation, filterClub, filterSentVia, filterNeedsReview, filterStatus, sortPreset]
   );
 
   const allCount = newRequests.length;
@@ -723,7 +746,9 @@ export default function Requests() {
     filterDate !== 'All',
     filterLocation !== 'All',
     filterClub !== 'All',
-    filterAlreadyExists !== 'All',
+    filterSentVia !== 'All',
+    filterNeedsReview !== 'All',
+    filterStatus !== 'All',
   ].filter(Boolean).length;
 
   // ── Manual form submit ──
@@ -1060,7 +1085,7 @@ export default function Requests() {
   const displayedRows = filteredRequests;
 
   return (
-    <div className={adminPageScrollClass}>
+    <AdminPageScroll>
       <Toast />
 
       <PageHeader
@@ -1115,13 +1140,30 @@ export default function Requests() {
             options: clubOptions
           },
           {
-            label: 'Already Exists', value: filterAlreadyExists, onChange: setFilterAlreadyExists,
+            label: 'Sent via', value: filterSentVia, onChange: setFilterSentVia,
+            options: [
+              { value: 'All', label: 'All' },
+              { value: TAG_PARTNER_REQUEST, label: 'Manager Form' },
+              { value: TAG_AUTO_MAIL, label: 'Auto Email' },
+              { value: SENT_VIA_BOTH, label: 'Both' },
+            ]
+          },
+          {
+            label: 'Needs review', value: filterNeedsReview, onChange: setFilterNeedsReview,
             options: [
               { value: 'All', label: 'All' },
               { value: 'Yes', label: 'Yes' },
-              { value: 'No', label: 'No' }
+              { value: 'No', label: 'No' },
             ]
-          }
+          },
+          {
+            label: 'Status', value: filterStatus, onChange: setFilterStatus,
+            options: [
+              { value: 'All', label: 'All' },
+              { value: 'New', label: 'New' },
+              { value: 'Already exists', label: 'Already exists' },
+            ]
+          },
         ]}
         sortPreset={sortPreset}
         setSortPreset={setSortPreset}
@@ -1400,6 +1442,6 @@ export default function Requests() {
         )}
       </Modal>
 
-    </div>
+    </AdminPageScroll>
   );
 }

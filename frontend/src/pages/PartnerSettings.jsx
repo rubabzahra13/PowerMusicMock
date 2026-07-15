@@ -34,6 +34,17 @@ import {
 
 const MAX_CONNECTED_INBOXES = 7;
 
+function readPmCache(key) {
+  try {
+    const raw = sessionStorage.getItem(`pm_cache_${key}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function connectedDate(iso) {
   if (!iso) return null;
   try { return format(parseISO(iso), 'd MMM yyyy'); } catch { return iso; }
@@ -93,8 +104,8 @@ function FeatureGroup({ title, description, children }) {
 export default function PartnerSettings() {
   const { showToast } = useToast();
 
-  const [accounts, setAccounts] = useState([]);
-  const [inboxesLoading, setInboxesLoading] = useState(true);
+  const [accounts, setAccounts] = useState(() => readPmCache('inboxes') || []);
+  const [inboxesLoading, setInboxesLoading] = useState(() => !readPmCache('inboxes'));
   const [busyId, setBusyId] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState('');
@@ -103,14 +114,14 @@ export default function PartnerSettings() {
   const [addTitle, setAddTitle] = useState('');
   const [addBusy, setAddBusy] = useState(false);
 
-  const [managerDomains, setManagerDomains] = useState([]);
-  const [domainsLoading, setDomainsLoading] = useState(true);
+  const [managerDomains, setManagerDomains] = useState(() => readPmCache('manager_domains') || []);
+  const [domainsLoading, setDomainsLoading] = useState(() => !readPmCache('manager_domains'));
   const [domainInput, setDomainInput] = useState('');
   const [domainAdding, setDomainAdding] = useState(false);
   const [pendingDomainRemove, setPendingDomainRemove] = useState(null);
 
-  const [autoSources, setAutoSources] = useState([]);
-  const [sourcesLoading, setSourcesLoading] = useState(true);
+  const [autoSources, setAutoSources] = useState(() => readPmCache('automated_sources') || []);
+  const [sourcesLoading, setSourcesLoading] = useState(() => !readPmCache('automated_sources'));
   const [sourceInput, setSourceInput] = useState('');
   const [sourceAdding, setSourceAdding] = useState(false);
   const [pendingSourceRemove, setPendingSourceRemove] = useState(null);
@@ -132,29 +143,23 @@ export default function PartnerSettings() {
   }, [showToast]);
 
   const refreshDomains = useCallback(() => {
-    setDomainsLoading(true);
-    getManagerDomains()
-      .then((rows) => {
-        setManagerDomains(rows);
-        setDomainsLoading(false);
-      })
-      .catch((err) => {
-        setDomainsLoading(false);
-        showToast(`Could not load manager domains: ${err.message}`, 'error');
-      });
+    loadWithCache('manager_domains', getManagerDomains, (rows) => {
+      setManagerDomains(Array.isArray(rows) ? rows : []);
+      setDomainsLoading(false);
+    }).catch((err) => {
+      setDomainsLoading(false);
+      showToast(`Could not load manager domains: ${err.message}`, 'error');
+    });
   }, [showToast]);
 
   const refreshSources = useCallback(() => {
-    setSourcesLoading(true);
-    getAutomatedSources()
-      .then((rows) => {
-        setAutoSources(rows);
-        setSourcesLoading(false);
-      })
-      .catch((err) => {
-        setSourcesLoading(false);
-        showToast(`Could not load automated sources: ${err.message}`, 'error');
-      });
+    loadWithCache('automated_sources', getAutomatedSources, (rows) => {
+      setAutoSources(Array.isArray(rows) ? rows : []);
+      setSourcesLoading(false);
+    }).catch((err) => {
+      setSourcesLoading(false);
+      showToast(`Could not load automated sources: ${err.message}`, 'error');
+    });
   }, [showToast]);
 
   useEffect(() => {
@@ -268,7 +273,8 @@ export default function PartnerSettings() {
     }
   };
 
-  const handleAddDomain = async (event) => {    event.preventDefault();
+  const handleAddDomain = async (event) => {
+    event.preventDefault();
     const value = domainInput.trim();
     if (!value) {
       showToast('Enter a domain like activegym.com.', 'error');
@@ -277,7 +283,11 @@ export default function PartnerSettings() {
     setDomainAdding(true);
     try {
       const created = await createManagerDomain(value);
-      setManagerDomains((prev) => [created, ...prev.filter((row) => row.id !== created.id)]);
+      setManagerDomains((prev) => {
+        const next = [created, ...prev.filter((row) => row.id !== created.id)];
+        writeCache('manager_domains', next);
+        return next;
+      });
       setDomainInput('');
       clearManagerAllowedDomainsCache();
       showToast('Manager domain added.', 'success');
@@ -292,7 +302,11 @@ export default function PartnerSettings() {
     setBusyId(row.id);
     try {
       await deleteManagerDomain(row.id);
-      setManagerDomains((prev) => prev.filter((item) => item.id !== row.id));
+      setManagerDomains((prev) => {
+        const next = prev.filter((item) => item.id !== row.id);
+        writeCache('manager_domains', next);
+        return next;
+      });
       clearManagerAllowedDomainsCache();
       setPendingDomainRemove(null);
       showToast('Manager domain removed.', 'success');
@@ -313,7 +327,11 @@ export default function PartnerSettings() {
     setSourceAdding(true);
     try {
       const created = await createAutomatedSource(value);
-      setAutoSources((prev) => [created, ...prev.filter((row) => row.id !== created.id)]);
+      setAutoSources((prev) => {
+        const next = [created, ...prev.filter((row) => row.id !== created.id)];
+        writeCache('automated_sources', next);
+        return next;
+      });
       setSourceInput('');
       showToast('Automated source added.', 'success');
     } catch (err) {
@@ -327,7 +345,11 @@ export default function PartnerSettings() {
     setBusyId(row.id);
     try {
       await deleteAutomatedSource(row.id);
-      setAutoSources((prev) => prev.filter((item) => item.id !== row.id));
+      setAutoSources((prev) => {
+        const next = prev.filter((item) => item.id !== row.id);
+        writeCache('automated_sources', next);
+        return next;
+      });
       setPendingSourceRemove(null);
       showToast('Automated source removed.', 'success');
     } catch (err) {

@@ -152,6 +152,14 @@ class DirectoryMatchOut(RequestMatchOut):
     directoryName: Optional[str] = None
 
 
+class AutomatedEmailOut(BaseModel):
+    fromEmail: str = ""
+    subject: str = ""
+    receivedAt: Optional[datetime] = None
+    inboxEmail: str = ""
+    details: str = ""
+
+
 class RequestOut(BaseModel):
     id: str
     displayId: int
@@ -169,6 +177,7 @@ class RequestOut(BaseModel):
     handledByAdminId: Optional[str] = None
     intakeMatch: Optional[RequestMatchOut] = None
     directoryMatch: Optional[DirectoryMatchOut] = None
+    automatedEmail: Optional[AutomatedEmailOut] = None
 
     @model_validator(mode="before")
     @classmethod

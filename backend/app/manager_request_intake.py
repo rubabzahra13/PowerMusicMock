@@ -19,7 +19,7 @@ from app.manager_request_tags import (
     merge_tags,
     normalize_tags,
 )
-from app.intake_persons import apply_person_to_row, sync_display_person
+from app.intake_persons import apply_person_to_row, set_auto_mail_meta, sync_display_person
 from app.person_match import same_person
 from app.manager_request_stats import increment_manager_request_stats
 from app.request_display import allocate_request_ids
@@ -101,10 +101,24 @@ def attach_auto_mail_to_request(
     *,
     person: schemas.PersonInfo,
     manager_notes: Optional[str] = None,
+    from_email: Optional[str] = None,
+    received_at: Optional[datetime] = None,
+    subject: Optional[str] = None,
+    inbox_email: Optional[str] = None,
 ) -> models.ManagerRequest:
     apply_person_to_row(req, person, source="autoMail")
-    if manager_notes:
-        req.manager_notes = manager_notes
+    # Never write roster auto text into manager_notes — that field is only for
+    # notes the manager entered on the form.
+    set_auto_mail_meta(
+        req,
+        from_email=from_email or "",
+        received_at=received_at,
+        subject=subject or "",
+        inbox_email=inbox_email or "",
+        details=(manager_notes or "").strip(),
+    )
+    if _looks_like_automated_notes(req.manager_notes):
+        req.manager_notes = None
     req.tags = merge_tags(
         req.tags,
         [TAG_AUTO_MAIL],
@@ -112,6 +126,17 @@ def attach_auto_mail_to_request(
     )
     sync_display_person(req)
     return req
+
+
+def _looks_like_automated_notes(raw: Optional[str]) -> bool:
+    text = (raw or "").strip().lower()
+    if not text:
+        return False
+    return (
+        text.startswith("automated roster email")
+        or text.startswith("automated puregym email")
+        or text.startswith("seed:")
+    )
 
 
 def verify_unverified_request(
@@ -124,9 +149,11 @@ def verify_unverified_request(
 ) -> models.ManagerRequest:
     req.manager_id = manager_id
     apply_person_to_row(req, person, source="partner")
-    if manager_notes:
-        existing = (req.manager_notes or "").strip()
-        req.manager_notes = manager_notes if not existing else f"{existing}\n\n{manager_notes}"
+    # Keep form notes only. Existing auto-generated text stays out of manager_notes.
+    if _looks_like_automated_notes(req.manager_notes):
+        req.manager_notes = None
+    if manager_notes and manager_notes.strip():
+        req.manager_notes = manager_notes.strip()
 
     base = [t for t in (req.tags or []) if t not in {TAG_UNVERIFIED}]
     req.tags = merge_tags(
@@ -178,6 +205,9 @@ def intake_automated_email_request(
     received_at: Optional[datetime] = None,
     source_email_id: Optional[str] = None,
     source_gmail_message_id: Optional[str] = None,
+    from_email: Optional[str] = None,
+    subject: Optional[str] = None,
+    inbox_email: Optional[str] = None,
 ) -> models.ManagerRequest:
     """PureGym auto email — attach to verified row or store as unverified (hidden)."""
     if source_gmail_message_id:
@@ -200,6 +230,10 @@ def intake_automated_email_request(
             verified,
             person=person,
             manager_notes=manager_notes,
+            from_email=from_email,
+            received_at=received_at,
+            subject=subject,
+            inbox_email=inbox_email,
         )
 
     pending = find_unverified_auto_mail_match(db, person, action)
@@ -209,19 +243,32 @@ def intake_automated_email_request(
             pending,
             person=person,
             manager_notes=manager_notes,
+            from_email=from_email,
+            received_at=received_at,
+            subject=subject,
+            inbox_email=inbox_email,
         )
 
-    return create_manager_request(
+    row = create_manager_request(
         db,
         person=person,
         action=action,
-        manager_notes=manager_notes,
+        manager_notes=None,
         manager_id=None,
         extra_tags=[TAG_UNVERIFIED, TAG_AUTO_MAIL],
         received_at=received_at,
         source_email_id=source_email_id,
         source_gmail_message_id=source_gmail_message_id,
     )
+    set_auto_mail_meta(
+        row,
+        from_email=from_email or "",
+        received_at=received_at,
+        subject=subject or "",
+        inbox_email=inbox_email or "",
+        details=(manager_notes or "").strip(),
+    )
+    return row
 
 
 def create_manager_request(

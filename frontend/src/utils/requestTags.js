@@ -63,6 +63,19 @@ export function sentViaTableRequestTags(tags = []) {
   return visibleTableRequestTags(tags).filter((tag) => tag !== TAG_ALREADY_EXISTS);
 }
 
+export const SENT_VIA_BOTH = 'both';
+
+/** Filter New Requests by intake source (exclusive Manager Form / Auto Email, or both). */
+export function matchesSentViaFilter(tags = [], filterValue) {
+  if (filterValue === 'All') return true;
+  const hasPartner = tags.includes(TAG_PARTNER_REQUEST);
+  const hasAuto = tags.includes(TAG_AUTO_MAIL);
+  if (filterValue === TAG_PARTNER_REQUEST) return hasPartner && !hasAuto;
+  if (filterValue === TAG_AUTO_MAIL) return hasAuto && !hasPartner;
+  if (filterValue === SENT_VIA_BOTH) return hasPartner && hasAuto;
+  return true;
+}
+
 export function requestTagLabel(tag) {
   if (tag === TAG_PARTNER_REQUEST) return 'Manager Form';
   if (tag === TAG_AUTO_MAIL) return 'Auto Email';

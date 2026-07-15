@@ -3,9 +3,8 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
 
 import { format, parseISO } from 'date-fns';
-import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL } from '../components/ui';
+import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, AdminPageScroll } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
-import { adminPageScrollClass } from '../utils/responsiveLayout';
 import { loadWithCache } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import {
@@ -671,7 +670,7 @@ export default function UserLedger() {
   ];
 
   return (
-    <div className={adminPageScrollClass}>
+    <AdminPageScroll>
       <PageHeader
         section="Partner Support"
         title="Users"
@@ -888,6 +887,6 @@ export default function UserLedger() {
           </div>
         )}
       </Drawer>
-    </div>
+    </AdminPageScroll>
   );
 }

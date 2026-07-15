@@ -1,14 +1,16 @@
 import { useMemo } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { formatAdminDate } from '../utils/requestDisplayId';
+import { formatAdminDateTime } from '../utils/requestDisplayId';
 import {
   hasAnyDataDiffs,
   hasComparisonContext,
 } from '../utils/requestComparison';
+import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST } from '../utils/requestTags';
+import DottedScroll from './ui/DottedScroll';
 
 const norm = (value) => (value || '').trim().toLowerCase();
 
-const FIELD_ROWS = [
+const PERSON_FIELD_ROWS = [
   { key: 'name', label: 'Name' },
   { key: 'email', label: 'Email', mono: true },
   { key: 'location', label: 'Location' },
@@ -16,12 +18,15 @@ const FIELD_ROWS = [
 
 /**
  * One matrix: fields as rows, sources as columns.
- * The "This request" column is the anchor; cells that differ from it are highlighted.
+ * The first column is the anchor; cells that differ from it are highlighted.
  */
-function ComparisonMatrix({ sources, embedded = false }) {
-  const rows = FIELD_ROWS.filter(({ key }) =>
-    sources.some((source) => source.values[key]),
-  );
+function ComparisonMatrix({ sources, embedded = false, includeManagerRow = false }) {
+  const rows = [
+    ...PERSON_FIELD_ROWS.filter(({ key }) =>
+      sources.some((source) => source.values[key]),
+    ),
+    ...(includeManagerRow ? [{ key: 'manager', label: 'Manager' }] : []),
+  ];
 
   const anchor = sources[0];
 
@@ -29,14 +34,14 @@ function ComparisonMatrix({ sources, embedded = false }) {
     <div
       className={
         embedded
-          ? 'overflow-hidden bg-white'
-          : 'overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white'
+          ? 'min-w-0 overflow-hidden bg-white'
+          : 'min-w-0 overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white'
       }
     >
-      <div className="overflow-x-auto">
+      <DottedScroll orientation="horizontal" className="min-w-0">
         <table className="w-full min-w-[40rem] border-collapse text-sm">
           <caption className="sr-only">
-            Person details from each source. Highlighted values differ from this request.
+            Person details from each source. Highlighted values differ from the first column.
           </caption>
           <thead>
             <tr className="border-b border-[var(--color-border-default)] bg-white">
@@ -68,8 +73,9 @@ function ComparisonMatrix({ sources, embedded = false }) {
                 .map((s) => s.values[key])
                 .filter((v) => (v || '').trim() !== '');
               const conflict =
-                presentValues.length > 1 &&
-                new Set(presentValues.map(norm)).size > 1;
+                key !== 'manager'
+                && presentValues.length > 1
+                && new Set(presentValues.map(norm)).size > 1;
 
               return (
                 <tr key={key}>
@@ -109,9 +115,9 @@ function ComparisonMatrix({ sources, embedded = false }) {
                               : 'font-medium text-[var(--color-text-primary)]'
                           }`}
                         >
-                          {value || <span className="text-[var(--color-text-muted)]">—</span>}
+                          {value || <span className="text-[var(--color-text-muted)]">-</span>}
                           {differs ? (
-                            <span className="sr-only"> (differs from this request)</span>
+                            <span className="sr-only"> (differs from {anchor.title})</span>
                           ) : null}
                         </span>
                       </td>
@@ -122,7 +128,7 @@ function ComparisonMatrix({ sources, embedded = false }) {
             })}
           </tbody>
         </table>
-      </div>
+      </DottedScroll>
     </div>
   );
 }
@@ -156,11 +162,29 @@ function TableReviewCell({ hasDiffs: showYes, onViewDetails }) {
   );
 }
 
+function formatManagerCell(name, email) {
+  const displayName = (name || '').trim();
+  const displayEmail = (email || '').trim();
+  if (displayName && displayEmail) return `${displayName} (${displayEmail})`;
+  return displayName || displayEmail || '';
+}
+
+function personValuesFromRequest(requestPerson) {
+  if (!requestPerson) return null;
+  return {
+    name: `${requestPerson.firstName || ''} ${requestPerson.lastName || ''}`.trim(),
+    email: requestPerson.email,
+    location: requestPerson.location,
+  };
+}
+
 export default function RequestComparison({
   intakeMatch,
   directoryMatch,
   directory = [],
   requestPerson,
+  requestManager = '',
+  tags = [],
   variant = 'table',
   onViewDetails,
   className = '',
@@ -191,69 +215,90 @@ export default function RequestComparison({
   const intakeField = (field, side) =>
     intakeMatch?.fields?.find((f) => f.field === field)?.[side] || '';
 
+  const hasManagerForm = (tags || []).includes(TAG_PARTNER_REQUEST)
+    || Boolean(intakeMatch?.fields?.some((field) => (field.leftValue || '').trim()));
+  const hasAutoMail = (tags || []).includes(TAG_AUTO_MAIL)
+    || Boolean(intakeMatch?.fields?.some((field) => (field.rightValue || '').trim()));
+
+  const requestPersonValues = personValuesFromRequest(requestPerson);
+
+  const includeDirectory = Boolean(directoryRecord || directoryMatch);
+  const directoryManager = formatManagerCell(
+    directoryRecord?.managerName,
+    directoryRecord?.managerEmail,
+  );
+
   const sources = [
-    requestPerson
+    hasManagerForm
       ? {
-          key: 'request',
-          title: 'This request',
-          caption: 'Being reviewed',
-          values: {
-            name: `${requestPerson.firstName || ''} ${requestPerson.lastName || ''}`.trim(),
-            email: requestPerson.email,
-            location: requestPerson.location,
-          },
-        }
-      : null,
-    intakeMatch?.fields?.length
-      ? {
-          key: 'partner',
-          title: 'Manager form',
+          key: 'manager',
+          title: 'Manager request',
           caption: 'Entered by manager',
           values: {
-            name: intakeField('name', 'leftValue'),
-            email: intakeField('email', 'leftValue'),
-            location: intakeField('location', 'leftValue'),
+            name: intakeMatch?.fields?.length
+              ? intakeField('name', 'leftValue')
+              : requestPersonValues?.name || '',
+            email: intakeMatch?.fields?.length
+              ? intakeField('email', 'leftValue')
+              : requestPersonValues?.email || '',
+            location: intakeMatch?.fields?.length
+              ? intakeField('location', 'leftValue')
+              : requestPersonValues?.location || '',
+            manager: requestManager || '',
           },
         }
       : null,
-    intakeMatch?.fields?.length
+    hasAutoMail
       ? {
           key: 'auto',
           title: 'Automated email',
           caption: 'From roster email',
           values: {
-            name: intakeField('name', 'rightValue'),
-            email: intakeField('email', 'rightValue'),
-            location: intakeField('location', 'rightValue'),
+            name: intakeMatch?.fields?.length
+              ? intakeField('name', 'rightValue')
+              : requestPersonValues?.name || '',
+            email: intakeMatch?.fields?.length
+              ? intakeField('email', 'rightValue')
+              : requestPersonValues?.email || '',
+            location: intakeMatch?.fields?.length
+              ? intakeField('location', 'rightValue')
+              : requestPersonValues?.location || '',
+            manager: '',
           },
         }
       : null,
-    directoryRecord || directoryMatch
+    includeDirectory
       ? {
           key: 'directory',
           title: 'Directory',
           caption: directoryRecord?.dateAdded
-            ? `Added ${formatAdminDate(directoryRecord.dateAdded)}`
+            ? `Added ${formatAdminDateTime(directoryRecord.dateAdded)}`
             : 'Existing record',
           values: directoryRecord
             ? {
                 name: `${directoryRecord.firstName || ''} ${directoryRecord.lastName || ''}`.trim(),
                 email: directoryRecord.email,
                 location: directoryRecord.location,
+                manager: directoryManager,
               }
             : {
                 name: directoryMatch?.directoryName || '',
                 email: directoryMatch?.fields?.find((f) => f.field === 'email')?.rightValue || '',
                 location:
                   directoryMatch?.fields?.find((f) => f.field === 'location')?.rightValue || '',
+                manager: directoryManager,
               },
         }
       : null,
   ].filter(Boolean);
 
   return (
-    <div className={className}>
-      <ComparisonMatrix sources={sources} embedded={embedded} />
+    <div className={`min-w-0 w-full ${className}`.trim()}>
+      <ComparisonMatrix
+        sources={sources}
+        embedded={embedded}
+        includeManagerRow={includeDirectory}
+      />
     </div>
   );
 }

@@ -127,6 +127,7 @@ def import_message(
         body=message.body,
         received_at=message.received_at,
         gmail_message_id=message.gmail_message_id,
+        inbox_email=account.email,
     ):
         db.commit()
         from app.partner_requests_realtime import notify_admin_requests_changed

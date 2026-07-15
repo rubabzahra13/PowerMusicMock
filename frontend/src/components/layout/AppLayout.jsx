@@ -65,7 +65,7 @@ export default function AppLayout({ children }) {
       />
 
       <div
-        className={`flex h-[100dvh] flex-col overflow-hidden transition-[margin] duration-300 ease-out ${
+        className={`flex h-[100dvh] min-w-0 flex-col overflow-hidden transition-[margin] duration-300 ease-out ${
           sidebarExpanded ? 'md:ml-[256px]' : 'md:ml-[72px]'
         }`}
       >
@@ -84,7 +84,7 @@ export default function AppLayout({ children }) {
           </div>
         </header>
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 sm:p-6">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4 sm:p-6">
           {children}
         </main>
       </div>

@@ -186,7 +186,7 @@ export default function Sidebar({
                 Partner support
               </span>
             )}
-            <NavLink to="/new-requests" end className={navItemClass} onClick={handleNavClick} title="New requests">
+            <NavLink to="/new-requests" className={navItemClass} onClick={handleNavClick} title="New requests">
               <Inbox className="h-4 w-4 shrink-0" />
               {showExpanded ? <span>New requests</span> : <Tooltip label="New requests" />}
             </NavLink>

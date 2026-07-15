@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import RequestDetailView from '../components/RequestDetailDrawer';
-import { Modal, Toast, useToast } from '../components/ui';
+import { AdminPageScroll, Modal, Toast, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { fetchJson } from '../utils/api';
 import {
@@ -143,15 +143,15 @@ export default function RequestDetail() {
 
   if (loading) {
     return (
-      <div className="flex h-[100dvh] items-center justify-center bg-[var(--color-surface-bg)] text-sm text-[var(--color-text-secondary)] antialiased font-sans">
+      <AdminPageScroll contentClassName="flex min-h-full items-center justify-center text-sm text-[var(--color-text-secondary)] select-none">
         Loading request…
-      </div>
+      </AdminPageScroll>
     );
   }
 
   if (notFound || !request) {
     return (
-      <div className="flex h-[100dvh] items-center justify-center bg-[var(--color-surface-bg)] px-4 antialiased font-sans">
+      <AdminPageScroll contentClassName="flex min-h-full items-center justify-center select-none">
         <div className="mx-auto flex max-w-lg flex-col items-center gap-4 text-center">
           <div>
             <h1 className="text-lg font-semibold text-[var(--color-text-primary)]">Request not found</h1>
@@ -167,22 +167,17 @@ export default function RequestDetail() {
             Back to new requests
           </button>
         </div>
-      </div>
+      </AdminPageScroll>
     );
   }
 
   return (
-    <div
-      data-page="request-detail"
-      className="h-[100dvh] overflow-y-auto bg-[var(--color-surface-bg)] text-[var(--color-text-primary)] antialiased font-sans"
-    >
-      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-8">
-        <RequestDetailView
-          request={request}
-          directory={directory}
-          onConfirmAction={(req, adminNote) => setConfirmAction({ request: req, adminNote: adminNote || '' })}
-        />
-      </div>
+    <AdminPageScroll dataPage="request-detail" contentClassName="min-w-0 select-none pb-2">
+      <RequestDetailView
+        request={request}
+        directory={directory}
+        onConfirmAction={(req, adminNote) => setConfirmAction({ request: req, adminNote: adminNote || '' })}
+      />
 
       <Modal
         isOpen={confirmAction !== null}
@@ -225,6 +220,6 @@ export default function RequestDetail() {
       </Modal>
 
       <Toast toast={toast} onDismiss={dismissToast} />
-    </div>
+    </AdminPageScroll>
   );
 }

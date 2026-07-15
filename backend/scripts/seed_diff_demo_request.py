@@ -17,10 +17,6 @@ from app.request_match_summary import build_directory_match, build_intake_match
 
 DEMO_EMAIL = "casey.differs@demo.powermusic.test"
 DEMO_PENDING_ID_MARKER = "demo-diff-all-sources"
-DIRECTORY_NOTES = "SEED: directory version of Casey Differs demo"
-PENDING_NOTES = "SEED: manager + auto mail + directory all differ"
-
-
 def _purge_demo_rows(db) -> None:
     rows = (
         db.query(models.ManagerRequest)
@@ -64,7 +60,7 @@ def seed_diff_demo_request() -> dict:
             person_email=DEMO_EMAIL,
             person_location="London",
             action="Add",
-            manager_notes=DIRECTORY_NOTES,
+            manager_notes=None,
             admin_notes="Demo directory seed",
             tags=[TAG_PARTNER_REQUEST, TAG_VERIFIED],
             status="handled",
@@ -93,7 +89,7 @@ def seed_diff_demo_request() -> dict:
             person_email=DEMO_EMAIL,
             person_location="Manchester",
             action="Add",
-            manager_notes=PENDING_NOTES,
+            manager_notes=None,
             admin_notes=None,
             tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_AUTO_MAIL],
             status="new",
@@ -111,6 +107,13 @@ def seed_diff_demo_request() -> dict:
                     "lastName": "Auto",
                     "email": DEMO_EMAIL,
                     "location": "Birmingham",
+                },
+                "autoMailMeta": {
+                    "fromEmail": "em@myptzone.co",
+                    "inboxEmail": "ogs529@gmail.com",
+                    "subject": "New PureGym user",
+                    "receivedAt": (now - timedelta(minutes=12)).isoformat(),
+                    "details": "Automated PureGym email — Add\nSubject: New PureGym user",
                 },
             },
         )

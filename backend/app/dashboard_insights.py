@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -29,20 +29,26 @@ def build_dashboard_insights(
     db: Session,
     *,
     pending: List[models.ManagerRequest],
+    pending_payloads: Optional[List[dict]] = None,
 ) -> dict:
     pending_add = sum(1 for row in pending if (row.action or "").lower() == "add")
     pending_remove = sum(1 for row in pending if (row.action or "").lower() == "remove")
-    duplicates = sum(1 for row in pending if row.tags and TAG_ALREADY_EXISTS in row.tags)
-    auto_mail = sum(1 for row in pending if row.tags and TAG_AUTO_MAIL in row.tags)
-    partner_req = sum(1 for row in pending if row.tags and TAG_PARTNER_REQUEST in row.tags)
+
+    # Prefer API payloads so "already exists" matches New requests (includes
+    # directory-derived tags, not only rows that stored the tag in the DB).
+    tag_rows = pending_payloads if pending_payloads is not None else [
+        {"tags": list(row.tags or [])} for row in pending
+    ]
+    duplicates = sum(1 for row in tag_rows if TAG_ALREADY_EXISTS in (row.get("tags") or []))
+    auto_mail = sum(1 for row in tag_rows if TAG_AUTO_MAIL in (row.get("tags") or []))
+    partner_req = sum(1 for row in tag_rows if TAG_PARTNER_REQUEST in (row.get("tags") or []))
     awaiting_partner = sum(
         1
-        for row in pending
-        if row.tags
-        and TAG_UNVERIFIED in row.tags
-        and TAG_AUTO_MAIL in row.tags
-        and TAG_PARTNER_REQUEST not in row.tags
-        and TAG_VERIFIED not in row.tags
+        for row in tag_rows
+        if TAG_UNVERIFIED in (row.get("tags") or [])
+        and TAG_AUTO_MAIL in (row.get("tags") or [])
+        and TAG_PARTNER_REQUEST not in (row.get("tags") or [])
+        and TAG_VERIFIED not in (row.get("tags") or [])
     )
 
     users_added = len(roster_snapshot_rows(db, limit=10_000))

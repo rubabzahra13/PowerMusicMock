@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -13,7 +14,7 @@ from app.directory_person_match import (
     request_person_for_match,
 )
 from app.manager_request_views import is_request_unread
-from app.manager_request_tags import TAG_ALREADY_EXISTS, merge_tags
+from app.manager_request_tags import TAG_ALREADY_EXISTS, TAG_AUTO_MAIL, merge_tags
 from app.request_display import parse_request_display_number
 from app.request_match_summary import build_directory_match, build_intake_match
 from app.user_display import (
@@ -48,12 +49,235 @@ def _effective_tags(
     return tags
 
 
+def _connected_inbox_email(db: Session) -> str:
+    row = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.status == "Connected")
+        .order_by(models.EmailAccount.connected_at.desc().nullslast())
+        .first()
+    )
+    return (row.email if row else "") or ""
+
+
+def _backfill_auto_mail_from_gmail(
+    db: Session,
+    req: models.ManagerRequest,
+) -> Dict[str, Any]:
+    """Recover sender/inbox for older roster intakes that never stored Email rows."""
+    from app.intake_persons import get_auto_mail_meta, set_auto_mail_meta
+    from app.pilot2 import gmail as gmail_api
+
+    gmail_id = (req.source_gmail_message_id or "").strip()
+    meta = get_auto_mail_meta(req)
+    if not gmail_id or meta.get("fromEmailLookupFailed") or meta.get("fromEmail"):
+        return {}
+    # Demo / synthetic ids are never recoverable from Gmail.
+    if gmail_id.startswith("demo-") or gmail_id.startswith("test-"):
+        return {}
+
+    accounts = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.status == "Connected")
+        .all()
+    )
+    for account in accounts:
+        if not (account.oauth_refresh_token or "").strip():
+            continue
+        try:
+            message = gmail_api.fetch_message(account, gmail_id)
+        except Exception:
+            continue
+        if not message:
+            continue
+        set_auto_mail_meta(
+            req,
+            from_email=message.from_email or "",
+            received_at=message.received_at or req.received_at,
+            subject=message.subject or "",
+            inbox_email=account.email or "",
+        )
+        try:
+            db.add(req)
+            db.commit()
+        except Exception:
+            db.rollback()
+        return {
+            "fromEmail": message.from_email or "",
+            "subject": message.subject or "",
+            "receivedAt": message.received_at or req.received_at,
+            "inboxEmail": account.email or "",
+        }
+
+    # Avoid hammering Gmail when the message is gone / wrong inbox.
+    current = dict(get_auto_mail_meta(req))
+    current["fromEmailLookupFailed"] = True
+    if not current.get("inboxEmail"):
+        inbox = _connected_inbox_email(db)
+        if inbox:
+            current["inboxEmail"] = inbox
+    persons = dict(req.intake_persons or {}) if isinstance(req.intake_persons, dict) else {}
+    persons["autoMailMeta"] = current
+    req.intake_persons = persons
+    try:
+        db.add(req)
+        db.commit()
+    except Exception:
+        db.rollback()
+    return {"inboxEmail": current.get("inboxEmail") or ""} if current.get("inboxEmail") else {}
+
+
+def _automated_email_meta(
+    db: Session,
+    req: models.ManagerRequest,
+) -> Optional[Dict[str, Any]]:
+    """Sender + inbox + time for roster auto-mail, when present."""
+    from app.intake_persons import get_auto_mail_meta, set_auto_mail_meta
+
+    email_row = None
+    if req.source_email_id:
+        email_row = (
+            db.query(models.Email)
+            .filter(models.Email.id == req.source_email_id)
+            .first()
+        )
+    elif req.source_gmail_message_id:
+        email_row = (
+            db.query(models.Email)
+            .filter(models.Email.gmail_message_id == req.source_gmail_message_id)
+            .first()
+        )
+
+    meta = get_auto_mail_meta(req)
+    inbox_email = (
+        (email_row.account_email if email_row else None)
+        or meta.get("inboxEmail")
+        or ""
+    )
+    raw_from = (email_row.from_email if email_row else None) or meta.get("fromEmail") or ""
+    original_from = ""
+    if email_row is not None:
+        original_from = (getattr(email_row, "original_from_email", None) or "").strip()
+    # Prefer original sender when this was a forward into the connected inbox.
+    if (
+        original_from
+        and inbox_email
+        and raw_from.lower() == inbox_email.lower()
+    ):
+        from_email = original_from
+    else:
+        from_email = raw_from
+    subject = (email_row.subject if email_row else None) or meta.get("subject") or ""
+    received_at = (
+        (email_row.received_at if email_row else None)
+        or meta.get("receivedAt")
+        or req.received_at
+    )
+    _, notes_auto = _split_manager_and_automated_notes(req.manager_notes)
+    details = (meta.get("details") or "").strip() or notes_auto or subject or ""
+
+    has_auto_tag = TAG_AUTO_MAIL in (req.tags or [])
+    if not from_email and req.source_gmail_message_id and (has_auto_tag or req.source_gmail_message_id):
+        recovered = _backfill_auto_mail_from_gmail(db, req)
+        if recovered:
+            from_email = recovered.get("fromEmail") or from_email
+            subject = recovered.get("subject") or subject
+            inbox_email = recovered.get("inboxEmail") or inbox_email
+            received_at = recovered.get("receivedAt") or received_at
+
+    if not inbox_email and (has_auto_tag or req.source_gmail_message_id or from_email):
+        inbox_email = _connected_inbox_email(db)
+        if inbox_email and not meta.get("inboxEmail"):
+            set_auto_mail_meta(req, inbox_email=inbox_email)
+            try:
+                db.add(req)
+                db.commit()
+            except Exception:
+                db.rollback()
+
+    # Persist details migrated out of polluted manager_notes (legacy rows).
+    if notes_auto and not (meta.get("details") or "").strip():
+        manager_only, _ = _split_manager_and_automated_notes(req.manager_notes)
+        set_auto_mail_meta(req, details=notes_auto)
+        req.manager_notes = manager_only
+        try:
+            db.add(req)
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    if (
+        email_row is None
+        and not meta
+        and not has_auto_tag
+        and not req.source_gmail_message_id
+        and not from_email
+        and not inbox_email
+        and not details
+    ):
+        return None
+
+    if (
+        not has_auto_tag
+        and not req.source_gmail_message_id
+        and not from_email
+        and not inbox_email
+        and not details
+    ):
+        return None
+
+    return {
+        "fromEmail": from_email,
+        "subject": subject,
+        "receivedAt": received_at,
+        "inboxEmail": inbox_email,
+        "details": details,
+    }
+
+
+def _looks_like_automated_notes(raw: Optional[str]) -> bool:
+    text = (raw or "").strip().lower()
+    if not text:
+        return False
+    return text.startswith("automated roster email") or text.startswith("automated puregym email")
+
+
+def _looks_like_seed_notes(raw: Optional[str]) -> bool:
+    text = (raw or "").strip().lower()
+    return text.startswith("seed:")
+
+
+def _split_manager_and_automated_notes(raw: Optional[str]) -> Tuple[Optional[str], str]:
+    """Return (manager_form_notes, automated_details). Seed text is dropped."""
+    text = (raw or "").strip()
+    if not text:
+        return None, ""
+    if _looks_like_seed_notes(text):
+        return None, ""
+    if _looks_like_automated_notes(text):
+        return None, text
+
+    parts = [part.strip() for part in re.split(r"\n{2,}", text) if part.strip()]
+    manager_parts: List[str] = []
+    auto_parts: List[str] = []
+    for part in parts:
+        if _looks_like_seed_notes(part):
+            continue
+        if _looks_like_automated_notes(part):
+            auto_parts.append(part)
+        else:
+            manager_parts.append(part)
+    manager = "\n\n".join(manager_parts).strip() or None
+    auto = "\n\n".join(auto_parts).strip()
+    return manager, auto
+
+
 def request_to_api_dict(
     req: models.ManagerRequest,
     *,
     manager_user: Optional[models.PowermusicUser] = None,
     admin_user: Optional[models.PowermusicUser] = None,
     directory_row: Optional[models.ManagerRequest] = None,
+    db: Optional[Session] = None,
 ) -> Dict[str, Any]:
     if manager_user is None:
         manager_user = getattr(req, "_manager_user", None)
@@ -65,6 +289,7 @@ def request_to_api_dict(
     intake_match = build_intake_match(req)
     directory_match = build_directory_match(req, directory_row)
     tags = _effective_tags(req, directory_row)
+    manager_notes, _ = _split_manager_and_automated_notes(req.manager_notes)
 
     payload = {
         "id": req.id,
@@ -79,8 +304,8 @@ def request_to_api_dict(
             "location": req.person_location,
         },
         "action": req.action,
-        "notes": req.manager_notes,
-        "managerNotes": req.manager_notes,
+        "notes": manager_notes,
+        "managerNotes": manager_notes,
         "tags": tags,
         "createdBy": created_by,
         "status": req.status,
@@ -92,6 +317,10 @@ def request_to_api_dict(
         payload["intakeMatch"] = intake_match
     if directory_match:
         payload["directoryMatch"] = directory_match
+    if db is not None:
+        automated = _automated_email_meta(db, req)
+        if automated is not None:
+            payload["automatedEmail"] = automated
     return payload
 
 
@@ -102,7 +331,7 @@ def requests_to_api_dicts(db: Session, requests: List[models.ManagerRequest]) ->
     for req in rows:
         directory_row = _directory_conflict_for_request(db, req)
         results.append(
-            request_to_api_dict(req, directory_row=directory_row),
+            request_to_api_dict(req, directory_row=directory_row, db=db),
         )
     return results
 
@@ -121,6 +350,7 @@ def directory_person_to_api_dict(
     manager_fields = resolve_manager_fields(req, manager_user=manager_user)
     manager_name = resolve_manager_name(req, manager_user=manager_user)
     handled_by = resolve_handled_by_name(req, admin_user=admin_user)
+    manager_notes, _ = _split_manager_and_automated_notes(req.manager_notes)
 
     return {
         "id": req.id,
@@ -139,9 +369,9 @@ def directory_person_to_api_dict(
         "sourceRequestId": req.id,
         "sourceRequestNumber": parse_request_display_number(req.id),
         "requestReceivedAt": req.received_at,
-        "managerNotes": req.manager_notes,
+        "managerNotes": manager_notes,
         "adminNotes": req.admin_notes,
-        "notes": req.manager_notes,
+        "notes": manager_notes,
     }
 
 
@@ -164,7 +394,7 @@ def manager_request_list_item_to_api_dict(
         "action": req.action,
         "status": req.status,
         "outcome": req.outcome,
-        "notes": req.manager_notes,
+        "notes": _split_manager_and_automated_notes(req.manager_notes)[0],
         "isUnread": is_request_unread(req, seen_at),
     }
 

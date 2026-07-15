@@ -24,6 +24,38 @@ def get_auto_mail_snapshot(req: models.ManagerRequest) -> Optional[schemas.Perso
     return person_from_mapping(get_intake_persons(req).get("autoMail"))
 
 
+def get_auto_mail_meta(req: models.ManagerRequest) -> Dict[str, Any]:
+    raw = get_intake_persons(req).get("autoMailMeta")
+    return raw if isinstance(raw, dict) else {}
+
+
+def set_auto_mail_meta(
+    req: models.ManagerRequest,
+    *,
+    from_email: str = "",
+    received_at: Optional[Any] = None,
+    subject: str = "",
+    inbox_email: str = "",
+    details: str = "",
+) -> None:
+    current = dict(get_intake_persons(req))
+    meta = dict(get_auto_mail_meta(req))
+    if from_email:
+        meta["fromEmail"] = from_email
+    if subject:
+        meta["subject"] = subject
+    if inbox_email:
+        meta["inboxEmail"] = inbox_email
+    if details:
+        meta["details"] = details
+    if received_at is not None:
+        meta["receivedAt"] = (
+            received_at.isoformat() if hasattr(received_at, "isoformat") else received_at
+        )
+    current["autoMailMeta"] = meta
+    req.intake_persons = current
+
+
 def _set_snapshot(req: models.ManagerRequest, key: str, person: schemas.PersonInfo) -> None:
     current = dict(get_intake_persons(req))
     current[key] = person_to_mapping(person)

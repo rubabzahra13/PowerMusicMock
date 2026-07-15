@@ -9,4 +9,6 @@ export { default as FilterBar } from './FilterBar';
 export { default as SectionLabel } from './SectionLabel';
 export { default as SelectDropdown } from './SelectDropdown';
 export { default as CountTabs } from './CountTabs';
+export { default as AdminPageScroll } from './AdminPageScroll';
+export { default as DottedScroll } from './DottedScroll';
 export { Skeleton, KpiSkeletonGrid, PanelListSkeleton, ActivitySkeleton, EmailListSkeleton, CardListSkeleton, DraftCreatingPanel } from './Skeleton';

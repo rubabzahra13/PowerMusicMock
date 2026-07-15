@@ -44,12 +44,10 @@ export default function App() {
           </Route>
 
           <Route element={<AdminRoute />}>
-            {/* Existing request detail page — full viewport, no sidebar */}
-            <Route path="/new-requests/:requestId" element={<RequestDetail />} />
-
             <Route element={<AdminShellLayout />}>
               <Route path="/" element={<Home />} />
               <Route path="/new-requests" element={<NewRequests />} />
+              <Route path="/new-requests/:requestId" element={<RequestDetail />} />
               <Route path="/directory" element={<Directory />} />
               <Route path="/partner-settings" element={<PartnerSettings />} />
               <Route path="/templates" element={<Navigate to="/" replace />} />

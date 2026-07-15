@@ -252,6 +252,7 @@ def intake_roster_message(
     body: str,
     received_at: Optional[datetime] = None,
     gmail_message_id: Optional[str] = None,
+    inbox_email: Optional[str] = None,
 ) -> bool:
     """Create a manager_request and return True if this message was consumed."""
     sources = list_automated_sources(db)
@@ -285,6 +286,9 @@ def intake_roster_message(
         manager_notes=_manager_notes(subject, body, action),
         received_at=received_at,
         source_gmail_message_id=gmail_message_id,
+        from_email=from_email,
+        subject=subject,
+        inbox_email=inbox_email,
     )
     return True
 
@@ -298,6 +302,7 @@ def intake_puregym_roster_message(
     body: str,
     received_at: Optional[datetime] = None,
     gmail_message_id: Optional[str] = None,
+    inbox_email: Optional[str] = None,
 ) -> bool:
     return intake_roster_message(
         db,
@@ -307,6 +312,7 @@ def intake_puregym_roster_message(
         body=body,
         received_at=received_at,
         gmail_message_id=gmail_message_id,
+        inbox_email=inbox_email,
     )
 
 
