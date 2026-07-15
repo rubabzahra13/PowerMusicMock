@@ -1,4 +1,4 @@
-export default function Tag({ variant, label, compact = false, prefix: prefixOverride }) {
+export default function Tag({ variant, label, compact: _compact = false, prefix: prefixOverride }) {
   let bgClass = '';
   let textClass = '';
   let extraClass = '';
@@ -22,9 +22,9 @@ export default function Tag({ variant, label, compact = false, prefix: prefixOve
       if (prefixOverride == null) prefix = '⚠ ';
       break;
     case 'new-person':
-      bgClass = 'bg-[var(--color-tag-added-bg)]';
-      textClass = 'text-[var(--color-tag-added-text)]';
-      extraClass = 'ring-1 ring-inset ring-[var(--color-tag-added-text)]/20';
+      bgClass = 'bg-[var(--color-tag-auto-mail-bg)]';
+      textClass = 'text-[var(--color-tag-auto-mail-text)]';
+      extraClass = 'ring-1 ring-inset ring-[var(--color-tag-auto-mail-border)]';
       break;
     case 'add-action':
       bgClass = 'bg-[var(--color-tag-add-action-bg)]';
@@ -77,10 +77,15 @@ export default function Tag({ variant, label, compact = false, prefix: prefixOve
       break;
   }
 
+  const equalSentViaWidth =
+    label === 'Manager Form' || label === 'Automated email'
+      ? 'w-[7.5rem] justify-center'
+      : '';
+
   return (
     <span
-      className={`inline-flex items-center rounded-full font-semibold select-none ${compact ? 'px-1.5 py-0.5 text-[10px] leading-tight' : 'px-2 py-0.5 text-xs'} ${bgClass} ${textClass} ${extraClass}`}
-      style={compact ? undefined : { fontSize: 'var(--font-size-xs)' }}
+      className={`inline-flex h-5 items-center rounded-full px-2 py-0 text-xs font-semibold leading-none select-none ${equalSentViaWidth} ${bgClass} ${textClass} ${extraClass}`}
+      style={{ fontSize: 'var(--font-size-xs)' }}
     >
       {prefix}
       {label}

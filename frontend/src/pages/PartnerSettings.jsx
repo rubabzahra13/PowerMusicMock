@@ -10,9 +10,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import PageHeader from '../components/layout/PageHeader';
-import { adminPageShellClassNarrow } from '../utils/responsiveLayout';
-import DottedScroll from '../components/ui/DottedScroll';
-import { Toast, useToast, CardListSkeleton, Modal } from '../components/ui';
+import { AdminPageScroll, Toast, useToast, CardListSkeleton, Modal } from '../components/ui';
 import { getUserTimeZoneLabel } from '../utils/dateTime';
 import { clearManagerAllowedDomainsCache } from '../utils/managerAuth';
 import {
@@ -84,7 +82,7 @@ function SectionCard({ title, description, actions, children }) {
 function FeatureGroup({ title, description, children }) {
   return (
     <div className="space-y-4">
-      <div className="border-b border-[var(--color-border-default)] pb-3">
+      <div>
         <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
           {title}
         </h2>
@@ -360,21 +358,19 @@ export default function PartnerSettings() {
   };
 
   return (
-    <div className={adminPageShellClassNarrow}>
+    <AdminPageScroll dataPage="partner-settings" contentClassName="flex flex-col gap-6 min-w-0 select-none pb-2">
       <Toast />
       <PageHeader
         section="Partner support"
         title="Partner settings"
         description="Manage who can access the manager portal, and set up automated add/remove email intake."
-        className="mb-4 shrink-0"
+        compact
       />
 
-      <DottedScroll className="flex-1 min-h-0">
-        <div className="space-y-10 pb-8">
-          <FeatureGroup
-            title="Manager access"
-            description="Controls who can sign up, sign in, and submit requests on the manager portal."
-          >
+      <FeatureGroup
+        title="Manager access"
+        description="Controls who can sign up, sign in, and submit requests on the manager portal."
+      >
             <SectionCard
               title="Allowed domains"
               description="Only emails on these domains can use the manager portal."
@@ -604,8 +600,6 @@ export default function PartnerSettings() {
               )}
             </SectionCard>
           </FeatureGroup>
-        </div>
-      </DottedScroll>
 
       <Modal
         isOpen={addOpen}
@@ -709,6 +703,6 @@ export default function PartnerSettings() {
       >
         <p>Stop treating messages from <strong>{pendingSourceRemove ? formatSourcePattern(pendingSourceRemove) : ''}</strong> as automated add/remove requests.</p>
       </Modal>
-    </div>
+    </AdminPageScroll>
   );
 }

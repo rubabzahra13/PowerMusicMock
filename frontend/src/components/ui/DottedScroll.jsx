@@ -9,9 +9,10 @@ const DEFAULT_SCROLL_CLASS = {
 };
 
 /**
- * @param {'overlay' | 'below'} indicatorPlacement
+ * @param {'overlay' | 'below' | 'gutter'} indicatorPlacement
  * - overlay: dots sit on top of the scroll content (vertical default)
  * - below: dots sit under the scroll content (avoids covering table cells)
+ * - gutter: dots sit in reserved right padding beside the scroll content
  */
 export default function DottedScroll({
   children,
@@ -20,19 +21,25 @@ export default function DottedScroll({
   scrollClassName,
   orientation = 'vertical',
   indicatorPlacement,
+  indicatorClassName = '',
 }) {
   const containerRef = useRef(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [canScroll, setCanScroll] = useState(false);
   const isHorizontal = orientation === 'horizontal';
-  const resolvedScrollClass =
-    scrollClassName ?? DEFAULT_SCROLL_CLASS[isHorizontal ? 'horizontal' : 'vertical'];
-  const resolvedContentClass =
-    contentClassName
-    ?? (isHorizontal ? 'block w-max min-w-full leading-[0]' : 'flex flex-col gap-4');
   const resolvedIndicatorPlacement =
     indicatorPlacement ?? (isHorizontal ? 'below' : 'overlay');
   const indicatorsBelow = resolvedIndicatorPlacement === 'below';
+  const indicatorsGutter = resolvedIndicatorPlacement === 'gutter';
+  const baseScrollClass =
+    scrollClassName ?? DEFAULT_SCROLL_CLASS[isHorizontal ? 'horizontal' : 'vertical'];
+  const resolvedScrollClass =
+    indicatorsGutter && !isHorizontal && !/\bpr-\d/.test(baseScrollClass)
+      ? `${baseScrollClass} pr-4`.trim()
+      : baseScrollClass;
+  const resolvedContentClass =
+    contentClassName
+    ?? (isHorizontal ? 'block w-max min-w-full leading-[0]' : 'flex flex-col gap-4');
   const bounded = isHorizontal
     ? !resolvedScrollClass.includes('w-full')
     : !resolvedScrollClass.includes('h-full');
@@ -86,17 +93,8 @@ export default function DottedScroll({
     };
   }, [updateScrollState]);
 
-  const dots = canScroll ? (
-    <div
-      className={
-        indicatorsBelow
-          ? 'pointer-events-none mt-2 flex items-center justify-center gap-2'
-          : isHorizontal
-            ? 'pointer-events-none absolute bottom-1.5 left-1/2 z-[2] flex -translate-x-1/2 items-center gap-2'
-            : 'pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 flex-col items-center gap-2 py-3'
-      }
-      aria-hidden="true"
-    >
+  const dotMarks = (
+    <>
       {Array.from({ length: DOT_COUNT }).map((_, index) => (
         <span
           key={index}
@@ -107,6 +105,23 @@ export default function DottedScroll({
           }`}
         />
       ))}
+    </>
+  );
+
+  const dots = canScroll ? (
+    <div
+      className={
+        indicatorsBelow
+          ? `pointer-events-none mt-2 flex items-center justify-center gap-2 ${indicatorClassName}`.trim()
+          : isHorizontal
+            ? `pointer-events-none absolute bottom-1.5 left-1/2 z-[2] flex -translate-x-1/2 items-center gap-2 ${indicatorClassName}`.trim()
+            : indicatorsGutter
+              ? `pointer-events-none absolute inset-y-0 right-0 z-[2] flex w-4 flex-col items-center justify-center gap-2 ${indicatorClassName}`.trim()
+              : `pointer-events-none absolute top-1/2 flex -translate-y-1/2 flex-col items-center gap-2 py-3 ${indicatorClassName || 'right-1'}`.trim()
+      }
+      aria-hidden="true"
+    >
+      {dotMarks}
     </div>
   ) : null;
 

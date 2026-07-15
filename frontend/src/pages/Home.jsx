@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache, getDashboard } from '../utils/pilot2Api';
-import { AdminPageScroll, PanelListSkeleton } from '../components/ui';
+import { AdminPageScroll, DottedScroll, PanelListSkeleton } from '../components/ui';
 import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
 
 const CHART = {
@@ -104,6 +104,18 @@ function ChartCard({ title, subtitle, legend, children, className = '' }) {
       </div>
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>
+  );
+}
+
+function PanelScrollBody({ children, className = '' }) {
+  return (
+    <DottedScroll
+      className={`-mr-4 min-h-0 flex-1 ${className}`.trim()}
+      scrollClassName="h-full overflow-y-auto scrollbar-hide"
+      indicatorPlacement="gutter"
+    >
+      {children}
+    </DottedScroll>
   );
 }
 
@@ -357,7 +369,7 @@ function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue }) {
   ];
 
   return (
-    <ul className="flex min-h-0 flex-1 flex-col justify-start space-y-1.5">
+    <ul className="space-y-1.5">
       {rows.map((row) => {
         const Icon = row.Icon;
         return (
@@ -467,11 +479,15 @@ export default function Home() {
   };
 
   return (
-    <AdminPageScroll contentClassName="flex flex-col gap-3 select-none pb-4">
+    <AdminPageScroll
+      contentClassName="flex flex-col gap-2 select-none pb-4 lg:h-full lg:min-h-0 lg:overflow-hidden lg:pb-4"
+      scrollClassName="h-full w-full overflow-y-auto scrollbar-hide lg:overflow-hidden"
+    >
       <PageHeader
         section="Overview"
         title="Hello Andrea."
         description="A live view of partner requests, ledger health, and what needs your attention."
+        borderless
         className="shrink-0"
       />
 
@@ -485,7 +501,7 @@ export default function Home() {
           <PanelListSkeleton rows={3} />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 pb-4 xl:overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 pb-4 lg:min-h-0 lg:overflow-hidden lg:pb-0">
           <div className="grid shrink-0 grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
             <InsightCard
               label="Pending requests"
@@ -521,8 +537,8 @@ export default function Home() {
             />
           </div>
 
-          <div className="grid min-h-0 shrink-0 grid-cols-1 gap-3 xl:grid-cols-5">
-            <div className="min-h-[16rem] xl:col-span-3">
+          <div className="grid shrink-0 grid-cols-1 gap-3 xl:grid-cols-5">
+            <div className="h-[14rem] xl:col-span-3 xl:h-[16rem]">
               <ChartCard
                 title="This week’s flow"
                 subtitle="Requests received vs requests you handled"
@@ -537,7 +553,7 @@ export default function Home() {
               </ChartCard>
             </div>
 
-            <div className="min-h-[16rem] xl:col-span-2">
+            <div className="h-[14rem] xl:col-span-2 xl:h-[16rem]">
               <ChartCard
                 title="Pending by action"
                 subtitle="What’s waiting in New requests"
@@ -551,21 +567,23 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-3 lg:items-stretch">
-            <section className="flex min-h-[18rem] flex-col rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:h-full">
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-3 lg:items-stretch lg:overflow-hidden">
+            <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:min-h-0 lg:h-full">
               <PanelHeader
                 title="How pending requests arrived"
                 subtitle="Partner form vs automated email"
                 action={<QueueLink onClick={() => navigate('/new-requests')} />}
               />
-              <ArrivalSourceList
-                partnerReq={insights.partnerReq}
-                autoMail={insights.autoMail}
-                onOpenQueue={() => navigate('/new-requests')}
-              />
+              <PanelScrollBody>
+                <ArrivalSourceList
+                  partnerReq={insights.partnerReq}
+                  autoMail={insights.autoMail}
+                  onOpenQueue={() => navigate('/new-requests')}
+                />
+              </PanelScrollBody>
             </section>
 
-            <section className="flex min-h-[18rem] flex-col rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:h-full">
+            <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:min-h-0 lg:h-full">
               <PanelHeader
                 title="Priority alerts"
                 subtitle={duplicateAlerts.length ? 'Possible duplicate people' : 'All clear'}
@@ -577,34 +595,36 @@ export default function Home() {
                   <p className="text-sm font-medium text-[var(--color-text-secondary)]">No duplicate alerts</p>
                 </div>
               ) : (
-                <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
-                  {duplicateAlerts.map((req) => (
-                    <li key={req.id}>
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/new-requests/${encodeURIComponent(req.id)}`)}
-                        className="flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--color-brand-accent)] bg-white px-2.5 py-2 text-left transition-colors hover:bg-[#fff7f8]"
-                      >
-                        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-brand-accent)]/10">
-                          <AlertTriangle className="h-3.5 w-3.5 text-[var(--color-brand-accent)]" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
-                            {`${req.person?.firstName || ''} ${req.person?.lastName || ''}`.trim() || 'Unknown'}
-                          </p>
-                          <p className="truncate text-xs text-[var(--color-text-secondary)]">{req.person?.email}</p>
-                          <p className="mt-0.5 text-[10px] font-semibold text-[var(--color-text-muted)]">
-                            {formatActivityDate(req.receivedAt)}
-                          </p>
-                        </div>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <PanelScrollBody>
+                  <ul className="space-y-1.5">
+                    {duplicateAlerts.map((req) => (
+                      <li key={req.id}>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/new-requests/${encodeURIComponent(req.id)}`)}
+                          className="flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--color-brand-accent)] bg-white px-2.5 py-2 text-left transition-colors hover:bg-[#fff7f8]"
+                        >
+                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-brand-accent)]/10">
+                            <AlertTriangle className="h-3.5 w-3.5 text-[var(--color-brand-accent)]" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+                              {`${req.person?.firstName || ''} ${req.person?.lastName || ''}`.trim() || 'Unknown'}
+                            </p>
+                            <p className="truncate text-xs text-[var(--color-text-secondary)]">{req.person?.email}</p>
+                            <p className="mt-0.5 text-[10px] font-semibold text-[var(--color-text-muted)]">
+                              {formatActivityDate(req.receivedAt)}
+                            </p>
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </PanelScrollBody>
               )}
             </section>
 
-            <section className="flex min-h-[18rem] flex-col rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:h-full">
+            <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:min-h-0 lg:h-full">
               <PanelHeader
                 title="Recent activity"
                 subtitle="Latest request events"
@@ -615,49 +635,51 @@ export default function Home() {
                   <p className="text-sm font-medium text-[var(--color-text-secondary)]">No recent activity</p>
                 </div>
               ) : (
-                <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
-                  {recentActivity.map((item) => {
-                    const Icon = activityIcon(item.type);
-                    const clickable = Boolean(item.linkedRequestId);
-                    return (
-                      <li key={item.id}>
-                        <button
-                          type="button"
-                          disabled={!clickable}
-                          onClick={() => {
-                            if (!item.linkedRequestId) return;
-                            const handled = item.type === 'marked_added' || item.type === 'marked_removed';
-                            navigate(
-                              handled
-                                ? `/directory?id=${encodeURIComponent(item.linkedRequestId)}`
-                                : `/new-requests/${encodeURIComponent(item.linkedRequestId)}`,
-                            );
-                          }}
-                          className={`flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] bg-white px-2.5 py-2 text-left transition-colors ${
-                            clickable ? 'cursor-pointer hover:bg-[var(--color-surface-panel)]' : 'cursor-default'
-                          }`}
-                        >
-                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-highlight)]">
-                            <Icon className="h-3.5 w-3.5 text-[#3b6ea5]" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="truncate text-sm font-semibold leading-snug text-[var(--color-text-primary)]">
-                                {item.description}
-                              </p>
-                              {clickable ? (
-                                <ArrowRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
-                              ) : null}
+                <PanelScrollBody>
+                  <ul className="space-y-1.5">
+                    {recentActivity.map((item) => {
+                      const Icon = activityIcon(item.type);
+                      const clickable = Boolean(item.linkedRequestId);
+                      return (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            disabled={!clickable}
+                            onClick={() => {
+                              if (!item.linkedRequestId) return;
+                              const handled = item.type === 'marked_added' || item.type === 'marked_removed';
+                              navigate(
+                                handled
+                                  ? `/directory?id=${encodeURIComponent(item.linkedRequestId)}`
+                                  : `/new-requests/${encodeURIComponent(item.linkedRequestId)}`,
+                              );
+                            }}
+                            className={`flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] bg-white px-2.5 py-2 text-left transition-colors ${
+                              clickable ? 'cursor-pointer hover:bg-[var(--color-surface-panel)]' : 'cursor-default'
+                            }`}
+                          >
+                            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-highlight)]">
+                              <Icon className="h-3.5 w-3.5 text-[#3b6ea5]" />
                             </div>
-                            <p className="mt-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
-                              {formatActivityDate(item.timestamp)}
-                            </p>
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="truncate text-sm font-semibold leading-snug text-[var(--color-text-primary)]">
+                                  {item.description}
+                                </p>
+                                {clickable ? (
+                                  <ArrowRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--color-text-muted)]" />
+                                ) : null}
+                              </div>
+                              <p className="mt-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
+                                {formatActivityDate(item.timestamp)}
+                              </p>
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </PanelScrollBody>
               )}
             </section>
           </div>

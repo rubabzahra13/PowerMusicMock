@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
-import { Search, Download, Info, SortAsc, ChevronDown, Filter, Eye } from 'lucide-react';
+import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2 } from 'lucide-react';
 
 import { format, parseISO } from 'date-fns';
-import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, AdminPageScroll } from '../components/ui';
+import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
@@ -14,7 +14,7 @@ import {
   ADMIN_NEW_ROW_HIGHLIGHT_CLASS,
 } from '../utils/adminUiHighlights';
 import { formatRequestDisplayId, formatAdminDateTime, formatAdminDate } from '../utils/requestDisplayId';
-import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
+import { formatManagerNotes, readManagerNotes, MANAGER_NOTES_EMPTY_LABEL } from '../utils/managerNotes';
 import { csvCell } from '../utils/csvSafe';
 
 const directoryHighlightClass = (row) =>
@@ -23,6 +23,71 @@ const directoryHighlightClass = (row) =>
 const personManagerName = (user) => user.managerName || '';
 const personHandledBy = (user) => user.handledBy || user.addedBy || 'Power Music Admin';
 const personAdminNotes = (user) => user.adminNotes || '';
+const formatAdminNotes = (user) => personAdminNotes(user).trim() || MANAGER_NOTES_EMPTY_LABEL;
+
+function buildFallbackHistory(user) {
+  const events = [];
+  if (user?.dateAdded) {
+    events.push({
+      id: `${user.id}-handled`,
+      type: 'handled',
+      at: user.dateAdded,
+      title: `Marked as ${user.status}`,
+      detail: `By ${personHandledBy(user)}`,
+      displayId: user.displayId,
+    });
+  }
+  if (user?.requestReceivedAt) {
+    events.push({
+      id: `${user.id}-manager-request`,
+      type: 'manager_request',
+      at: user.requestReceivedAt,
+      title: 'Manager request received',
+      detail: personManagerName(user)
+        ? `Submitted by ${personManagerName(user)}`
+        : null,
+      displayId: user.displayId,
+    });
+  }
+  return events;
+}
+
+function historyIcon(type) {
+  if (type === 'auto_mail') return Mail;
+  if (type === 'handled') return CheckCircle2;
+  return UserRound;
+}
+
+function DrawerMetaRow({ label, value, mono = false }) {
+  if (value == null || value === '') return null;
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <dt className="shrink-0 text-[11px] font-medium text-[var(--color-text-muted)]">
+        {label}
+      </dt>
+      <dd
+        className={`min-w-0 text-right text-xs font-semibold text-[var(--color-text-primary)] ${
+          mono ? 'font-mono break-all' : 'break-words'
+        }`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function DrawerSection({ title, children, className = '' }) {
+  return (
+    <section
+      className={`rounded-xl border border-[var(--color-border-default)] bg-white px-4 py-3.5 shadow-[0_1px_2px_rgba(26,26,46,0.04)] ${className}`.trim()}
+    >
+      <h3 className="mb-2.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
 
 function requestIdsMatch(a, b) {
   if (a == null || b == null) return false;
@@ -81,20 +146,22 @@ function ControlsBar({
   const toolbarBtnClass = (active) =>
     `flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
       active
-        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] shadow-sm ring-1 ring-[rgba(26,26,46,0.06)]'
-        : 'text-[var(--color-text-secondary)] hover:bg-white hover:text-[var(--color-text-primary)]'
+        ? 'bg-white text-[var(--color-brand-secondary)] shadow-[0_1px_2px_rgba(44,95,143,0.12)] ring-1 ring-[var(--color-brand-secondary-border)]/55'
+        : 'text-[var(--color-text-secondary)] hover:bg-white/80 hover:text-[var(--color-brand-secondary)]'
     }`;
 
   return (
-    <div className="w-full rounded-2xl border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-card)]">
+    <div className="w-full rounded-2xl border border-[var(--color-brand-secondary-border)]/55 bg-white shadow-[var(--shadow-card)]">
       <div
-        className={`bg-[var(--color-surface-panel)] ${
-          filterOpen ? 'border-b border-[var(--color-border-default)] rounded-t-2xl' : 'rounded-2xl'
+        className={`bg-[var(--color-brand-secondary-muted)]/45 ${
+          filterOpen
+            ? 'border-b border-[var(--color-brand-secondary-border)]/40 rounded-t-2xl'
+            : 'rounded-2xl'
         }`}
       >
         <div className="flex flex-col md:flex-row items-stretch gap-2 p-2">
-          <div className="flex items-center gap-2.5 px-3 py-2 flex-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-sm focus-within:ring-2 focus-within:ring-[rgba(26,26,46,0.08)] focus-within:border-transparent transition-shadow">
-            <Search className="h-4 w-4 text-[var(--color-text-muted)] shrink-0" />
+          <div className="flex items-center gap-2.5 px-3 py-2 flex-1 bg-white rounded-xl border border-[var(--color-brand-secondary-border)]/35 shadow-sm focus-within:ring-2 focus-within:ring-[var(--color-brand-secondary)]/15 focus-within:border-[var(--color-brand-secondary-border)] transition-shadow">
+            <Search className="h-4 w-4 text-[var(--color-brand-secondary)]/70 shrink-0" />
             <input
               type="text"
               placeholder="Search name, email, club or location..."
@@ -120,7 +187,7 @@ function ControlsBar({
               <Filter className="h-4 w-4" />
               <span>Filter</span>
               {activeFilterCount > 0 && (
-                <span className="ml-0.5 bg-[var(--color-brand-primary)] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                <span className="ml-0.5 bg-[var(--color-brand-secondary)] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
                   {activeFilterCount}
                 </span>
               )}
@@ -138,7 +205,7 @@ function ControlsBar({
               </button>
 
               {sortOpen && (
-                <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-56 max-h-72 overflow-y-auto py-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-[var(--shadow-modal)]">
+                <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-56 max-h-72 overflow-y-auto py-1 bg-white rounded-xl border border-[var(--color-brand-secondary-border)]/45 shadow-[var(--shadow-modal)]">
                   {SORT_PRESETS.map((opt) => (
                     <button
                       key={opt.value}
@@ -146,8 +213,8 @@ function ControlsBar({
                       onClick={() => { setSortPreset(opt.value); setSortOpen(false); }}
                       className={`w-full text-left px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
                         sortPreset === opt.value
-                          ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
-                          : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)]'
+                          ? 'bg-[var(--color-brand-secondary-muted)] text-[var(--color-brand-secondary)]'
+                          : 'text-[var(--color-text-primary)] hover:bg-[var(--color-brand-secondary-muted)]/50'
                       }`}
                     >
                       {opt.label}
@@ -173,11 +240,11 @@ function ControlsBar({
       </div>
 
       {filterOpen && (
-        <div className="bg-[var(--color-surface-highlight)]/50 px-4 py-4 rounded-b-2xl">
+        <div className="bg-[var(--color-brand-secondary-muted)]/35 px-4 py-4 rounded-b-2xl">
           <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
             {filterSlots.map((slot) => (
               <div key={slot.label} className="flex flex-col gap-1 min-w-[140px]">
-                <label className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-brand-secondary)]/80">
                   {slot.label}
                 </label>
                 <SelectDropdown
@@ -324,11 +391,13 @@ function DirectoryMobileList({
                     </p>
                     <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
                       <span className="font-semibold text-[var(--color-text-muted)]">Admin notes: </span>
-                      {adminNotes || EMPTY_CELL}
+                      <span className={adminNotes ? '' : 'text-[var(--color-text-muted)]'}>
+                        {formatAdminNotes(row)}
+                      </span>
                     </p>
                   </div>
                 </div>
-                <Eye className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+                <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
               </div>
             </button>
           </li>
@@ -547,75 +616,44 @@ export default function UserLedger() {
       render: (val) => <TimestampCell val={val} />
     },
     {
-      key: 'status',
-      label: 'Status',
-      width: '72px',
-      noShrink: true,
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle whitespace-nowrap text-center',
-      render: (val) => <Tag variant={val === 'Added' ? 'added' : 'removed'} label={val} />
-    },
-    {
       key: 'person',
       label: 'Person',
-      width: '19%',
+      width: '24%',
+      wrap: true,
       headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
+      cellClassName: 'align-top text-left',
       render: (_, row) => {
         const name = `${row.firstName} ${row.lastName}`.trim();
         return (
-          <div className="min-w-0">
-            <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]">
-              {name}
-            </TruncateCell>
-            <TruncateCell className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-              {row.email}
-            </TruncateCell>
-          </div>
+          <StackedTextCell
+            primary={name}
+            secondary={row.email}
+            tertiary={row.location || EMPTY_CELL}
+            truncate={false}
+          />
         );
       },
     },
     {
-      key: 'location',
-      label: 'Location',
-      width: '9%',
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
-      render: (val) => (
-        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {val || EMPTY_CELL}
-        </TruncateCell>
-      )
-    },
-    {
       key: 'manager',
       label: 'Manager',
-      width: '19%',
+      width: '24%',
+      wrap: true,
       headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
+      cellClassName: 'align-top text-left',
       render: (_, row) => (
         <StackedTextCell
-          primary={personManagerName(row)}
-          secondary={row.managerEmail || EMPTY_CELL}
+          primary={personManagerName(row) || EMPTY_CELL}
+          secondary={row.managerEmail || undefined}
+          tertiary={row.club || EMPTY_CELL}
+          truncate={false}
         />
-      )
-    },
-    {
-      key: 'club',
-      label: 'Manager Club',
-      width: '13%',
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
-      render: (val) => (
-        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {val || EMPTY_CELL}
-        </TruncateCell>
       )
     },
     {
       key: 'managerNotes',
       label: 'Manager notes',
-      width: '11%',
+      width: '14%',
       cellClassName: 'align-middle max-w-0 overflow-hidden',
       render: (_, row) => {
         const notes = readManagerNotes(row);
@@ -624,6 +662,7 @@ export default function UserLedger() {
             className={`text-xs leading-relaxed ${
               notes ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'
             }`}
+            title={notes || undefined}
           >
             {formatManagerNotes(row)}
           </TruncateCell>
@@ -633,31 +672,41 @@ export default function UserLedger() {
     {
       key: 'adminNotes',
       label: 'Admin notes',
-      width: '11%',
+      width: '14%',
       cellClassName: 'align-middle max-w-0 overflow-hidden',
-      render: (_, row) => (
-        <TruncateCell className="text-xs text-[var(--color-text-secondary)]">
-          {personAdminNotes(row).trim() || EMPTY_CELL}
-        </TruncateCell>
-      )
+      render: (_, row) => {
+        const notes = personAdminNotes(row).trim();
+        return (
+          <TruncateCell
+            className={`text-xs leading-relaxed ${
+              notes ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'
+            }`}
+            title={notes || undefined}
+          >
+            {formatAdminNotes(row)}
+          </TruncateCell>
+        );
+      }
     },
     {
-      key: 'actions',
-      label: 'Actions',
-      width: '56px',
+      key: 'status',
+      label: 'Status',
+      width: '72px',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
-      render: (_, row) => (
-        <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => handleOpenUser(row)}
-            aria-label="View user details"
-            className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer shrink-0"
-          >
-            <Eye className="h-4 w-4" />
-          </button>
+      cellClassName: 'align-middle whitespace-nowrap text-center',
+      render: (val) => <Tag variant={val === 'Added' ? 'added' : 'removed'} label={val} />
+    },
+    {
+      key: 'open',
+      label: '',
+      width: '40px',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-1',
+      render: () => (
+        <div className="flex items-center justify-center" aria-hidden="true">
+          <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" />
         </div>
       )
     }
@@ -686,28 +735,11 @@ export default function UserLedger() {
           </button>
         }
         footer={
-            <div className="flex max-w-full w-full items-center overflow-x-auto bg-[var(--color-surface-panel)] rounded-xl p-1 gap-1 ring-1 ring-[rgba(26,26,46,0.05)] sm:w-fit">
-            {statusTabs.map(({ key, label, count }) => (
-              <button
-                key={key}
-                onClick={() => handleStatusTabSwitch(key)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
-                  statusTab === key
-                    ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] shadow-sm'
-                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                }`}
-              >
-                {label}
-                <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                  statusTab === key
-                    ? 'bg-[var(--color-brand-primary)] text-white'
-                    : 'bg-[var(--color-surface-highlight)] text-[var(--color-text-secondary)]'
-                }`}>
-                  {count}
-                </span>
-              </button>
-            ))}
-            </div>
+          <CountTabs
+            value={statusTab}
+            onChange={handleStatusTabSwitch}
+            tabs={statusTabs}
+          />
         }
       />
 
@@ -761,6 +793,7 @@ export default function UserLedger() {
           emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
           compact
           centerHeaders
+          accent
           loading={tableLoading}
         />
       </div>
@@ -774,118 +807,133 @@ export default function UserLedger() {
       <Drawer
         isOpen={selectedUser !== null}
         onClose={() => setSelectedUser(null)}
-        title={selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName}` : ''}
+        title={selectedUser ? `${selectedUser.firstName} ${selectedUser.lastName}` : 'User details'}
+        hideHeader
       >
-        {selectedUser && (
-          <div className="space-y-5 text-left select-none">
-            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                Status
-              </span>
-              <div className="flex items-center gap-2">
-                <Tag variant={selectedUser.status === 'Added' ? 'added' : 'removed'} label={selectedUser.status} />
-              </div>
-              <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
-                <div>Request ID: {formatRequestDisplayId(selectedUser.displayId)}</div>
-                <div>Handled: {formatAdminDateTime(selectedUser.dateAdded)}</div>
-                <div>Handled by: {personHandledBy(selectedUser)}</div>
-              </div>
-            </div>
+        {selectedUser && (() => {
+          const history =
+            Array.isArray(selectedUser.requestHistory) && selectedUser.requestHistory.length
+              ? selectedUser.requestHistory
+              : buildFallbackHistory(selectedUser);
+          const initials = `${selectedUser.firstName?.[0] || ''}${selectedUser.lastName?.[0] || ''}`.toUpperCase() || '?';
+          const fullName = `${selectedUser.firstName || ''} ${selectedUser.lastName || ''}`.trim() || 'Unknown';
+          const isAdded = selectedUser.status === 'Added';
 
-            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                {selectedUser.status === 'Added' ? 'Added person' : 'Removed person'}
-              </span>
-              <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {selectedUser.firstName} {selectedUser.lastName}
-              </div>
-              <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
-                <div>Email: {selectedUser.email}</div>
-                <div>Location: {selectedUser.location}</div>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                Manager details
-              </span>
-              <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {personManagerName(selectedUser) || EMPTY_CELL}
-              </div>
-              <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
-                {selectedUser.managerEmail && <div>Email: {selectedUser.managerEmail}</div>}
-                <div>Club: {selectedUser.club}</div>
-              </div>
-            </div>
-
-            <section
-              aria-labelledby="directory-manager-notes-heading"
-              className="rounded-lg border border-[var(--color-border-default)] bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(26,26,46,0.04)]"
-            >
-              <h3
-                id="directory-manager-notes-heading"
-                className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
-              >
-                Notes from manager
-              </h3>
-              <p
-                className={`mt-1.5 text-xs leading-relaxed ${
-                  readManagerNotes(selectedUser)
-                    ? 'whitespace-pre-wrap text-[var(--color-text-primary)]'
-                    : 'text-[var(--color-text-muted)]'
-                }`}
-              >
-                {formatManagerNotes(selectedUser)}
-              </p>
-            </section>
-
-            <div className="rounded-lg border border-[var(--color-border-default)] bg-white p-4 space-y-2 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                Notes by admin
-              </span>
-              <p className="text-sm text-[var(--color-text-primary)] leading-normal whitespace-pre-wrap">
-                {personAdminNotes(selectedUser).trim() ? personAdminNotes(selectedUser) : EMPTY_CELL}
-              </p>
-            </div>
-
-            <div className="space-y-3 border-t border-[var(--color-border-default)] pt-3">
-              <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-                Request history
-              </span>
-              <div className="relative space-y-5 border-l border-[var(--color-border-default)] py-1 pl-6">
-                <div className="relative">
-                  <div className="absolute -left-[29px] top-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white bg-[var(--color-brand-primary)] shadow-sm" />
-                  <time className="text-[11px] font-semibold text-[var(--color-text-secondary)]">
-                    {formatAdminDateTime(selectedUser.dateAdded)}
-                  </time>
-                  <div className="mt-0.5 text-xs font-semibold text-[var(--color-text-primary)]">
-                    Marked as {selectedUser.status} by {personHandledBy(selectedUser)}
+          return (
+            <div className="space-y-3 text-left select-none">
+              <div className="rounded-2xl border border-[var(--color-border-default)] bg-white px-4 py-4 shadow-[0_1px_2px_rgba(26,26,46,0.04)]">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[var(--color-brand-secondary-muted)] text-sm font-bold tracking-tight text-[var(--color-brand-primary)] ring-1 ring-[var(--color-brand-secondary-border)]/50">
+                    {initials}
+                  </div>
+                  <div className="min-w-0 flex-1 pr-10">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate text-base font-bold text-[var(--color-text-primary)]">
+                        {fullName}
+                      </h3>
+                      <Tag
+                        variant={isAdded ? 'added' : 'removed'}
+                        label={selectedUser.status}
+                        compact
+                      />
+                    </div>
+                    <p className="mt-0.5 truncate font-mono text-xs text-[var(--color-text-secondary)]">
+                      {selectedUser.email || EMPTY_CELL}
+                    </p>
+                    <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                      {selectedUser.location || EMPTY_CELL}
+                    </p>
                   </div>
                 </div>
-                {selectedUser.requestReceivedAt ? (
-                  <div className="relative">
-                    <div className="absolute -left-[29px] top-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white bg-gray-300 shadow-sm" />
-                    <time className="text-[11px] font-semibold text-[var(--color-text-secondary)]">
-                      {formatAdminDateTime(selectedUser.requestReceivedAt)}
-                    </time>
-                    <div className="mt-0.5 text-xs font-semibold text-[var(--color-text-primary)]">
-                      Request submitted by {personManagerName(selectedUser)}
-                    </div>
-                  </div>
-                ) : null}
+                <dl className="mt-4 space-y-2 border-t border-[var(--color-border-default)] pt-3">
+                  <DrawerMetaRow label="Request ID" value={formatRequestDisplayId(selectedUser.displayId)} />
+                  <DrawerMetaRow label="Handled" value={formatAdminDateTime(selectedUser.dateAdded)} />
+                  <DrawerMetaRow label="Handled by" value={personHandledBy(selectedUser)} />
+                </dl>
               </div>
-            </div>
 
-            {selectedUser.status === 'Added' && (
-              <div className="flex items-start gap-2.5 rounded-md border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] p-4">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-brand-primary)]" />
-                <span className="text-xs font-semibold leading-normal text-[var(--color-text-secondary)]">
-                  This user will trigger a duplicate warning on new Manager Form submissions.
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+              <DrawerSection title="Manager details">
+                <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+                  {personManagerName(selectedUser) || EMPTY_CELL}
+                </p>
+                <dl className="mt-2.5 space-y-2">
+                  <DrawerMetaRow label="Email" value={selectedUser.managerEmail || EMPTY_CELL} mono />
+                  <DrawerMetaRow label="Club" value={selectedUser.club || EMPTY_CELL} />
+                </dl>
+              </DrawerSection>
+
+              <DrawerSection title="Notes from manager">
+                <p
+                  className={`text-xs leading-relaxed ${
+                    readManagerNotes(selectedUser)
+                      ? 'whitespace-pre-wrap text-[var(--color-text-primary)]'
+                      : 'italic text-[var(--color-text-muted)]'
+                  }`}
+                >
+                  {formatManagerNotes(selectedUser)}
+                </p>
+              </DrawerSection>
+
+              <DrawerSection title="Notes by admin">
+                <p
+                  className={`text-sm leading-normal ${
+                    personAdminNotes(selectedUser).trim()
+                      ? 'whitespace-pre-wrap text-[var(--color-text-primary)]'
+                      : 'italic text-[var(--color-text-muted)]'
+                  }`}
+                >
+                  {formatAdminNotes(selectedUser)}
+                </p>
+              </DrawerSection>
+
+              <DrawerSection title="Request history">
+                {history.length === 0 ? (
+                  <p className="text-xs italic text-[var(--color-text-muted)]">No history available.</p>
+                ) : (
+                  <ol className="relative space-y-0 border-l border-[var(--color-border-default)] pl-5">
+                    {history.map((event, index) => {
+                      const Icon = historyIcon(event.type);
+                      const isLast = index === history.length - 1;
+                      return (
+                        <li key={event.id || `${event.type}-${event.at}-${index}`} className={`relative ${isLast ? '' : 'pb-4'}`}>
+                          <span className="absolute -left-[27px] top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-surface-panel)] text-[var(--color-text-secondary)] ring-2 ring-white">
+                            <Icon className="h-3 w-3" aria-hidden="true" />
+                          </span>
+                          <time className="block text-[11px] font-semibold text-[var(--color-text-muted)]">
+                            {event.at ? formatAdminDateTime(event.at) : EMPTY_CELL}
+                          </time>
+                          <p className="mt-0.5 text-xs font-semibold text-[var(--color-text-primary)]">
+                            {event.title}
+                          </p>
+                          {event.detail ? (
+                            <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                              {event.detail}
+                            </p>
+                          ) : null}
+                          {event.displayId != null ? (
+                            <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                              {formatRequestDisplayId(event.displayId)}
+                              {event.action ? ` · ${event.action}` : ''}
+                            </p>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </DrawerSection>
+
+              {isAdded && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] p-4">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" />
+                  <span className="text-xs font-semibold leading-normal text-[var(--color-text-secondary)]">
+                    This user will trigger a duplicate warning on new Manager Form submissions.
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Drawer>
     </AdminPageScroll>
   );

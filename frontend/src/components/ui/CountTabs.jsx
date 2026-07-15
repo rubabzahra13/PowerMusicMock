@@ -1,12 +1,11 @@
 /**
- * Modern filter tabs: no grey capsule track.
- * Active tab uses weight + brand underline; counts stay quiet until selected.
+ * Standalone filter chips — active fills brand-primary; inactive are bordered white pills.
  */
 export default function CountTabs({ tabs, value, onChange, className = '' }) {
   return (
     <div
       role="tablist"
-      className={`flex max-w-full items-center gap-1 overflow-x-auto ${className}`.trim()}
+      className={`inline-flex max-w-full flex-wrap items-center gap-2 ${className}`.trim()}
     >
       {tabs.map(({ key, label, count }) => {
         const selected = value === key;
@@ -17,19 +16,19 @@ export default function CountTabs({ tabs, value, onChange, className = '' }) {
             role="tab"
             aria-selected={selected}
             onClick={() => onChange?.(key)}
-            className={`relative inline-flex shrink-0 items-baseline gap-2 border-b-2 px-3 pb-2.5 pt-1 text-sm transition-colors ${
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-all duration-150 ${
               selected
-                ? 'border-[var(--color-brand-primary)] font-semibold text-[var(--color-text-primary)]'
-                : 'border-transparent font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                ? 'bg-[var(--color-brand-primary)] font-semibold text-white shadow-sm'
+                : 'border border-[var(--color-border-default)] bg-white font-medium text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]/40 hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-text-primary)]'
             }`}
           >
-            {label}
+            <span className="leading-none">{label}</span>
             {count != null ? (
               <span
-                className={`tabular-nums text-xs ${
+                className={`inline-flex min-w-[1.25rem] items-center justify-center rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums leading-none ${
                   selected
-                    ? 'font-semibold text-[var(--color-text-primary)]'
-                    : 'font-medium text-[var(--color-text-muted)]'
+                    ? 'bg-white/15 text-white'
+                    : 'bg-[var(--color-surface-panel)] text-[var(--color-text-muted)]'
                 }`}
               >
                 {count}

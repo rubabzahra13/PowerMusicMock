@@ -9,6 +9,7 @@ export default function AdminPageScroll({
   className = '',
   narrow = false,
   contentClassName = 'flex flex-col gap-4 sm:gap-6 select-none pb-2',
+  scrollClassName = 'h-full w-full overflow-y-scroll scrollbar-hide',
   dataPage,
 }) {
   const widthClass = narrow ? 'max-w-4xl' : 'max-w-7xl';
@@ -20,7 +21,7 @@ export default function AdminPageScroll({
     >
       <DottedScroll
         className="min-h-0 w-full flex-1"
-        scrollClassName="h-full w-full overflow-y-scroll scrollbar-hide"
+        scrollClassName={scrollClassName}
         contentClassName={`mx-auto w-full ${widthClass} px-4 pt-4 sm:px-6 sm:pt-6 ${contentClassName}`.trim()}
       >
         {children}

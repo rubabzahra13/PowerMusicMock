@@ -29,7 +29,7 @@ export function requestTagVariant(tag) {
   if (tag === TAG_VERIFIED) return 'add-action';
   if (tag === TAG_UNVERIFIED) return 'archived';
   if (tag === TAG_PARTNER_REQUEST) return 'neutral';
-  if (tag === TAG_AUTO_MAIL) return 'auto-mail';
+  if (tag === TAG_AUTO_MAIL) return 'neutral';
   return 'neutral';
 }
 
@@ -78,7 +78,7 @@ export function matchesSentViaFilter(tags = [], filterValue) {
 
 export function requestTagLabel(tag) {
   if (tag === TAG_PARTNER_REQUEST) return 'Manager Form';
-  if (tag === TAG_AUTO_MAIL) return 'Auto Email';
+  if (tag === TAG_AUTO_MAIL) return 'Automated email';
   return tag;
 }
 
@@ -93,11 +93,13 @@ export function directoryStatusTag(request) {
       variant: 'already-exists',
       label: 'Already exists',
       prefix: '⚠ ',
+      plain: false,
     };
   }
   return {
     variant: 'new-person',
-    label: 'New',
+    label: request?.action === 'Remove' ? 'Not removed' : 'Not added',
     prefix: '',
+    plain: true,
   };
 }

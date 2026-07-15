@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import DottedScroll from './DottedScroll';
 
 export default function Drawer({
   isOpen,
@@ -9,6 +10,7 @@ export default function Drawer({
   children,
   footer,
   fill = false,
+  hideHeader = false,
   widthClass = 'w-full max-w-full sm:max-w-[420px]',
 }) {
   const titleId = useId();
@@ -36,6 +38,24 @@ export default function Drawer({
 
   if (typeof document === 'undefined') return null;
 
+  const closeButton = (
+    <button
+      ref={closeRef}
+      type="button"
+      onClick={onClose}
+      className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus:outline-none"
+      aria-label="Close panel"
+    >
+      <X className="size-3.5 shrink-0" strokeWidth={2.25} aria-hidden="true" />
+    </button>
+  );
+
+  const body = (
+    <div className={`flex flex-1 flex-col px-4 py-4 ${fill ? 'min-h-0 overflow-hidden' : ''}`}>
+      {children}
+    </div>
+  );
+
   return createPortal(
     <>
       <div
@@ -56,32 +76,41 @@ export default function Drawer({
           isOpen ? 'translate-x-0' : 'translate-x-full pointer-events-none'
         }`}
       >
-        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-default)] bg-white px-4 pt-[env(safe-area-inset-top)] sm:pt-0">
-          <h2
-            id={titleId}
-            className="truncate text-sm font-semibold tracking-tight text-[var(--color-text-primary)]"
-          >
+        {hideHeader ? (
+          <h2 id={titleId} className="sr-only">
             {title}
           </h2>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/25 focus-visible:ring-offset-1"
-            aria-label="Close panel"
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </button>
-        </header>
+        ) : (
+          <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border-default)] bg-white px-4 pt-[env(safe-area-inset-top)] sm:pt-0">
+            <h2
+              id={titleId}
+              className="truncate text-sm font-semibold tracking-tight text-[var(--color-text-primary)]"
+            >
+              {title}
+            </h2>
+            {closeButton}
+          </header>
+        )}
 
-        <div
-          className={`flex min-h-0 flex-1 flex-col bg-[var(--color-surface-bg)] ${
-            fill ? 'overflow-hidden' : 'overflow-y-auto overscroll-contain'
-          }`}
-        >
-          <div className={`flex flex-1 flex-col px-4 py-4 ${fill ? 'min-h-0 overflow-hidden' : ''}`}>
-            {children}
-          </div>
+        <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--color-surface-bg)] overflow-hidden">
+          {hideHeader ? (
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-end px-4 pt-[max(1rem,env(safe-area-inset-top))]">
+              <div className="pointer-events-auto">{closeButton}</div>
+            </div>
+          ) : null}
+          {fill ? (
+            body
+          ) : (
+            <DottedScroll
+              className="min-h-0 flex-1"
+              scrollClassName="h-full overflow-y-scroll scrollbar-hide overscroll-contain pr-4 sm:pr-0"
+              contentClassName="flex min-h-full flex-col"
+              indicatorPlacement="gutter"
+              indicatorClassName="sm:hidden"
+            >
+              {body}
+            </DottedScroll>
+          )}
         </div>
 
         {footer ? (

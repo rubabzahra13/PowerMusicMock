@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Search, Plus, SortAsc, ChevronDown, Filter, Eye, Trash2
+  Search, Plus, SortAsc, ChevronDown, Filter, ArrowRight, Trash2
 } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll } from '../components/ui';
@@ -88,20 +88,22 @@ function ControlsBar({
   const toolbarBtnClass = (active) =>
     `flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
       active
-        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)] shadow-sm ring-1 ring-[rgba(26,26,46,0.06)]'
-        : 'text-[var(--color-text-secondary)] hover:bg-white hover:text-[var(--color-text-primary)]'
+        ? 'bg-white text-[var(--color-brand-secondary)] shadow-[0_1px_2px_rgba(44,95,143,0.12)] ring-1 ring-[var(--color-brand-secondary-border)]/55'
+        : 'text-[var(--color-text-secondary)] hover:bg-white/80 hover:text-[var(--color-brand-secondary)]'
     }`;
 
   return (
-    <div className="w-full rounded-2xl border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-card)]">
+    <div className="w-full rounded-2xl border border-[var(--color-brand-secondary-border)]/55 bg-white shadow-[var(--shadow-card)]">
       <div
-        className={`bg-[var(--color-surface-panel)] ${
-          filterOpen ? 'border-b border-[var(--color-border-default)] rounded-t-2xl' : 'rounded-2xl'
+        className={`bg-[var(--color-brand-secondary-muted)]/45 ${
+          filterOpen
+            ? 'border-b border-[var(--color-brand-secondary-border)]/40 rounded-t-2xl'
+            : 'rounded-2xl'
         }`}
       >
         <div className="flex flex-col md:flex-row items-stretch gap-2 p-2">
-          <div className="flex items-center gap-2.5 px-3 py-2 flex-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-sm focus-within:ring-2 focus-within:ring-[rgba(26,26,46,0.08)] focus-within:border-transparent transition-shadow">
-          <Search className="h-4 w-4 text-[var(--color-text-muted)] shrink-0" />
+          <div className="flex items-center gap-2.5 px-3 py-2 flex-1 bg-white rounded-xl border border-[var(--color-brand-secondary-border)]/35 shadow-sm focus-within:ring-2 focus-within:ring-[var(--color-brand-secondary)]/15 focus-within:border-[var(--color-brand-secondary-border)] transition-shadow">
+          <Search className="h-4 w-4 text-[var(--color-brand-secondary)]/70 shrink-0" />
           <input
             type="text"
             placeholder="Search name, email or club..."
@@ -123,7 +125,7 @@ function ControlsBar({
             <Filter className="h-4 w-4" />
             <span>Filter</span>
             {activeFilterCount > 0 && (
-              <span className="ml-0.5 bg-[var(--color-brand-primary)] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+              <span className="ml-0.5 bg-[var(--color-brand-secondary)] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
                 {activeFilterCount}
               </span>
             )}
@@ -141,7 +143,7 @@ function ControlsBar({
             </button>
 
             {sortOpen && (
-              <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-56 max-h-72 overflow-y-auto py-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-[var(--shadow-modal)]">
+              <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-56 max-h-72 overflow-y-auto py-1 bg-white rounded-xl border border-[var(--color-brand-secondary-border)]/45 shadow-[var(--shadow-modal)]">
                 {SORT_PRESETS.map((opt) => (
                   <button
                     key={opt.value}
@@ -149,8 +151,8 @@ function ControlsBar({
                     onClick={() => { setSortPreset(opt.value); setSortOpen(false); }}
                     className={`w-full text-left px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
                       sortPreset === opt.value
-                        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
-                        : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)]'
+                        ? 'bg-[var(--color-brand-secondary-muted)] text-[var(--color-brand-secondary)]'
+                        : 'text-[var(--color-text-primary)] hover:bg-[var(--color-brand-secondary-muted)]/50'
                     }`}
                   >
                     {opt.label}
@@ -176,11 +178,11 @@ function ControlsBar({
       </div>
 
       {filterOpen && (
-        <div className="bg-[var(--color-surface-highlight)]/50 px-4 py-4 rounded-b-2xl">
+        <div className="bg-[var(--color-brand-secondary-muted)]/35 px-4 py-4 rounded-b-2xl">
           <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
             {filterSlots.map((slot) => (
               <div key={slot.label} className="flex flex-col gap-1 min-w-[140px]">
-                <label className="text-[11px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-brand-secondary)]/80">
                   {slot.label}
                 </label>
                 <SelectDropdown
@@ -284,12 +286,18 @@ function NewRequestsMobileList({
                         {formatRequestDisplayId(row.displayId)}
                       </span>
                       <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={row.action} compact />
-                      <Tag
-                        variant={directoryStatus.variant}
-                        label={directoryStatus.label}
-                        prefix={directoryStatus.prefix}
-                        compact
-                      />
+                      {directoryStatus.plain ? (
+                        <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+                          {directoryStatus.label}
+                        </span>
+                      ) : (
+                        <Tag
+                          variant={directoryStatus.variant}
+                          label={directoryStatus.label}
+                          prefix={directoryStatus.prefix}
+                          compact
+                        />
+                      )}
                       {sentViaTags.map((tag) => (
                         <Tag key={tag} variant={requestTagVariant(tag)} label={requestTagLabel(tag)} compact />
                       ))}
@@ -337,7 +345,7 @@ function NewRequestsMobileList({
                       </span>
                     </p>
                   </div>
-                  <Eye className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+                  <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
                 </div>
               </button>
 
@@ -358,14 +366,6 @@ function NewRequestsMobileList({
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => onOpenRequest(row)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-highlight)]"
-                >
-                  <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                  View
-                </button>
-                <button
-                  type="button"
                   onClick={() => onMarkAs(row)}
                   className={`min-w-[4.75rem] rounded-md border px-3 py-1.5 text-center text-xs font-semibold text-white shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition-all active:translate-y-px active:shadow-none ${
                     isAdd
@@ -374,6 +374,14 @@ function NewRequestsMobileList({
                   }`}
                 >
                   {isAdd ? 'Added' : 'Removed'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenRequest(row)}
+                  aria-label="Open request details"
+                  className="inline-flex items-center justify-center rounded-lg p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
+                >
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -466,8 +474,18 @@ export default function Requests() {
   }, [deepLinkRequestId, navigate, setSearchParams]);
 
   useEffect(() => {
-    if (statusDeepLink !== 'New' && statusDeepLink !== 'Already exists') return;
-    setFilterStatus(statusDeepLink);
+    if (
+      statusDeepLink !== 'New'
+      && statusDeepLink !== 'Not added/removed'
+      && statusDeepLink !== 'Not added'
+      && statusDeepLink !== 'Not removed'
+      && statusDeepLink !== 'Already exists'
+    ) return;
+    setFilterStatus(
+      statusDeepLink === 'New' || statusDeepLink === 'Not added/removed'
+        ? 'Not added'
+        : statusDeepLink,
+    );
     setFilterOpen(true);
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -890,12 +908,13 @@ export default function Requests() {
     }
   };
 
-  // ── Column definitions — shared structure ──
-  const sharedStartColumns = [
+  // ── Column order: #, Received, Person, Manager, Type, Status, Notes, Needs review, Mark as, →
+  const newColumns = [
     {
       key: 'displayId',
       label: '#',
-      width: '52px',
+      width: '3rem',
+      minWidth: '3rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'text-center align-middle whitespace-nowrap px-2',
@@ -908,69 +927,38 @@ export default function Requests() {
     {
       key: 'timestamp',
       label: 'Received',
-      width: '108px',
+      width: '6.5rem',
+      minWidth: '6.5rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'align-middle whitespace-nowrap',
       render: (_, row) => <TimestampCell val={row.receivedAt} />
     },
     {
-      key: 'action',
-      label: 'Type',
-      width: '72px',
-      noShrink: true,
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle whitespace-nowrap text-center',
-      render: (val) => <Tag variant={val === 'Add' ? 'add-action' : 'remove-action'} label={val} />
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      width: '110px',
-      noShrink: true,
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle whitespace-nowrap text-center px-1',
-      render: (_, row) => {
-        const status = directoryStatusTag(row);
-        return (
-          <Tag
-            variant={status.variant}
-            label={status.label}
-            prefix={status.prefix}
-            compact
-          />
-        );
-      },
-    },
-    {
       key: 'person',
       label: 'Person',
-      width: '17%',
+      width: '21%',
+      minWidth: '11rem',
       headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
+      cellClassName: 'align-top max-w-0 overflow-hidden text-left py-2',
       render: (_, row) => {
         const name = `${row.person.firstName} ${row.person.lastName}`.trim();
         return (
-          <div className="min-w-0">
-            <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]">
-              {name}
-            </TruncateCell>
-            <TruncateCell className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-              {row.person.email}
-            </TruncateCell>
-            <TruncateCell className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-              {row.person.location || EMPTY_CELL}
-            </TruncateCell>
-          </div>
+          <StackedTextCell
+            primary={name}
+            secondary={row.person.email}
+            tertiary={row.person.location || EMPTY_CELL}
+          />
         );
       },
     },
     {
       key: 'manager',
       label: 'Manager',
-      width: '17%',
+      width: '18%',
+      minWidth: '10rem',
       headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
+      cellClassName: 'align-top max-w-0 overflow-hidden text-left',
       render: (_, row) => {
         const manager = getManagerColumnContent(row);
         return (
@@ -984,9 +972,47 @@ export default function Requests() {
       }
     },
     {
+      key: 'action',
+      label: 'Type',
+      width: '3.5rem',
+      minWidth: '3.5rem',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle whitespace-nowrap text-center',
+      render: (val) => <Tag variant={val === 'Add' ? 'add-action' : 'remove-action'} label={val} />
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      width: '7.75rem',
+      minWidth: '7.75rem',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle overflow-hidden text-center px-1',
+      render: (_, row) => {
+        const status = directoryStatusTag(row);
+        if (status.plain) {
+          return (
+            <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+              {status.label}
+            </span>
+          );
+        }
+        return (
+          <Tag
+            variant={status.variant}
+            label={status.label}
+            prefix={status.prefix}
+            compact
+          />
+        );
+      },
+    },
+    {
       key: 'managerNotes',
       label: 'Manager notes',
-      width: '14%',
+      width: '8%',
+      minWidth: '5rem',
       headerClassName: 'text-center',
       cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (_, row) => {
@@ -996,36 +1022,20 @@ export default function Requests() {
             className={`text-xs leading-relaxed ${
               notes ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'
             }`}
+            title={notes || undefined}
           >
             {formatManagerNotes(row)}
           </TruncateCell>
         );
       },
-    }
-  ];
-
-  const newColumns = [
-    ...sharedStartColumns,
-    {
-      key: 'tags',
-      label: 'Sent via',
-      width: '18%',
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden pl-2 pr-1 text-center',
-      render: (_, row) => (
-        <div className="flex flex-col items-center justify-center gap-1 min-w-0 px-1">
-          {sentViaTableRequestTags(row.tags || []).map((t) => (
-            <Tag key={t} variant={requestTagVariant(t)} label={requestTagLabel(t)} compact />
-          ))}
-        </div>
-      )
     },
     {
       key: 'remarks',
       label: 'Needs review',
-      width: '22%',
+      width: '7rem',
+      minWidth: '7rem',
       headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-center px-2 py-1.5',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-center px-2',
       render: (_, row) => (
         <RequestComparison
           intakeMatch={row.intakeMatch}
@@ -1038,38 +1048,19 @@ export default function Requests() {
       )
     },
     {
-      key: 'rowActions',
-      label: 'Actions',
-      width: '56px',
-      noShrink: true,
-      headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
-      render: (_, row) => (
-        <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => handleOpenRequest(row)}
-            aria-label="View request details"
-            className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] rounded-lg transition-colors cursor-pointer shrink-0"
-          >
-            <Eye className="h-4 w-4" />
-          </button>
-        </div>
-      )
-    },
-    {
       key: 'markAs',
       label: 'Mark as',
-      width: '128px',
+      width: '5rem',
+      minWidth: '5rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
+      cellClassName: 'text-center align-middle whitespace-nowrap pl-1 pr-0 py-2',
       render: (_, row) => (
         <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
             onClick={() => setConfirmActionRequest({ request: row, adminNote: '' })}
-            className={`min-w-[4.75rem] w-[4.75rem] text-center px-2 py-1.5 text-xs font-semibold rounded-md border transition-all cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.12)] active:translate-y-px active:shadow-none shrink-0 ${
+            className={`min-w-[4.75rem] w-[4.75rem] text-center px-1.5 py-1.5 text-xs font-semibold rounded-md border transition-all cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.12)] active:translate-y-px active:shadow-none shrink-0 ${
               row.action === 'Add'
                 ? 'bg-[#16a34a] text-white border-[#15803d] hover:bg-[#15803d]'
                 : 'bg-[#dc2626] text-white border-[#b91c1c] hover:bg-[#b91c1c]'
@@ -1079,7 +1070,21 @@ export default function Requests() {
           </button>
         </div>
       )
-    }
+    },
+    {
+      key: 'open',
+      label: '',
+      width: '1.5rem',
+      minWidth: '1.5rem',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'text-center align-middle whitespace-nowrap pl-0 pr-1 py-2',
+      render: () => (
+        <div className="flex items-center justify-center" aria-hidden="true">
+          <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" />
+        </div>
+      )
+    },
   ];
 
   const displayedRows = filteredRequests;
@@ -1144,7 +1149,7 @@ export default function Requests() {
             options: [
               { value: 'All', label: 'All' },
               { value: TAG_PARTNER_REQUEST, label: 'Manager Form' },
-              { value: TAG_AUTO_MAIL, label: 'Auto Email' },
+              { value: TAG_AUTO_MAIL, label: 'Automated email' },
               { value: SENT_VIA_BOTH, label: 'Both' },
             ]
           },
@@ -1160,7 +1165,8 @@ export default function Requests() {
             label: 'Status', value: filterStatus, onChange: setFilterStatus,
             options: [
               { value: 'All', label: 'All' },
-              { value: 'New', label: 'New' },
+              { value: 'Not added', label: 'Not added' },
+              { value: 'Not removed', label: 'Not removed' },
               { value: 'Already exists', label: 'Already exists' },
             ]
           },
@@ -1188,6 +1194,7 @@ export default function Requests() {
           emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
           compact
           centerHeaders
+          accent
           loading={tableLoading}
         />
       </div>

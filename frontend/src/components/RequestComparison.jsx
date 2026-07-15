@@ -179,7 +179,7 @@ function TableReviewCell({ hasDiffs: showYes, onViewDetails }) {
 
   return (
     <span className="inline-flex flex-wrap items-center justify-center gap-x-1 text-center text-xs font-medium text-[var(--color-text-muted)]">
-      <span>Yes</span>
+      <span className="text-[var(--color-text-muted)]">Yes</span>
       <span aria-hidden="true">·</span>
       {onViewDetails ? (
         <button
@@ -307,7 +307,7 @@ export default function RequestComparison({
   if (variant === 'table') {
     return (
       <div
-        className={`flex min-w-0 justify-center ${className}`.trim()}
+        className={`flex min-w-0 items-center justify-center ${className}`.trim()}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => event.stopPropagation()}
       >

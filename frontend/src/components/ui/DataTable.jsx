@@ -1,30 +1,31 @@
 export const EMPTY_CELL = '-';
 
-export function TruncateCell({ children, className = '' }) {
+export function TruncateCell({ children, className = '', title }) {
   const text = children == null ? '' : String(children);
   if (!text) return null;
   return (
-    <span className={`block truncate ${className}`}>
+    <span className={`block truncate ${className}`} title={title ?? text}>
       {children}
     </span>
   );
 }
 
-export function StackedTextCell({ primary, secondary, tertiary, primaryClassName = '' }) {
+export function StackedTextCell({ primary, secondary, tertiary, primaryClassName = '', truncate = true }) {
+  const lineClass = truncate ? 'block truncate' : 'block break-words';
   return (
     <div className="min-w-0">
-      <TruncateCell className={`text-sm font-semibold text-[var(--color-text-primary)] ${primaryClassName}`.trim()}>
+      <span className={`${lineClass} text-sm font-semibold text-[var(--color-text-primary)] ${primaryClassName}`.trim()}>
         {primary}
-      </TruncateCell>
+      </span>
       {secondary ? (
-        <TruncateCell className="text-xs text-[var(--color-text-secondary)] mt-0.5">
+        <span className={`${lineClass} text-xs text-[var(--color-text-secondary)] mt-0.5`}>
           {secondary}
-        </TruncateCell>
+        </span>
       ) : null}
       {tertiary ? (
-        <TruncateCell className="text-xs text-[var(--color-text-muted)] mt-0.5">
+        <span className={`${lineClass} text-xs text-[var(--color-text-muted)] mt-0.5`}>
           {tertiary}
-        </TruncateCell>
+        </span>
       ) : null}
     </div>
   );
@@ -56,27 +57,37 @@ export default function DataTable({
   loading = false,
   skeletonRows = 6,
   getRowClassName,
+  /** Match request-detail blue border + header accents */
+  accent = false,
 }) {
   const isRowClickable = typeof onRowClick === 'function';
+  const shellClass = accent
+    ? 'border-[var(--color-brand-secondary)]'
+    : 'border-[var(--color-border-default)]';
+  const headRowClass = accent
+    ? 'bg-[var(--color-brand-secondary-muted)] border-b border-[var(--color-brand-secondary-border)]'
+    : 'bg-[#f9fafb] border-b border-[var(--color-border-default)]';
+  const headCellClass = accent
+    ? 'text-[var(--color-brand-secondary)]'
+    : 'text-[var(--color-text-secondary)]';
 
   return (
     <div
-      className={`w-full border border-[var(--color-border-default)] rounded-md bg-[var(--color-surface-card)] ${
-        compact ? 'overflow-hidden' : 'overflow-x-auto'
-      }`}
+      className={`w-full border rounded-md bg-[var(--color-surface-card)] overflow-x-auto ${shellClass}`}
     >
-      <table className={`w-full border-collapse text-left ${compact ? 'table-fixed' : ''}`}>
+      <table className={`w-full border-collapse text-left ${compact ? 'table-fixed min-w-[70rem]' : ''}`}>
         <thead>
-          <tr className="bg-[#f9fafb] border-b border-[var(--color-border-default)]">
+          <tr className={headRowClass}>
             {columns.map((column) => (
               <th
                 key={column.key}
-                className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] select-none ${
+                className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wider select-none ${headCellClass} ${
                   centerHeaders ? 'text-center' : ''
                 } ${column.headerClassName || ''}`}
                 style={{
                   fontSize: 'var(--font-size-xs)',
-                  ...(column.width ? { width: column.width } : {})
+                  ...(column.width ? { width: column.width } : {}),
+                  ...(column.minWidth ? { minWidth: column.minWidth } : {}),
                 }}
               >
                 {column.label}
@@ -104,18 +115,23 @@ export default function DataTable({
                     ? column.render(rawValue, row)
                     : rawValue;
 
-                  const cellStyle = column.width ? { width: column.width } : undefined;
+                  const cellStyle = {
+                    ...(column.width ? { width: column.width } : {}),
+                    ...(column.minWidth ? { minWidth: column.minWidth } : {}),
+                  };
                   const defaultCellClass = compact
                     ? column.noShrink
                       ? 'align-middle whitespace-nowrap'
-                      : 'align-middle max-w-0 overflow-hidden'
+                      : column.wrap
+                        ? 'align-top whitespace-normal'
+                        : 'align-middle max-w-0 overflow-hidden'
                     : 'whitespace-nowrap align-middle';
 
                   return (
                     <td
                       key={column.key}
                       style={{ ...cellStyle }}
-                      className={`px-3 py-2.5 text-sm text-[var(--color-text-primary)] ${
+                      className={`px-3 py-3 text-sm text-[var(--color-text-primary)] ${
                         column.cellClassName ?? defaultCellClass
                       }`}
                     >

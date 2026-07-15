@@ -1,4 +1,4 @@
-export default function PageHeader({ section, title, description, meta, actions, footer, className = '', compact = false, workspace = false }) {
+export default function PageHeader({ section, title, description, meta, actions, footer, className = '', compact = false, borderless = false, workspace = false }) {
   if (workspace) {
     return (
       <header className={`border-b border-[var(--color-border-default)] shrink-0 pb-2.5 mb-2 ${className}`}>
@@ -24,8 +24,14 @@ export default function PageHeader({ section, title, description, meta, actions,
     );
   }
 
+  const spacingClass = borderless
+    ? 'pb-0 mb-2'
+    : compact
+      ? 'pb-4 mb-3'
+      : 'pb-5 mb-8';
+
   return (
-    <header className={`border-b border-[var(--color-border-default)] space-y-4 shrink-0 ${compact ? 'pb-4 mb-3' : 'pb-5 mb-8'} ${className}`}>
+    <header className={`${borderless ? '' : 'border-b border-[var(--color-border-default)]'} space-y-4 shrink-0 ${spacingClass} ${className}`}>
       <div className="min-w-0">
         <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">
           {section}

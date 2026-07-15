@@ -16,7 +16,6 @@ import RequestComparison from './RequestComparison';
 import { hasAnyDataDiffs, hasComparisonContext } from '../utils/requestComparison';
 import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
 import {
-  TAG_ALREADY_EXISTS,
   TAG_AUTO_MAIL,
   visibleTableRequestTags,
   requestTagLabel,
@@ -128,7 +127,7 @@ export default function RequestDetailView({
 
   return (
     <div className="relative z-0 min-w-0 w-full bg-[var(--color-surface-bg)] pb-16 select-none">
-      <nav aria-label="Breadcrumb" className="mb-8 flex flex-wrap items-center gap-x-3 gap-y-2">
+      <nav aria-label="Breadcrumb" className="mb-8 flex w-full flex-wrap items-center gap-x-3 gap-y-2">
         <Link
           to="/new-requests"
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
@@ -156,22 +155,20 @@ export default function RequestDetailView({
           </li>
         </ol>
         {secondaryTags.length > 0 ? (
-          <>
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <span
-              className="h-4 w-px shrink-0 self-center bg-[var(--color-border-default)]"
+              className="mr-1.5 hidden h-4 w-px shrink-0 self-center bg-[var(--color-border-default)] sm:block"
               aria-hidden="true"
             />
-            <div className="flex flex-wrap items-center gap-1.5">
-              {secondaryTags.map((tag) => (
-                <Tag
-                  key={tag}
-                  variant={requestTagVariant(tag)}
-                  label={requestTagLabel(tag)}
-                  compact={tag === TAG_ALREADY_EXISTS}
-                />
-              ))}
-            </div>
-          </>
+            {secondaryTags.map((tag) => (
+              <Tag
+                key={tag}
+                variant={requestTagVariant(tag)}
+                label={requestTagLabel(tag)}
+                compact={false}
+              />
+            ))}
+          </div>
         ) : null}
       </nav>
 
@@ -215,7 +212,6 @@ export default function RequestDetailView({
                 <Tag
                   variant={isAdd ? 'add-action' : 'remove-action'}
                   label={isAdd ? 'Add person' : 'Remove person'}
-                  compact
                 />
               </div>
 

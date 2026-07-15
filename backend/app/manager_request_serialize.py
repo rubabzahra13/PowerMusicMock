@@ -14,7 +14,14 @@ from app.directory_person_match import (
     request_person_for_match,
 )
 from app.manager_request_views import is_request_unread
-from app.manager_request_tags import TAG_ALREADY_EXISTS, TAG_AUTO_MAIL, merge_tags
+from app.manager_request_tags import (
+    TAG_ALREADY_EXISTS,
+    TAG_AUTO_MAIL,
+    TAG_PARTNER_REQUEST,
+    TAG_VERIFIED,
+    has_tag,
+    merge_tags,
+)
 from app.request_display import parse_request_display_number
 from app.request_match_summary import build_directory_match, build_intake_match
 from app.user_display import (
@@ -341,6 +348,8 @@ def directory_person_to_api_dict(
     *,
     manager_user: Optional[models.PowermusicUser] = None,
     admin_user: Optional[models.PowermusicUser] = None,
+    db: Optional[Session] = None,
+    related_rows: Optional[List[models.ManagerRequest]] = None,
 ) -> Dict[str, Any]:
     if manager_user is None:
         manager_user = getattr(req, "_manager_user", None)
@@ -351,6 +360,9 @@ def directory_person_to_api_dict(
     manager_name = resolve_manager_name(req, manager_user=manager_user)
     handled_by = resolve_handled_by_name(req, admin_user=admin_user)
     manager_notes, _ = _split_manager_and_automated_notes(req.manager_notes)
+
+    history_source = related_rows if related_rows is not None else [req]
+    request_history = _build_directory_request_history(db, history_source)
 
     return {
         "id": req.id,
@@ -372,7 +384,136 @@ def directory_person_to_api_dict(
         "managerNotes": manager_notes,
         "adminNotes": req.admin_notes,
         "notes": manager_notes,
+        "requestHistory": request_history,
     }
+
+
+def _light_auto_mail_snapshot(req: models.ManagerRequest) -> Optional[Dict[str, Any]]:
+    """Auto-mail summary without DB round-trips (safe for list serialization)."""
+    from app.intake_persons import get_auto_mail_meta
+
+    tags = req.tags or []
+    meta = get_auto_mail_meta(req)
+    _, notes_auto = _split_manager_and_automated_notes(req.manager_notes)
+    if (
+        not has_tag(tags, TAG_AUTO_MAIL)
+        and not meta
+        and not req.source_gmail_message_id
+        and not notes_auto
+    ):
+        return None
+    return {
+        "fromEmail": (meta.get("fromEmail") or "").strip(),
+        "subject": (meta.get("subject") or "").strip(),
+        "inboxEmail": (meta.get("inboxEmail") or "").strip(),
+        "receivedAt": meta.get("receivedAt") or req.received_at,
+        "details": ((meta.get("details") or "").strip() or notes_auto or ""),
+    }
+
+
+def _history_sort_key(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.min
+    return datetime.min
+
+
+def _build_directory_request_history(
+    _db: Optional[Session],
+    rows: List[models.ManagerRequest],
+) -> List[Dict[str, Any]]:
+    """Timeline of manager submissions, auto-mail receipts, and handled outcomes."""
+    events: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for req in rows:
+        tags = req.tags or []
+        manager_user = getattr(req, "_manager_user", None)
+        admin_user = getattr(req, "_admin_user", None)
+        manager_name = resolve_manager_name(req, manager_user=manager_user)
+        handled_by = resolve_handled_by_name(req, admin_user=admin_user)
+        display_id = parse_request_display_number(req.id)
+        action = req.action or ""
+        action_verb = "add" if action == "Add" else "remove" if action == "Remove" else action.lower()
+
+        auto = _light_auto_mail_snapshot(req)
+
+        if auto is not None:
+            event_id = f"{req.id}-auto-mail"
+            if event_id not in seen:
+                seen.add(event_id)
+                subject = (auto.get("subject") or "").strip()
+                from_email = (auto.get("fromEmail") or "").strip()
+                detail_bits = []
+                if from_email:
+                    detail_bits.append(f"From {from_email}")
+                if subject:
+                    detail_bits.append(subject)
+                events.append(
+                    {
+                        "id": event_id,
+                        "type": "auto_mail",
+                        "at": auto.get("receivedAt") or req.received_at,
+                        "requestId": req.id,
+                        "displayId": display_id,
+                        "action": action,
+                        "title": f"Automated email received for {action_verb or 'update'}",
+                        "detail": " · ".join(detail_bits) if detail_bits else None,
+                        "fromEmail": from_email or None,
+                        "subject": subject or None,
+                    }
+                )
+
+        has_manager = (
+            has_tag(tags, TAG_PARTNER_REQUEST)
+            or has_tag(tags, TAG_VERIFIED)
+            or bool(req.manager_id)
+        )
+        if has_manager:
+            event_id = f"{req.id}-manager-request"
+            if event_id not in seen:
+                seen.add(event_id)
+                who = manager_name or "a manager"
+                events.append(
+                    {
+                        "id": event_id,
+                        "type": "manager_request",
+                        "at": req.received_at,
+                        "requestId": req.id,
+                        "displayId": display_id,
+                        "action": action,
+                        "title": f"Manager request to {action_verb or 'update'}",
+                        "detail": f"Submitted by {who}",
+                        "managerName": manager_name or None,
+                    }
+                )
+
+        if req.status == "handled" and req.handled_at:
+            event_id = f"{req.id}-handled"
+            if event_id not in seen:
+                seen.add(event_id)
+                outcome = req.outcome or action
+                events.append(
+                    {
+                        "id": event_id,
+                        "type": "handled",
+                        "at": req.handled_at,
+                        "requestId": req.id,
+                        "displayId": display_id,
+                        "action": action,
+                        "title": f"Marked as {outcome}",
+                        "detail": f"By {handled_by}" if handled_by else None,
+                        "handledBy": handled_by or None,
+                        "outcome": outcome,
+                    }
+                )
+
+    events.sort(key=lambda e: _history_sort_key(e.get("at")), reverse=True)
+    return events
 
 
 def manager_request_list_item_to_api_dict(
@@ -412,6 +553,41 @@ def manager_requests_list_to_api_dicts(
 
 
 def directory_rows_to_api_dicts(db: Session, rows: List[models.ManagerRequest]) -> List[Dict[str, Any]]:
+    from collections import defaultdict
+
+    from sqlalchemy import func
+
     items = list(rows)
     hydrate_request_users(db, items)
-    return [directory_person_to_api_dict(req) for req in items]
+
+    emails = {
+        (row.person_email or "").strip().lower()
+        for row in items
+        if (row.person_email or "").strip()
+    }
+    related_by_email: Dict[str, List[models.ManagerRequest]] = defaultdict(list)
+    if emails:
+        related = (
+            db.query(models.ManagerRequest)
+            .filter(func.lower(models.ManagerRequest.person_email).in_(list(emails)))
+            .order_by(models.ManagerRequest.received_at.desc().nullslast())
+            .limit(max(200, len(emails) * 12))
+            .all()
+        )
+        hydrate_request_users(db, related)
+        for row in related:
+            key = (row.person_email or "").strip().lower()
+            if key:
+                related_by_email[key].append(row)
+
+    return [
+        directory_person_to_api_dict(
+            req,
+            db=db,
+            related_rows=related_by_email.get(
+                (req.person_email or "").strip().lower(),
+                [req],
+            ),
+        )
+        for req in items
+    ]

@@ -234,6 +234,22 @@ class RequestOut(BaseModel):
         }
 
 
+class PersonHistoryEventOut(BaseModel):
+    id: str
+    type: str
+    at: Optional[datetime] = None
+    requestId: Optional[str] = None
+    displayId: Optional[int] = None
+    action: Optional[str] = None
+    title: str
+    detail: Optional[str] = None
+    managerName: Optional[str] = None
+    handledBy: Optional[str] = None
+    outcome: Optional[str] = None
+    fromEmail: Optional[str] = None
+    subject: Optional[str] = None
+
+
 class PersonOut(BaseModel):
     id: str
     displayId: int
@@ -254,6 +270,7 @@ class PersonOut(BaseModel):
     managerNotes: Optional[str] = None
     adminNotes: Optional[str] = None
     notes: Optional[str] = None  # alias for managerNotes (legacy)
+    requestHistory: List[PersonHistoryEventOut] = []
 
     @model_validator(mode="before")
     @classmethod
@@ -285,6 +302,7 @@ class PersonOut(BaseModel):
                 "managerNotes": mgr_notes,
                 "adminNotes": adm_notes,
                 "notes": mgr_notes,
+                "requestHistory": data.get("requestHistory") or data.get("request_history") or [],
             }
 
         mgr_notes = getattr(data, "notes", None)
