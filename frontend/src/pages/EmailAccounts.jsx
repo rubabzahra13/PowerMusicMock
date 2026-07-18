@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Mail, Link2, Unlink, Trash2, Pencil, Plus } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
-import { getUserTimeZoneLabel } from '../utils/dateTime';
+import { formatShortDate, getUserTimeZoneLabel } from '../utils/dateTime';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClassNarrow } from '../utils/responsiveLayout';
 import DottedScroll from '../components/ui/DottedScroll';
@@ -21,7 +20,7 @@ const MAX_CONNECTED_INBOXES = 7;
 
 function connectedDate(iso) {
   if (!iso) return null;
-  try { return format(parseISO(iso), 'd MMM yyyy'); } catch { return iso; }
+  return formatShortDate(iso);
 }
 
 export default function GmailAccounts() {

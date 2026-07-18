@@ -11,7 +11,7 @@ import {
   UserMinus,
   UserPlus,
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { formatAdminDate } from '../utils/dateTime';
 import { Toast, useToast } from '../components/ui';
 import { fetchJson } from '../utils/api';
 import { clearCache } from '../utils/pilot2Api';
@@ -112,11 +112,7 @@ function directoryRowMatchesForm(row) {
 
 function formatDirectoryDate(dateStr) {
   if (!dateStr) return null;
-  try {
-    return format(parseISO(dateStr), 'dd MMM yyyy');
-  } catch {
-    return null;
-  }
+  return formatAdminDate(dateStr) || null;
 }
 
 export default function ManagerForm() {

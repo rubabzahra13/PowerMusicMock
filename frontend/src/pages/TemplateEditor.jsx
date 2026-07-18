@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Info, ArrowLeft, Trash2 } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatISODate } from '../utils/dateTime';
 import { templates as mockTemplates } from '../data/mockData';
 import { Modal, Toast, useToast } from '../components/ui';
 
@@ -96,7 +96,7 @@ export default function TemplateEditor({ mode = 'new' }) {
     }
 
     const saveStatus = forcedStatus || status;
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const todayStr = formatISODate();
 
     let updatedTemplates;
 

@@ -1,18 +1,13 @@
 import { Link } from 'react-router-dom';
 import { Info } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { formatTimeOnly } from '../utils/dateTime';
 import { inboxes } from '../data/mockData';
 import { Tag } from '../components/ui';
 
 export default function Inboxes() {
   const formatLastSync = (syncTime) => {
     if (!syncTime) return '';
-    try {
-      const parsed = parseISO(syncTime);
-      return `Today at ${format(parsed, 'HH:mm')}`;
-    } catch {
-      return syncTime;
-    }
+    return `Today at ${formatTimeOnly(syncTime)}`;
   };
 
   return (

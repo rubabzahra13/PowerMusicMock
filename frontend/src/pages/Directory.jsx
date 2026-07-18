@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2 } from 'lucide-react';
 
-import { format, parseISO } from 'date-fns';
+import { parseISO } from 'date-fns';
+import { formatTimestampSplit } from '../utils/dateTime';
 import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache } from '../utils/pilot2Api';
@@ -278,12 +279,7 @@ const buildFilterOptions = (values) => [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function formatTimestamp(iso) {
-  try {
-    const d = parseISO(iso);
-    return { date: format(d, 'dd MMM yyyy'), time: format(d, 'hh:mm a') };
-  } catch {
-    return { date: iso, time: '' };
-  }
+  return formatTimestampSplit(iso);
 }
 
 const TimestampCell = ({ val }) => {

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Search, Download, Info, SortAsc, SortDesc, ChevronDown, Filter } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { formatTimestampSplit, formatShortDateAndTime, formatTimeOnly } from '../utils/dateTime';
 import { handledRequests } from '../data/mockData';
 import { TAG_ALREADY_EXISTS, TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_UNVERIFIED, TAG_VERIFIED, requestTagVariant, sortRequestTags } from '../utils/requestTags';
 import { DataTable, Tag, Drawer, EMPTY_CELL } from '../components/ui';
@@ -146,14 +146,10 @@ export default function PreviouslyHandled() {
 
   // ── Formatters ──
   const formatTimestamp = (iso) => {
-    try {
-      const d = parseISO(iso);
-      return { date: format(d, 'dd MMM yyyy'), time: format(d, 'hh:mm a') };
-    } catch { return { date: iso, time: '' }; }
+    return formatTimestampSplit(iso);
   };
   const formatDateTime = (iso) => {
-    try { return format(parseISO(iso), 'dd MMM yyyy, hh:mm a'); }
-    catch { return iso; }
+    return formatShortDateAndTime(iso);
   };
 
   // ── Filter + Sort ──
@@ -451,7 +447,7 @@ export default function PreviouslyHandled() {
               <div className="divide-y divide-[var(--color-border-default)] font-medium text-xs">
                 <div className="py-2 flex items-start gap-3">
                   <span className="text-[var(--color-text-secondary)] font-semibold shrink-0">
-                    {format(parseISO(selectedRequest.receivedAt), 'HH:mm')}
+                    {formatTimeOnly(selectedRequest.receivedAt)}
                   </span>
                   <span className="text-[var(--color-text-primary)]">
                     Request submitted by{' '}
@@ -462,7 +458,7 @@ export default function PreviouslyHandled() {
                 </div>
                 <div className="py-2 flex items-start gap-3">
                   <span className="text-[var(--color-text-secondary)] font-semibold shrink-0">
-                    {format(parseISO(selectedRequest.handledAt), 'HH:mm')}
+                    {formatTimeOnly(selectedRequest.handledAt)}
                   </span>
                   <span className="text-[var(--color-text-primary)]">
                     Marked as {selectedRequest.action === 'Add' ? 'Added' : 'Removed'} by Andrea

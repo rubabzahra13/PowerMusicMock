@@ -8,7 +8,7 @@ import {
   Trash2,
   Unlink,
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { formatShortDate } from '../utils/dateTime';
 import PageHeader from '../components/layout/PageHeader';
 import { AdminPageScroll, Toast, useToast, CardListSkeleton, Modal } from '../components/ui';
 import { getUserTimeZoneLabel } from '../utils/dateTime';
@@ -45,12 +45,12 @@ function readPmCache(key) {
 
 function connectedDate(iso) {
   if (!iso) return null;
-  try { return format(parseISO(iso), 'd MMM yyyy'); } catch { return iso; }
+  return formatShortDate(iso);
 }
 
 function formatAdded(iso) {
   if (!iso) return '';
-  try { return format(parseISO(iso), 'd MMM yyyy'); } catch { return iso; }
+  return formatShortDate(iso);
 }
 
 function formatSourcePattern(source) {

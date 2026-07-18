@@ -5,7 +5,8 @@ import {
   SlidersHorizontal, SortAsc, Mail, RotateCcw, Eye, Clock,
   ChevronLeft, ChevronRight, Link2, Unlink, Sparkles, Check, Loader2,
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { parseISO } from 'date-fns';
+import { formatShortDateAndTime, formatShortDate } from '../utils/dateTime';
 import {
   getTemplates, createTemplate, updateTemplate, deleteTemplate,
   restoreTemplate, deleteTemplateForever, getInboxes, loadWithCache, refreshCache, writeCache,
@@ -54,14 +55,12 @@ function translateSubject(originalSubject, lang) {
 // ─── Shared format helpers ─────────────────────────────────────────────────────
 const fmtUpdated = (iso) => {
   if (!iso) return EMPTY_CELL;
-  try { return format(parseISO(iso), "dd MMM yyyy, hh:mm a"); }
-  catch { return iso; }
+  return formatShortDateAndTime(iso);
 };
 
 const fmtListDate = (iso) => {
   if (!iso) return EMPTY_CELL;
-  try { return format(parseISO(iso), 'd MMM yyyy'); }
-  catch { return iso; }
+  return formatShortDate(iso);
 };
 
 // ─── Template List Item ────────────────────────────────────────────────────────

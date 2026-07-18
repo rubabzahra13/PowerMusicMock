@@ -1,12 +1,8 @@
-import { format, parseISO } from 'date-fns';
+import { formatDayTimeShort } from '../../utils/dateTime';
 import { AlertCircle } from 'lucide-react';
 
 function fmt(iso) {
-  try {
-    return format(parseISO(iso), 'h:mm a · d MMM');
-  } catch {
-    return iso;
-  }
+  return formatDayTimeShort(iso);
 }
 
 /**

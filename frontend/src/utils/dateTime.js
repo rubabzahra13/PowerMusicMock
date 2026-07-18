@@ -1,11 +1,16 @@
-/** Timezone-aware display helpers. Store UTC on the server; format in the viewer's zone. */
+/**
+ * Timezone-aware display helpers.
+ * Store UTC on the server; format in Pacific Time for all users.
+ *
+ * All users of this application operate within the same timezone, so every
+ * timestamp is displayed in Pacific Time (America/Los_Angeles) regardless of
+ * the viewer's browser or device settings.
+ */
+
+const APP_TIMEZONE = 'America/Los_Angeles';
 
 export function getUserTimeZone() {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
+  return APP_TIMEZONE;
 }
 
 export function getUserTimeZoneLabel(timeZone = getUserTimeZone()) {
@@ -106,4 +111,169 @@ export function getDateGroupLabel(isoString, timeZone = getUserTimeZone()) {
     day: 'numeric',
     month: 'long',
   }, timeZone);
+}
+
+// ─── Additional helpers (replace scattered date-fns format() calls) ──────────
+
+/** "d MMM yyyy" — e.g. "5 Jun 2025" */
+export function formatShortDate(isoString, timeZone = getUserTimeZone()) {
+  return formatDateTime(isoString, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }, timeZone);
+}
+
+/** "dd MMM yyyy, hh:mm a" — e.g. "24 Jun 2025, 02:15 PM" */
+export function formatShortDateAndTime(isoString, timeZone = getUserTimeZone()) {
+  return formatDateTime(isoString, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }, timeZone);
+}
+
+/** "HH:mm" — e.g. "14:30" (24-hour) */
+export function formatTimeOnly(isoString, timeZone = getUserTimeZone()) {
+  return formatDateTime(isoString, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }, timeZone);
+}
+
+/** "h:mm a · d MMM" — e.g. "2:30 PM · 5 Jun" (ReplyTargetPicker style) */
+export function formatDayTimeShort(isoString, timeZone = getUserTimeZone()) {
+  const date = parseInstant(isoString);
+  if (!date) return isoString || '';
+  try {
+    const timePart = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(date);
+    const datePart = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      day: 'numeric',
+      month: 'short',
+    }).format(date);
+    return `${timePart} · ${datePart}`;
+  } catch {
+    return isoString;
+  }
+}
+
+/** "EEE, d MMM · HH:mm" — e.g. "Tue, 5 Jun · 14:30" (ThreadHistory style) */
+export function formatWeekdayDayTime(isoString, timeZone = getUserTimeZone()) {
+  const date = parseInstant(isoString);
+  if (!date) return isoString || '';
+  try {
+    const dayPart = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    }).format(date);
+    const timePart = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+    return `${dayPart} · ${timePart}`;
+  } catch {
+    return isoString;
+  }
+}
+
+/** { date: "dd MMM yyyy", time: "hh:mm a" } — table timestamp split */
+export function formatTimestampSplit(isoString, timeZone = getUserTimeZone()) {
+  const date = parseInstant(isoString);
+  if (!date) return { date: isoString || '', time: '' };
+  try {
+    const datePart = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(date);
+    const timePart = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(date);
+    return { date: datePart, time: timePart };
+  } catch {
+    return { date: isoString, time: '' };
+  }
+}
+
+/** "dd MMM yyyy at HH:mm" — e.g. "24 Jun 2025 at 14:30" (FlaggedEmails detail) */
+export function formatDetailReceived(isoString, timeZone = getUserTimeZone()) {
+  const date = parseInstant(isoString);
+  if (!date) return isoString || '';
+  try {
+    const datePart = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(date);
+    const timePart = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+    return `${datePart} at ${timePart}`;
+  } catch {
+    return isoString;
+  }
+}
+
+/** "Today, HH:mm" / "Yesterday, HH:mm" / "d MMM yyyy" — activity/request timestamps */
+export function formatActivityTimestamp(isoString, timeZone = getUserTimeZone()) {
+  const date = parseInstant(isoString);
+  if (!date) return isoString || '';
+  if (isTodayInTimeZone(date, timeZone)) {
+    return `Today, ${formatTimeOnly(isoString, timeZone)}`;
+  }
+  if (isYesterdayInTimeZone(date, timeZone)) {
+    return `Yesterday, ${formatTimeOnly(isoString, timeZone)}`;
+  }
+  return formatShortDate(isoString, timeZone);
+}
+
+/** "Today, HH:mm" / "Yesterday, HH:mm" / "dd MMM, HH:mm" — dashboard activity */
+export function formatDashboardActivity(isoString, timeZone = getUserTimeZone()) {
+  const date = parseInstant(isoString);
+  if (!date) return isoString || '';
+  if (isTodayInTimeZone(date, timeZone)) {
+    return `Today, ${formatTimeOnly(isoString, timeZone)}`;
+  }
+  if (isYesterdayInTimeZone(date, timeZone)) {
+    return `Yesterday, ${formatTimeOnly(isoString, timeZone)}`;
+  }
+  const datePart = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    day: '2-digit',
+    month: 'short',
+  }).format(date);
+  const timePart = formatTimeOnly(isoString, timeZone);
+  return `${datePart}, ${timePart}`;
+}
+
+/** "yyyy-MM-dd" — ISO date for form values (TemplateEditor save) */
+export function formatISODate(date = new Date(), timeZone = getUserTimeZone()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
 }

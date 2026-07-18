@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Ban, Loader2, Plus, Trash2 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { formatShortDate } from '../utils/dateTime';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClassNarrow } from '../utils/responsiveLayout';
 import DottedScroll from '../components/ui/DottedScroll';
@@ -24,11 +24,7 @@ function formatPattern(rule) {
 
 function formatAdded(iso) {
   if (!iso) return '';
-  try {
-    return format(parseISO(iso), 'd MMM yyyy');
-  } catch {
-    return iso;
-  }
+  return formatShortDate(iso);
 }
 
 export default function IgnoreList() {

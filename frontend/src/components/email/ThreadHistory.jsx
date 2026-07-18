@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { format, parseISO } from 'date-fns';
+import { formatWeekdayDayTime } from '../../utils/dateTime';
 import { ChevronDown, ChevronUp, CornerDownRight, Forward } from 'lucide-react';
 import SafeHtml from './SafeHtml';
 import AttachmentChips from './AttachmentChips';
@@ -8,11 +8,7 @@ import { messagePreviewText } from '../../utils/emailQuotes';
 
 function fmt(iso) {
   if (!iso) return '';
-  try {
-    return format(parseISO(iso), 'EEE, d MMM · HH:mm');
-  } catch {
-    return iso;
-  }
+  return formatWeekdayDayTime(iso);
 }
 
 function shortPreview(text) {

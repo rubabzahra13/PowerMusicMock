@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Flag, Info, CheckCircle, ArrowLeft } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { formatTimeOnly, formatDetailReceived as formatDetailReceivedHelper } from '../utils/dateTime';
 import { emailQueue, templates } from '../data/mockData';
 import { DataTable, Tag, Drawer, Modal, Toast, useToast } from '../components/ui';
 
@@ -26,25 +26,13 @@ export default function FlaggedEmails() {
   // Helper: format received time for table
   const formatReceivedTime = (receivedStr) => {
     if (!receivedStr) return '';
-    try {
-      if (receivedStr.startsWith('2025-06-24')) {
-        return format(parseISO(receivedStr), 'HH:mm');
-      }
-      return 'Yesterday';
-    } catch {
-      return receivedStr;
-    }
+    return formatTimeOnly(receivedStr);
   };
 
   // Helper: format received datetime for drawer
   const formatDetailReceived = (dateStr) => {
     if (!dateStr) return '';
-    try {
-      const parsed = parseISO(dateStr);
-      return format(parsed, 'dd MMM yyyy at HH:mm');
-    } catch {
-      return dateStr;
-    }
+    return formatDetailReceivedHelper(dateStr);
   };
 
   // Helper: get intent pill CSS styles

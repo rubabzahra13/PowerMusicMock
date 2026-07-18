@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, Plus, SortAsc, ChevronDown, Filter, ArrowRight, Trash2
 } from 'lucide-react';
-import { format, parseISO, isToday, isYesterday } from 'date-fns';
+import { formatTimestampSplit } from '../utils/dateTime';
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll } from '../components/ui';
 import RequestComparison from '../components/RequestComparison';
 import PageHeader from '../components/layout/PageHeader';
@@ -211,10 +211,7 @@ function ControlsBar({
 
 // ─── Timestamp formatter ───────────────────────────────────────────────────────
 function formatTimestamp(iso) {
-  try {
-    const d = parseISO(iso);
-    return { date: format(d, 'dd MMM yyyy'), time: format(d, 'hh:mm a') };
-  } catch { return { date: iso, time: '' }; }
+  return formatTimestampSplit(iso);
 }
 
 // ─── Shared 11-column table cell renderers ────────────────────────────────────
