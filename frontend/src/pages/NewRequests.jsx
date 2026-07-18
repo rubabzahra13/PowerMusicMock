@@ -908,7 +908,7 @@ export default function Requests() {
     }
   };
 
-  // ── Column order: #, Received, Person, Manager, Type, Status, Sent via, Notes, Needs review, Mark as, →
+  // ── Column order: #, Received, Person, Manager, Type, Sent via, Status, Notes, Needs review, Mark as, →
   const newColumns = [
     {
       key: 'displayId',
@@ -982,6 +982,30 @@ export default function Requests() {
       render: (val) => <Tag variant={val === 'Add' ? 'add-action' : 'remove-action'} label={val} />
     },
     {
+      key: 'sentVia',
+      label: 'Sent via',
+      width: '8.5rem',
+      minWidth: '8.5rem',
+      noShrink: true,
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle whitespace-nowrap text-center',
+      render: (_, row) => {
+        const viaTags = sentViaTableRequestTags(row.tags || []);
+        if (!viaTags.length) {
+          return (
+            <span className="text-xs font-medium text-[var(--color-text-muted)]">—</span>
+          );
+        }
+        return (
+          <span className="inline-flex flex-col items-center gap-1">
+            {viaTags.map((tag) => (
+              <Tag key={tag} variant={requestTagVariant(tag)} label={requestTagLabel(tag)} />
+            ))}
+          </span>
+        );
+      },
+    },
+    {
       key: 'status',
       label: 'Status',
       width: '7.75rem',
@@ -1005,33 +1029,6 @@ export default function Requests() {
             prefix={status.prefix}
             compact
           />
-        );
-      },
-    },
-    {
-      key: 'sentVia',
-      label: 'Sent via',
-      width: '6.5rem',
-      minWidth: '6.5rem',
-      noShrink: true,
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle whitespace-nowrap text-center',
-      render: (_, row) => {
-        const tags = row.tags || [];
-        const hasPartner = tags.includes(TAG_PARTNER_REQUEST);
-        const hasAuto = tags.includes(TAG_AUTO_MAIL);
-        let label = '—';
-        if (hasPartner && hasAuto) label = 'Both';
-        else if (hasPartner) label = 'Manager Form';
-        else if (hasAuto) label = 'Auto Email';
-        return (
-          <span className={`text-xs font-medium ${
-            label === '—'
-              ? 'text-[var(--color-text-muted)]'
-              : 'text-[var(--color-text-secondary)]'
-          }`}>
-            {label}
-          </span>
         );
       },
     },
