@@ -372,7 +372,7 @@ export default function PartnerSettings() {
         description="Controls who can sign up, sign in, and submit requests on the manager portal."
       >
             <SectionCard
-              title="Allowed domains"
+              title="Active domains"
               description="Only emails on these domains can use the manager portal."
             >
               <form onSubmit={handleAddDomain} className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -403,7 +403,7 @@ export default function PartnerSettings() {
                 <CardListSkeleton rows={2} />
               ) : managerDomains.length === 0 ? (
                 <p className="text-sm text-[var(--color-text-secondary)]">
-                  No domains allowed yet. Managers cannot sign in until you add at least one.
+                  No active domains yet. Managers cannot sign in until you add at least one.
                 </p>
               ) : (
                 <ul className="space-y-2">
