@@ -10,23 +10,44 @@ export function TruncateCell({ children, className = '', title }) {
   );
 }
 
-export function StackedTextCell({ primary, secondary, tertiary, primaryClassName = '', truncate = true }) {
+export function StackedTextCell({
+  primary,
+  secondary,
+  tertiary,
+  lines,
+  primaryClassName = '',
+  truncate = true,
+}) {
   const lineClass = truncate ? 'block truncate' : 'block break-words';
+  const detailLines = Array.isArray(lines) && lines.length > 0
+    ? lines.filter((line) => line != null && String(line).trim() !== '')
+    : [secondary, tertiary].filter((line) => line != null && String(line).trim() !== '');
   return (
     <div className="min-w-0">
       <span className={`${lineClass} text-sm font-semibold text-[var(--color-text-primary)] ${primaryClassName}`.trim()}>
         {primary}
       </span>
-      {secondary ? (
-        <span className={`${lineClass} text-xs text-[var(--color-text-secondary)] mt-0.5`}>
-          {secondary}
-        </span>
-      ) : null}
-      {tertiary ? (
-        <span className={`${lineClass} text-xs text-[var(--color-text-muted)] mt-0.5`}>
-          {tertiary}
-        </span>
-      ) : null}
+      {detailLines.map((line, index) => {
+        const isSectionHeading = String(line).trim().toLowerCase() === 'manager details';
+        const hasHeading = String(detailLines[0] || '').trim().toLowerCase() === 'manager details';
+        const detailIndex = hasHeading ? index - 1 : index;
+        return (
+          <span
+            key={`${index}-${line}`}
+            className={`${lineClass} mt-0.5 ${
+              isSectionHeading
+                ? 'text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]'
+                : `text-xs ${
+                  detailIndex === 0
+                    ? 'text-[var(--color-text-secondary)]'
+                    : 'text-[var(--color-text-muted)]'
+                }`
+            }`}
+          >
+            {line}
+          </span>
+        );
+      })}
     </div>
   );
 }

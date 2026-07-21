@@ -178,6 +178,8 @@ class RequestOut(BaseModel):
     intakeMatch: Optional[RequestMatchOut] = None
     directoryMatch: Optional[DirectoryMatchOut] = None
     automatedEmail: Optional[AutomatedEmailOut] = None
+    adminPerson: Optional[PersonInfo] = None
+    adminSubmittedBy: Optional[SubmittedBy] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -248,6 +250,7 @@ class PersonHistoryEventOut(BaseModel):
     outcome: Optional[str] = None
     fromEmail: Optional[str] = None
     subject: Optional[str] = None
+    inboxEmail: Optional[str] = None
 
 
 class PersonOut(BaseModel):

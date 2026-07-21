@@ -13,13 +13,20 @@ from app.manager_request_tags import (
     MANAGER_SUBMIT_TAGS,
     TAG_AUTO_MAIL,
     TAG_PARTNER_REQUEST,
+    TAG_SENT_BY_ADMIN,
     TAG_UNVERIFIED,
     TAG_VERIFIED,
     has_tag,
     merge_tags,
     normalize_tags,
 )
-from app.intake_persons import apply_person_to_row, set_auto_mail_meta, sync_display_person
+from app.intake_persons import (
+    apply_person_to_row,
+    set_admin_submitted_by,
+    set_auto_mail_meta,
+    set_submitted_by_attribution,
+    sync_display_person,
+)
 from app.person_match import same_person
 from app.manager_request_stats import increment_manager_request_stats
 from app.request_display import allocate_request_ids
@@ -165,6 +172,62 @@ def verify_unverified_request(
     return req
 
 
+def attach_partner_submission_to_request(
+    db: Session,
+    req: models.ManagerRequest,
+    *,
+    person: schemas.PersonInfo,
+    manager_id: Optional[str] = None,
+    manager_notes: Optional[str] = None,
+    is_admin_entry: bool = False,
+    submitted_by: Optional[schemas.SubmittedBy] = None,
+) -> models.ManagerRequest:
+    """Merge a manager/admin submit onto an existing verified New request (same_person)."""
+    if manager_id and not req.manager_id:
+        req.manager_id = manager_id
+
+    already_has_partner = has_tag(req.tags, TAG_PARTNER_REQUEST)
+
+    # Admin Add Manually onto a row that already has a manager/partner submission —
+    # keep the existing person/manager data, store Admin form snapshots, and tag.
+    if is_admin_entry and already_has_partner:
+        apply_person_to_row(req, person, source="admin")
+        if submitted_by is not None:
+            set_admin_submitted_by(
+                req,
+                first_name=submitted_by.firstName or "",
+                last_name=submitted_by.lastName or "",
+                email=submitted_by.email or "",
+                club=submitted_by.club or "",
+            )
+        if manager_notes and manager_notes.strip() and not (req.manager_notes or "").strip():
+            req.manager_notes = manager_notes.strip()
+        req.tags = merge_tags(
+            req.tags,
+            [TAG_SENT_BY_ADMIN],
+            duplicate_tags_for_person(db, person, action=req.action),
+        )
+        return req
+
+    apply_person_to_row(req, person, source="partner")
+    if _looks_like_automated_notes(req.manager_notes):
+        req.manager_notes = None
+    if manager_notes and manager_notes.strip():
+        req.manager_notes = manager_notes.strip()
+
+    base = [t for t in (req.tags or []) if t not in {TAG_UNVERIFIED}]
+    extra = list(MANAGER_SUBMIT_TAGS)
+    # Pure admin create that lands on auto-only verified (rare) stays partner-tagged;
+    # Admin form is a display swap via isAdminEntry when there is no manager_id.
+    req.tags = merge_tags(
+        base,
+        extra,
+        duplicate_tags_for_person(db, person, action=req.action),
+    )
+    sync_display_person(req)
+    return req
+
+
 def intake_manager_submission(
     db: Session,
     *,
@@ -173,27 +236,52 @@ def intake_manager_submission(
     manager_id: Optional[str] = None,
     manager_notes: Optional[str] = None,
     new_id: Optional[str] = None,
+    submitted_by: Optional[schemas.SubmittedBy] = None,
 ) -> models.ManagerRequest:
-    """Manager portal / admin manual submit — verifies pending auto-mail or creates verified row."""
+    """Manager portal / admin manual submit — merge onto matching New row or create verified."""
+    is_admin_entry = manager_id is None and submitted_by is not None
+
     pending = find_unverified_auto_mail_match(db, person, action)
     if pending:
-        return verify_unverified_request(
+        row = verify_unverified_request(
             db,
             pending,
             person=person,
             manager_id=manager_id,
             manager_notes=manager_notes,
         )
+    else:
+        verified = find_verified_new_match(db, person, action)
+        if verified:
+            row = attach_partner_submission_to_request(
+                db,
+                verified,
+                person=person,
+                manager_id=manager_id,
+                manager_notes=manager_notes,
+                is_admin_entry=is_admin_entry,
+                submitted_by=submitted_by,
+            )
+        else:
+            row = create_manager_request(
+                db,
+                person=person,
+                action=action,
+                manager_notes=manager_notes,
+                manager_id=manager_id,
+                extra_tags=MANAGER_SUBMIT_TAGS,
+                new_id=new_id,
+            )
 
-    return create_manager_request(
-        db,
-        person=person,
-        action=action,
-        manager_notes=manager_notes,
-        manager_id=manager_id,
-        extra_tags=MANAGER_SUBMIT_TAGS,
-        new_id=new_id,
-    )
+    if submitted_by is not None and not row.manager_id:
+        set_submitted_by_attribution(
+            row,
+            first_name=submitted_by.firstName or "",
+            last_name=submitted_by.lastName or "",
+            email=submitted_by.email or "",
+            club=submitted_by.club or "",
+        )
+    return row
 
 
 def intake_automated_email_request(

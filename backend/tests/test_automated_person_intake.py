@@ -1,4 +1,10 @@
-"""Unit tests for automated roster email intake."""
+"""Unit tests for automated roster email intake.
+
+Patches llm_available=False so deterministic labelled-line fallback is exercised
+without calling Gemini.
+"""
+
+from unittest.mock import patch
 
 from app.automated_person_intake import (
     PUREGYM_LEAVER_SENDER,
@@ -28,8 +34,9 @@ DEFAULT_SOURCES = [
 ]
 
 
+@patch("app.automated_person_intake.llm_available", return_value=False)
 class TestAutomatedPersonIntake:
-    def test_classifies_new_puregym_user_as_add(self):
+    def test_classifies_new_puregym_user_as_add(self, _llm):
         assert classify_puregym_roster_email(
             "notifications@puregym.com",
             "New PureGym user",
@@ -38,7 +45,7 @@ class TestAutomatedPersonIntake:
             sources=DEFAULT_SOURCES,
         ) == "Add"
 
-    def test_classifies_puregym_leaver_as_remove(self):
+    def test_classifies_puregym_leaver_as_remove(self, _llm):
         assert classify_puregym_roster_email(
             PUREGYM_LEAVER_SENDER,
             "PureGym Leaver",
@@ -46,7 +53,7 @@ class TestAutomatedPersonIntake:
             sources=DEFAULT_SOURCES,
         ) == "Remove"
 
-    def test_parses_add_request_fields(self):
+    def test_parses_add_request_fields(self, _llm):
         parsed = parse_puregym_roster_email(
             "New PureGym user",
             ADD_BODY,
@@ -62,7 +69,7 @@ class TestAutomatedPersonIntake:
         assert person.email == "nik1285@hotmail.co.uk"
         assert person.location == "Alfreton"
 
-    def test_parses_remove_request_fields(self):
+    def test_parses_remove_request_fields(self, _llm):
         parsed = parse_puregym_roster_email(
             "PureGym Leaver",
             REMOVE_BODY,
@@ -77,7 +84,7 @@ class TestAutomatedPersonIntake:
         assert person.email == "wellnesswithjess@gmail.com"
         assert person.location == "Witney"
 
-    def test_ignores_unrelated_puregym_mail(self):
+    def test_ignores_unrelated_puregym_mail(self, _llm):
         assert not is_puregym_roster_notification(
             "ops@puregym.com",
             "Partnership review Q3",
@@ -86,7 +93,7 @@ class TestAutomatedPersonIntake:
             sources=DEFAULT_SOURCES,
         )
 
-    def test_ignores_wrong_sender_for_leaver(self):
+    def test_ignores_wrong_sender_for_leaver(self, _llm):
         assert classify_puregym_roster_email(
             "noreply@example.com",
             "PureGym Leaver",
@@ -94,7 +101,7 @@ class TestAutomatedPersonIntake:
             sources=DEFAULT_SOURCES,
         ) is None
 
-    def test_subject_normalization(self):
+    def test_subject_normalization(self, _llm):
         assert classify_puregym_roster_email(
             "notifications@puregym.com",
             "  new   PureGym   user  ",
@@ -103,7 +110,7 @@ class TestAutomatedPersonIntake:
             sources=DEFAULT_SOURCES,
         ) == "Add"
 
-    def test_allowlisted_gmail_add(self):
+    def test_allowlisted_gmail_add(self, _llm):
         assert classify_puregym_roster_email(
             "rubabzahra248@gmail.com",
             "New user",
@@ -111,7 +118,7 @@ class TestAutomatedPersonIntake:
             sources=DEFAULT_SOURCES,
         ) == "Add"
 
-    def test_allowlisted_gmail_remove(self):
+    def test_allowlisted_gmail_remove(self, _llm):
         assert classify_puregym_roster_email(
             "rubabzahra248@gmail.com",
             "Remove user",
@@ -119,10 +126,18 @@ class TestAutomatedPersonIntake:
             sources=DEFAULT_SOURCES,
         ) == "Remove"
 
-    def test_rejects_non_allowlisted_sender(self):
+    def test_rejects_non_allowlisted_sender(self, _llm):
         assert classify_puregym_roster_email(
             "someone@random.com",
             "New PureGym user",
             ADD_BODY,
+            sources=DEFAULT_SOURCES,
+        ) is None
+
+    def test_rejects_allowlisted_sender_without_roster_signal_when_llm_off(self, _llm):
+        assert classify_puregym_roster_email(
+            "rubabzahra248@gmail.com",
+            "Hello",
+            "Rubab Zahra\nrubab@example.com\nRawalpindi\n",
             sources=DEFAULT_SOURCES,
         ) is None

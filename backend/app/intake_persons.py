@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Literal, Optional
 
 from app import models, schemas
-from app.manager_request_tags import TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, has_tag
+from app.manager_request_tags import TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_SENT_BY_ADMIN, has_tag
 from app.person_compare import person_from_mapping, person_to_mapping
 
 
@@ -24,9 +24,91 @@ def get_auto_mail_snapshot(req: models.ManagerRequest) -> Optional[schemas.Perso
     return person_from_mapping(get_intake_persons(req).get("autoMail"))
 
 
+def get_admin_snapshot(req: models.ManagerRequest) -> Optional[schemas.PersonInfo]:
+    return person_from_mapping(get_intake_persons(req).get("admin"))
+
+
 def get_auto_mail_meta(req: models.ManagerRequest) -> Dict[str, Any]:
     raw = get_intake_persons(req).get("autoMailMeta")
     return raw if isinstance(raw, dict) else {}
+
+
+def get_submitted_by_attribution(req: models.ManagerRequest) -> Dict[str, str]:
+    """Admin-entered manager details when the row is not linked to a manager user."""
+    raw = get_intake_persons(req).get("submittedBy")
+    if not isinstance(raw, dict):
+        return {"firstName": "", "lastName": "", "email": "", "club": ""}
+    return {
+        "firstName": str(raw.get("firstName") or "").strip(),
+        "lastName": str(raw.get("lastName") or "").strip(),
+        "email": str(raw.get("email") or "").strip(),
+        "club": str(raw.get("club") or "").strip(),
+    }
+
+
+def get_admin_submitted_by(req: models.ManagerRequest) -> Dict[str, str]:
+    """Manager details entered on Admin form when overlaying an existing manager request."""
+    raw = get_intake_persons(req).get("adminSubmittedBy")
+    if isinstance(raw, dict) and any(str(raw.get(k) or "").strip() for k in ("firstName", "lastName", "email", "club")):
+        return {
+            "firstName": str(raw.get("firstName") or "").strip(),
+            "lastName": str(raw.get("lastName") or "").strip(),
+            "email": str(raw.get("email") or "").strip(),
+            "club": str(raw.get("club") or "").strip(),
+        }
+    # Legacy overlays wrote attribution into submittedBy while manager_id stayed set.
+    if has_tag(req.tags or [], TAG_SENT_BY_ADMIN) and req.manager_id:
+        return get_submitted_by_attribution(req)
+    return {"firstName": "", "lastName": "", "email": "", "club": ""}
+
+
+def set_submitted_by_attribution(
+    req: models.ManagerRequest,
+    *,
+    first_name: str = "",
+    last_name: str = "",
+    email: str = "",
+    club: str = "",
+) -> None:
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    mail = (email or "").strip()
+    club_name = (club or "").strip()
+    if not first and not last and not mail and not club_name:
+        return
+    current = dict(get_intake_persons(req))
+    current["submittedBy"] = {
+        "firstName": first,
+        "lastName": last,
+        "email": mail,
+        "club": club_name,
+    }
+    req.intake_persons = current
+
+
+def set_admin_submitted_by(
+    req: models.ManagerRequest,
+    *,
+    first_name: str = "",
+    last_name: str = "",
+    email: str = "",
+    club: str = "",
+) -> None:
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    mail = (email or "").strip()
+    club_name = (club or "").strip()
+    current = dict(get_intake_persons(req))
+    if not first and not last and not mail and not club_name:
+        current.pop("adminSubmittedBy", None)
+    else:
+        current["adminSubmittedBy"] = {
+            "firstName": first,
+            "lastName": last,
+            "email": mail,
+            "club": club_name,
+        }
+    req.intake_persons = current
 
 
 def set_auto_mail_meta(
@@ -66,10 +148,11 @@ def apply_person_to_row(
     req: models.ManagerRequest,
     person: schemas.PersonInfo,
     *,
-    source: Literal["partner", "autoMail"],
+    source: Literal["partner", "autoMail", "admin"],
 ) -> None:
     _set_snapshot(req, source, person)
-    sync_display_person(req)
+    if source != "admin":
+        sync_display_person(req)
 
 
 def sync_display_person(req: models.ManagerRequest) -> None:
@@ -103,6 +186,8 @@ def bootstrap_intake_persons(req: models.ManagerRequest) -> None:
         current["partner"] = person_to_mapping(person)
     if has_tag(tags, TAG_AUTO_MAIL) or req.source_gmail_message_id:
         current["autoMail"] = person_to_mapping(person)
+    if has_tag(tags, TAG_SENT_BY_ADMIN):
+        current["admin"] = person_to_mapping(person)
 
     if current:
         req.intake_persons = current

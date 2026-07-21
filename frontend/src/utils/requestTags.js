@@ -3,6 +3,9 @@ export const TAG_PARTNER_REQUEST = 'partner req';
 export const TAG_AUTO_MAIL = 'auto mail';
 export const TAG_VERIFIED = 'verified';
 export const TAG_UNVERIFIED = 'unverified';
+/** Stored when admin overlays an existing manager request; also display alias for pure admin entries. */
+export const TAG_SENT_BY_ADMIN = 'sent by admin';
+export const ADMIN_FORM_LABEL = 'Admin form';
 
 /** @deprecated use TAG_AUTO_MAIL */
 export const TAG_AUTO_EMAIL = TAG_AUTO_MAIL;
@@ -29,6 +32,7 @@ export function requestTagVariant(tag) {
   if (tag === TAG_VERIFIED) return 'add-action';
   if (tag === TAG_UNVERIFIED) return 'archived';
   if (tag === TAG_PARTNER_REQUEST) return 'neutral';
+  if (tag === TAG_SENT_BY_ADMIN) return 'neutral';
   if (tag === TAG_AUTO_MAIL) return 'neutral';
   return 'neutral';
 }
@@ -38,6 +42,7 @@ export function sortRequestTags(tags = []) {
     TAG_VERIFIED,
     TAG_UNVERIFIED,
     TAG_PARTNER_REQUEST,
+    TAG_SENT_BY_ADMIN,
     TAG_AUTO_MAIL,
     TAG_ALREADY_EXISTS,
   ];
@@ -58,9 +63,21 @@ export function visibleTableRequestTags(tags = []) {
   );
 }
 
+/** Display tags for UI — pure admin entries show Admin form instead of Manager Form.
+ *  When admin overlays an existing manager request, both tags are stored and shown.
+ */
+export function displayRequestTags(tags = [], { isAdminEntry = false } = {}) {
+  const hasStoredAdmin = tags.includes(TAG_SENT_BY_ADMIN);
+  return visibleTableRequestTags(tags).map((tag) => (
+    isAdminEntry && !hasStoredAdmin && tag === TAG_PARTNER_REQUEST
+      ? TAG_SENT_BY_ADMIN
+      : tag
+  ));
+}
+
 /** Intake source tags for the Sent via column (excludes review-only tags). */
-export function sentViaTableRequestTags(tags = []) {
-  return visibleTableRequestTags(tags).filter((tag) => tag !== TAG_ALREADY_EXISTS);
+export function sentViaTableRequestTags(tags = [], { isAdminEntry = false } = {}) {
+  return displayRequestTags(tags, { isAdminEntry }).filter((tag) => tag !== TAG_ALREADY_EXISTS);
 }
 
 export const SENT_VIA_BOTH = 'both';
@@ -78,6 +95,7 @@ export function matchesSentViaFilter(tags = [], filterValue) {
 
 export function requestTagLabel(tag) {
   if (tag === TAG_PARTNER_REQUEST) return 'Manager Form';
+  if (tag === TAG_SENT_BY_ADMIN) return ADMIN_FORM_LABEL;
   if (tag === TAG_AUTO_MAIL) return 'Automated email';
   return tag;
 }

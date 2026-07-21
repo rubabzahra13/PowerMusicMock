@@ -41,30 +41,60 @@ function readSessionCache(key) {
   }
 }
 
+export const REQUESTS_PAGE_CACHE_KEY = 'requests_page_v3';
+
 const inFlightFreshByKey = new Map();
+/** Bumped on local mutations so in-flight GETs cannot overwrite newer cache/UI. */
+const cacheEpochByKey = new Map();
+
+export function bumpCacheEpoch(key) {
+  cacheEpochByKey.set(key, (cacheEpochByKey.get(key) || 0) + 1);
+  inFlightFreshByKey.delete(key);
+}
+
+function currentCacheEpoch(key) {
+  return cacheEpochByKey.get(key) || 0;
+}
 
 async function fetchFreshWithRateLimitRetry(fetcher, cacheKey) {
   if (inFlightFreshByKey.has(cacheKey)) {
     return inFlightFreshByKey.get(cacheKey);
   }
 
+  const startedEpoch = currentCacheEpoch(cacheKey);
+
   const run = async () => {
     try {
-      return await fetcher();
+      const data = await fetcher();
+      return { data, startedEpoch };
     } catch (err) {
       if (!isRateLimitError(err) || !readSessionCache(cacheKey)) {
         throw err;
       }
       await new Promise((resolve) => window.setTimeout(resolve, 2000));
-      return fetcher();
+      const data = await fetcher();
+      return { data, startedEpoch };
     }
   };
 
   const promise = run().finally(() => {
-    inFlightFreshByKey.delete(cacheKey);
+    if (inFlightFreshByKey.get(cacheKey) === promise) {
+      inFlightFreshByKey.delete(cacheKey);
+    }
   });
   inFlightFreshByKey.set(cacheKey, promise);
   return promise;
+}
+
+async function resolveFreshPayload(key, fetcher, { depth = 0 } = {}) {
+  const { data, startedEpoch } = await fetchFreshWithRateLimitRetry(fetcher, key);
+  if (currentCacheEpoch(key) !== startedEpoch) {
+    if (depth >= 3) {
+      return { data: readSessionCache(key), stale: true };
+    }
+    return resolveFreshPayload(key, fetcher, { depth: depth + 1 });
+  }
+  return { data, stale: false };
 }
 
 // Stale-while-revalidate: show the last known data instantly from
@@ -75,7 +105,11 @@ export async function loadWithCache(key, fetcher, apply) {
   if (cached) apply(cached, true);
 
   try {
-    const fresh = await fetchFreshWithRateLimitRetry(fetcher, key);
+    const { data: fresh, stale } = await resolveFreshPayload(key, fetcher);
+    if (stale) {
+      if (fresh) apply(fresh, true);
+      return fresh;
+    }
     if (isApiErrorPayload(fresh)) {
       throw new Error(fresh.detail);
     }
@@ -94,7 +128,11 @@ export async function loadWithCache(key, fetcher, apply) {
 // sessionStorage apply so optimistic updates are not briefly reverted.
 export async function refreshCache(key, fetcher, apply) {
   try {
-    const fresh = await fetchFreshWithRateLimitRetry(fetcher, key);
+    const { data: fresh, stale } = await resolveFreshPayload(key, fetcher);
+    if (stale) {
+      if (fresh) apply(fresh, true);
+      return fresh;
+    }
     if (isApiErrorPayload(fresh)) {
       throw new Error(fresh.detail);
     }

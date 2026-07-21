@@ -1,6 +1,7 @@
 export { default as Tag } from './Tag';
 export { default as KpiCard } from './KpiCard';
 export { default as DataTable, StackedTextCell, TruncateCell, EMPTY_CELL } from './DataTable';
+export { default as TablePagination } from './TablePagination';
 export { default as Drawer } from './Drawer';
 export { default as Modal } from './Modal';
 export { default as Toast } from './Toast';

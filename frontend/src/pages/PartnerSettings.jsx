@@ -8,7 +8,7 @@ import {
   Trash2,
   Unlink,
 } from 'lucide-react';
-import { formatShortDate } from '../utils/dateTime';
+import { format, parseISO } from 'date-fns';
 import PageHeader from '../components/layout/PageHeader';
 import { AdminPageScroll, Toast, useToast, CardListSkeleton, Modal } from '../components/ui';
 import { getUserTimeZoneLabel } from '../utils/dateTime';
@@ -45,12 +45,12 @@ function readPmCache(key) {
 
 function connectedDate(iso) {
   if (!iso) return null;
-  return formatShortDate(iso);
+  try { return format(parseISO(iso), 'd MMM yyyy'); } catch { return iso; }
 }
 
 function formatAdded(iso) {
   if (!iso) return '';
-  return formatShortDate(iso);
+  try { return format(parseISO(iso), 'd MMM yyyy'); } catch { return iso; }
 }
 
 function formatSourcePattern(source) {
@@ -126,6 +126,11 @@ export default function PartnerSettings() {
 
   const connectedAccounts = useMemo(
     () => accounts.filter((account) => account.status === 'Connected'),
+    [accounts],
+  );
+  // Keep slots that were connected before (including token-expired) so Reconnect stays available.
+  const displayAccounts = useMemo(
+    () => accounts.filter((account) => account.status === 'Connected' || account.connectedAt),
     [accounts],
   );
   const atAccountLimit = connectedAccounts.length >= MAX_CONNECTED_INBOXES;
@@ -372,7 +377,7 @@ export default function PartnerSettings() {
         description="Controls who can sign up, sign in, and submit requests on the manager portal."
       >
             <SectionCard
-              title="Active domains"
+              title="Allowed domains"
               description="Only emails on these domains can use the manager portal."
             >
               <form onSubmit={handleAddDomain} className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -403,7 +408,7 @@ export default function PartnerSettings() {
                 <CardListSkeleton rows={2} />
               ) : managerDomains.length === 0 ? (
                 <p className="text-sm text-[var(--color-text-secondary)]">
-                  No active domains yet. Managers cannot sign in until you add at least one.
+                  No domains allowed yet. Managers cannot sign in until you add at least one.
                 </p>
               ) : (
                 <ul className="space-y-2">
@@ -440,7 +445,7 @@ export default function PartnerSettings() {
           >
             <SectionCard
               title="Connected inbox"
-              description={`Used only to receive automated add/remove emails. Times in ${getUserTimeZoneLabel()}.`}
+              description={`Used only to receive automated add/remove emails. Stays connected until you disconnect. Times in ${getUserTimeZoneLabel()}.`}
               actions={(
                 <button
                   type="button"
@@ -455,7 +460,7 @@ export default function PartnerSettings() {
             >
               {inboxesLoading ? (
                 <CardListSkeleton rows={2} />
-              ) : connectedAccounts.length === 0 ? (
+              ) : displayAccounts.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-4 py-10 text-center">
                   <Mail className="mx-auto mb-3 h-8 w-8 text-[var(--color-text-muted)]" aria-hidden="true" />
                   <p className="text-sm font-medium text-[var(--color-text-primary)]">No inbox connected</p>
@@ -463,8 +468,11 @@ export default function PartnerSettings() {
                     Connect 1–2 inboxes where partner systems send add/remove notifications.
                   </p>
                 </div>
-              ) : connectedAccounts.map((account) => {
+              ) : displayAccounts.map((account) => {
                 const isConnected = account.status === 'Connected';
+                const needsReconnect =
+                  (isConnected && account.backfillError === 'oauth_revoked')
+                  || (!isConnected && Boolean(account.connectedAt));
                 const isBusy = busyId === account.id;
                 return (
                   <div
@@ -476,15 +484,21 @@ export default function PartnerSettings() {
                         <h3 className="text-sm font-bold text-[var(--color-text-primary)]">{account.title}</h3>
                         <p className="text-sm text-[var(--color-text-secondary)] break-all mt-0.5">{account.email}</p>
                         <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                          {isConnected && account.connectedAt
-                            ? `Connected ${connectedDate(account.connectedAt)}`
-                            : 'Not connected yet'}
+                          {needsReconnect
+                            ? 'Google access expired. Reconnect to resume mail sync. Connection is only removed if you disconnect.'
+                            : isConnected && account.connectedAt
+                              ? `Connected ${connectedDate(account.connectedAt)}`
+                              : 'Not connected yet'}
                         </p>
                       </div>
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                        isConnected ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                        needsReconnect
+                          ? 'bg-amber-50 text-amber-800'
+                          : isConnected
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-gray-100 text-gray-500'
                       }`}>
-                        {account.status}
+                        {needsReconnect ? 'Reconnect required' : account.status}
                       </span>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -501,10 +515,14 @@ export default function PartnerSettings() {
                         type="button"
                         onClick={() => handleConnect(account)}
                         disabled={isBusy}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:bg-white disabled:opacity-50"
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:opacity-50 ${
+                          needsReconnect
+                            ? 'border-[var(--color-brand-primary)] bg-[var(--color-brand-primary)] text-white hover:bg-[var(--color-surface-sidebar-hover)]'
+                            : 'border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:bg-white'
+                        }`}
                       >
                         <Link2 className="w-3.5 h-3.5" />
-                        {isBusy ? 'Redirecting…' : isConnected ? 'Reconnect' : 'Connect'}
+                        {isBusy ? 'Redirecting…' : needsReconnect || isConnected ? 'Reconnect' : 'Connect'}
                       </button>
                       {isConnected && (
                         <button
@@ -560,7 +578,7 @@ export default function PartnerSettings() {
                 </button>
               </form>
               <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-                Captures subjects like “New user” or “Remove user”, with Name, Email, and Club in the body.
+                Captures add/remove roster emails from allowlisted senders. AI reads the subject and body, so formatting can vary.
               </p>
 
               {sourcesLoading ? (

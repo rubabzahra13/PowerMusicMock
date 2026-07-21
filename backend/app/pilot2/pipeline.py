@@ -564,20 +564,49 @@ def poll_all_accounts(db: Session) -> int:
     changes = 0
     accounts = (
         db.query(models.EmailAccount)
-        .filter(models.EmailAccount.status == "Connected")
+        .filter(
+            models.EmailAccount.status == "Connected",
+            models.EmailAccount.oauth_refresh_token.isnot(None),
+        )
         .all()
     )
     for account in accounts:
         try:
             changes += sync.sync_account_history(db, account)
-        except Exception:
+        except Exception as exc:
             logger.exception("History sync failed for %s", account.email)
             db.rollback()
+            if gmail.is_auth_revoked_error(exc):
+                try:
+                    # Re-load after rollback so we mutate a bound instance.
+                    account = db.query(models.EmailAccount).filter(
+                        models.EmailAccount.id == account.id
+                    ).first()
+                    if account is not None:
+                        gmail.mark_account_auth_revoked(db, account, exc)
+                        log(
+                            db,
+                            "inbox_auth_revoked",
+                            f"Inbox {account.email} needs reconnect (Gmail token revoked).",
+                        )
+                except Exception:
+                    logger.exception("Failed to mark %s as Disconnected after auth error", account.email)
             continue
         try:
             _sync_states_from_gmail(db, account)
-        except Exception:
+        except Exception as exc:
             logger.exception("State sync failed for %s", account.email)
+            if gmail.is_auth_revoked_error(exc):
+                db.rollback()
+                try:
+                    account = db.query(models.EmailAccount).filter(
+                        models.EmailAccount.id == account.id
+                    ).first()
+                    if account is not None:
+                        gmail.mark_account_auth_revoked(db, account, exc)
+                except Exception:
+                    logger.exception("Failed to mark %s as Disconnected after auth error", account.email)
+                continue
         account.last_synced_at = datetime.now(timezone.utc)
     db.commit()
 

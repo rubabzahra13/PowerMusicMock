@@ -1,4 +1,4 @@
-import { formatActivityTimestamp } from './dateTime';
+import { format, isToday, isYesterday, parseISO } from 'date-fns';
 import { CheckCircle2, Clock3 } from 'lucide-react';
 import { fetchJson } from './api';
 
@@ -12,11 +12,21 @@ export { MANAGER_UPDATE_HIGHLIGHT_CLASS } from './managerUiHighlights';
 
 export function formatRequestTimestamp(value) {
   if (!value) return null;
-  return formatActivityTimestamp(value) || null;
+  try {
+    const date = parseISO(value);
+    if (isToday(date)) return `Today, ${format(date, 'HH:mm')}`;
+    if (isYesterday(date)) return `Yesterday, ${format(date, 'HH:mm')}`;
+    return format(date, 'd MMM yyyy');
+  } catch {
+    return null;
+  }
 }
 
 export function personName(person) {
-  return `${person?.firstName || ''} ${person?.lastName || ''}`.trim() || 'Unknown person';
+  const first = (person?.firstName || '').trim();
+  const last = (person?.lastName || '').trim();
+  const name = [first, last].filter(Boolean).join(' ');
+  return name || 'Unknown person';
 }
 
 export function requestStatusMeta(request) {

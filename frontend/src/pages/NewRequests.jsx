@@ -3,14 +3,15 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search, Plus, SortAsc, ChevronDown, Filter, ArrowRight, Trash2
 } from 'lucide-react';
-import { formatTimestampSplit } from '../utils/dateTime';
-import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll } from '../components/ui';
+import { formatTimestampSplit, isTodayInTimeZone, isYesterdayInTimeZone } from '../utils/dateTime';
+import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination } from '../components/ui';
 import RequestComparison from '../components/RequestComparison';
 import PageHeader from '../components/layout/PageHeader';
-import { getManagerColumnContent, getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
-import { loadWithCache, patchCache, writeCache, refreshCache, getNewRequestsPage } from '../utils/pilot2Api';
+import { getManagerColumnContent, getManagerDisplayName, isManualEntry, isAdminEntry } from '../utils/manualEntry';
+import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import { useRealtimeBroadcast } from '../hooks/useRealtimeBroadcast';
+import { useClientPagination } from '../hooks/useClientPagination';
 import {
   markDirectoryPersonHighlight,
   isRequestUnseen,
@@ -25,8 +26,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
-
-const REQUESTS_POLL_MS = 10000;
+import { formatPersonFields, formatPersonName, formatPersonEmail, formatPersonLocation } from '../utils/personDisplay';
 import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, directoryStatusTag, matchesSentViaFilter, SENT_VIA_BOTH } from '../utils/requestTags';
 import { hasAnyDataDiffs } from '../utils/requestComparison';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
@@ -38,6 +38,7 @@ import {
   firstInvalidPersonField,
 } from '../utils/managerFormValidation';
 
+const REQUESTS_POLL_MS = 10000;
 const SORT_PRESETS = [
   { value: 'displayId-desc', label: 'ID (newest first)' },
   { value: 'displayId-asc', label: 'ID (oldest first)' },
@@ -262,10 +263,12 @@ function NewRequestsMobileList({
     <ul className="overflow-hidden rounded-md border border-[var(--color-border-default)] bg-white sm:hidden">
       {rows.map((row) => {
         const extraClass = getRowClassName ? getRowClassName(row) : '';
-        const name = `${row.person.firstName} ${row.person.lastName}`.trim();
+        const { name, email, location } = formatPersonFields(row.person);
         const manager = getManagerColumnContent(row);
         const isAdd = row.action === 'Add';
-        const sentViaTags = sentViaTableRequestTags(row.tags || []);
+        const sentViaTags = sentViaTableRequestTags(row.tags || [], {
+          isAdminEntry: isAdminEntry(row),
+        });
         const directoryStatus = directoryStatusTag(row);
 
         return (
@@ -304,9 +307,9 @@ function NewRequestsMobileList({
 
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{name}</p>
-                      <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{row.person.email}</p>
+                      <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{email}</p>
                       <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
-                        {row.person.location || EMPTY_CELL}
+                        {location}
                       </p>
                     </div>
 
@@ -315,24 +318,40 @@ function NewRequestsMobileList({
                         Manager
                       </p>
                       <p
-                        className={`mt-0.5 truncate text-xs font-semibold ${
-                          manager.muted
-                            ? 'italic text-[var(--color-text-muted)]'
-                            : 'text-[var(--color-text-primary)]'
+                        className={`mt-0.5 truncate ${
+                          manager.placeholder
+                            ? 'text-xs font-normal text-[var(--color-text-muted)]'
+                            : manager.muted
+                              ? 'text-xs font-semibold italic text-[var(--color-text-muted)]'
+                              : 'text-xs font-semibold text-[var(--color-text-primary)]'
                         }`}
                       >
-                        {manager.primary || EMPTY_CELL}
+                        {manager.primary}
                       </p>
-                      {manager.secondary ? (
-                        <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-secondary)]">
-                          {manager.secondary}
-                        </p>
-                      ) : null}
-                      {manager.tertiary ? (
-                        <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
-                          {manager.tertiary}
-                        </p>
-                      ) : null}
+                      {(manager.lines?.length
+                        ? manager.lines
+                        : [manager.secondary, manager.tertiary].filter(Boolean)
+                      ).map((line, index, all) => {
+                        const isSectionHeading = String(line).trim().toLowerCase() === 'manager details';
+                        const hasHeading = String(all[0] || '').trim().toLowerCase() === 'manager details';
+                        const detailIndex = hasHeading ? index - 1 : index;
+                        return (
+                          <p
+                            key={`${index}-${line}`}
+                            className={`mt-0.5 truncate ${
+                              isSectionHeading
+                                ? 'text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]'
+                                : `text-[11px] ${
+                                  detailIndex === 0
+                                    ? 'text-[var(--color-text-secondary)]'
+                                    : 'text-[var(--color-text-muted)]'
+                                }`
+                            }`}
+                          >
+                            {line}
+                          </p>
+                        );
+                      })}
                     </div>
 
                     <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
@@ -392,10 +411,11 @@ function NewRequestsMobileList({
 const matchesDateFilter = (iso, filterDate) => {
   if (filterDate === 'All') return true;
   try {
-    const d = parseISO(iso);
-    if (filterDate === 'Today') return isToday(d);
-    if (filterDate === 'Yesterday') return isYesterday(d);
-    if (filterDate === 'Older') return !isToday(d) && !isYesterday(d);
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return true;
+    if (filterDate === 'Today') return isTodayInTimeZone(d);
+    if (filterDate === 'Yesterday') return isYesterdayInTimeZone(d);
+    if (filterDate === 'Older') return !isTodayInTimeZone(d) && !isYesterdayInTimeZone(d);
   } catch {
     return true;
   }
@@ -433,6 +453,7 @@ export default function Requests() {
   const deepLinkRequestId = searchParams.get('id');
   const statusDeepLink = searchParams.get('status');
   const consumedDeepLinkRef = useRef(null);
+  const pendingCreatedIdsRef = useRef(new Set());
   const adminDisplayName = profile?.full_name?.trim() || 'Power Music Admin';
 
   // ── Action tab (Add / Remove) ──
@@ -493,7 +514,26 @@ export default function Requests() {
 
   const applyRequestsPage = useCallback((data, isStale) => {
     if (Array.isArray(data.requests)) {
-      setNewRequests(data.requests);
+      setNewRequests((prev) => {
+        const server = data.requests;
+        const serverIds = new Set(server.map((row) => row.id));
+        for (const id of [...pendingCreatedIdsRef.current]) {
+          if (serverIds.has(id)) pendingCreatedIdsRef.current.delete(id);
+        }
+        // Fresh server payload is source of truth. Keeping "pending" rows that the
+        // server no longer has resurrects deleted merges (e.g. ghost R-116) until
+        // a hard refresh — especially painful while /page is slow.
+        if (!isStale) {
+          for (const id of [...pendingCreatedIdsRef.current]) {
+            if (!serverIds.has(id)) pendingCreatedIdsRef.current.delete(id);
+          }
+          return server;
+        }
+        const pending = prev.filter(
+          (row) => pendingCreatedIdsRef.current.has(row.id) && !serverIds.has(row.id),
+        );
+        return pending.length > 0 ? [...pending, ...server] : server;
+      });
       setLiveDirectory(data.persons);
       setTableLoading(false);
       if (!isStale) {
@@ -507,12 +547,13 @@ export default function Requests() {
     const { networkOnly = false } = options;
     const fetcher = getNewRequestsPage;
     if (networkOnly) {
-      return refreshCache('requests_page', fetcher, applyRequestsPage).catch((err) => {
+      return refreshCache(REQUESTS_PAGE_CACHE_KEY, fetcher, applyRequestsPage).catch((err) => {
         console.error(err);
         setTableLoading(false);
       });
     }
-    return loadWithCache('requests_page', fetcher, applyRequestsPage).catch((err) => {
+    // Cache key bumped to drop stale sessionStorage rows (deleted duplicates, etc.).
+    return loadWithCache(REQUESTS_PAGE_CACHE_KEY, fetcher, applyRequestsPage).catch((err) => {
       console.error(err);
       setTableLoading(false);
     });
@@ -655,20 +696,20 @@ export default function Requests() {
   const applyFilterSort = (rows, timestampKey) => {
     const query = searchQuery.trim().toLowerCase();
     const filtered = rows.filter((req) => {
-      const personName = `${req.person.firstName} ${req.person.lastName}`.toLowerCase();
+      const personName = formatPersonName(req.person, { empty: '' }).toLowerCase();
       const isManual = isManualEntry(req.submittedBy);
       const awaitingManager = isAwaitingManagerSubmission(req.tags);
       const managerName = awaitingManager
         ? 'awaiting partner request'
         : isManual
           ? 'admin'
-          : `${req.submittedBy?.firstName || ''} ${req.submittedBy?.lastName || ''}`.toLowerCase();
+          : formatPersonName(req.submittedBy, { empty: '' }).toLowerCase();
 
       const matchesSearch =
         query === '' ||
         personName.includes(query) ||
-        req.person.email.toLowerCase().includes(query) ||
-        (req.person.location && req.person.location.toLowerCase().includes(query)) ||
+        formatPersonEmail(req.person, { empty: '' }).toLowerCase().includes(query) ||
+        formatPersonLocation(req.person, { empty: '' }).toLowerCase().includes(query) ||
         managerName.includes(query) ||
         (req.submittedBy?.email && req.submittedBy.email.toLowerCase().includes(query)) ||
         (req.submittedBy?.club && req.submittedBy.club.toLowerCase().includes(query));
@@ -682,7 +723,7 @@ export default function Requests() {
         filterClub === 'All' || req.submittedBy?.club === filterClub;
       const tags = req.tags || [];
       const matchesSentVia = matchesSentViaFilter(tags, filterSentVia);
-      const needsReview = hasAnyDataDiffs(req.intakeMatch, req.directoryMatch);
+      const needsReview = hasAnyDataDiffs(req.intakeMatch, req.directoryMatch, req.adminPerson);
       const matchesNeedsReview =
         filterNeedsReview === 'All' ||
         (filterNeedsReview === 'Yes' && needsReview) ||
@@ -712,8 +753,8 @@ export default function Requests() {
         return nA.localeCompare(nB) * dir;
       }
       if (sortField === 'personName') {
-        const nA = `${a.person.firstName} ${a.person.lastName}`.toLowerCase();
-        const nB = `${b.person.firstName} ${b.person.lastName}`.toLowerCase();
+        const nA = formatPersonName(a.person, { empty: '' }).toLowerCase();
+        const nB = formatPersonName(b.person, { empty: '' }).toLowerCase();
         return nA.localeCompare(nB) * dir;
       }
       if (sortField === 'location') {
@@ -806,17 +847,44 @@ export default function Requests() {
         })
       });
 
+      bumpCacheEpoch(REQUESTS_PAGE_CACHE_KEY);
+      const existingIds = new Set(newRequests.map((row) => row.id));
+      let mergedIntoExisting = 0;
+      for (const row of created) {
+        if (!row?.id) continue;
+        if (existingIds.has(row.id)) mergedIntoExisting += 1;
+        else pendingCreatedIdsRef.current.add(row.id);
+      }
       setNewRequests((prev) => {
-        const next = [...created, ...prev];
-        patchCache('requests_page', { requests: next });
+        const createdIds = new Set(created.map((row) => row.id));
+        const next = [...created, ...prev.filter((row) => !createdIds.has(row.id))];
+        patchCache(REQUESTS_PAGE_CACHE_KEY, { requests: next });
         return next;
       });
-      showToast(
-        created.length === 1 ? 'Request created.' : `${created.length} requests created.`,
-        'success'
-      );
+      const createdCount = created.length - mergedIntoExisting;
+      if (mergedIntoExisting > 0 && createdCount === 0) {
+        showToast(
+          mergedIntoExisting === 1
+            ? 'Matched an existing request and added Admin form.'
+            : `Updated ${mergedIntoExisting} existing requests.`,
+          'success',
+        );
+      } else if (mergedIntoExisting > 0) {
+        showToast(
+          `Created ${createdCount} and updated ${mergedIntoExisting} existing.`,
+          'success',
+        );
+      } else {
+        showToast(
+          created.length === 1 ? 'Request created.' : `${created.length} requests created.`,
+          'success',
+        );
+      }
       setShowAddManualModal(false);
       resetManualForm();
+      // Revalidate in the background; epoch + pending ids keep the new rows visible
+      // if an older in-flight /page response arrives first.
+      refreshRequestsPage({ networkOnly: true }).catch(() => {});
     } catch (err) {
       console.error(err);
       showToast('Failed to create request.', 'error');
@@ -824,12 +892,13 @@ export default function Requests() {
   };
 
   const completeRequest = async (req, adminNote = '') => {
-    const personName = `${req.person.firstName} ${req.person.lastName}`.trim();
+    const personName = formatPersonName(req.person);
     const outcome = req.action === 'Add' ? 'Added' : 'Removed';
     const handledAt = new Date().toISOString();
 
     setConfirmActionRequest(null);
     removeRequestHighlight(req.id);
+    pendingCreatedIdsRef.current.delete(req.id);
     bumpHighlights();
 
     const nextRequests = newRequests.filter((r) => r.id !== req.id);
@@ -871,9 +940,10 @@ export default function Requests() {
           ...liveDirectory,
         ];
 
+    bumpCacheEpoch(REQUESTS_PAGE_CACHE_KEY);
     setNewRequests(nextRequests);
     setLiveDirectory(nextDirectory);
-    patchCache('requests_page', { requests: nextRequests, persons: nextDirectory });
+    patchCache(REQUESTS_PAGE_CACHE_KEY, { requests: nextRequests, persons: nextDirectory });
     writeCache('directory_persons', nextDirectory);
     markDirectoryPersonHighlight(req.person.email);
     sessionStorage.setItem('pm_directory_pending_tab', outcome === 'Added' ? 'Added' : 'Removed');
@@ -895,7 +965,7 @@ export default function Requests() {
     } catch (err) {
       console.error(err);
       showToast(err.message || 'Failed to save — refreshing list.', 'error');
-      loadWithCache('requests_page', getNewRequestsPage, (data, isStale) => {
+      loadWithCache(REQUESTS_PAGE_CACHE_KEY, getNewRequestsPage, (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
           syncAdminNewRequestHighlights(data.requests, { isManualEntry });
         }
@@ -937,14 +1007,14 @@ export default function Requests() {
       width: '21%',
       minWidth: '11rem',
       headerClassName: 'text-center',
-      cellClassName: 'align-top max-w-0 overflow-hidden text-left py-2',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (_, row) => {
-        const name = `${row.person.firstName} ${row.person.lastName}`.trim();
+        const { name, email, location } = formatPersonFields(row.person);
         return (
           <StackedTextCell
             primary={name}
-            secondary={row.person.email}
-            tertiary={row.person.location || EMPTY_CELL}
+            secondary={email}
+            tertiary={location}
           />
         );
       },
@@ -955,15 +1025,22 @@ export default function Requests() {
       width: '18%',
       minWidth: '10rem',
       headerClassName: 'text-center',
-      cellClassName: 'align-top max-w-0 overflow-hidden text-left',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
       render: (_, row) => {
         const manager = getManagerColumnContent(row);
         return (
           <StackedTextCell
-            primary={manager.primary || EMPTY_CELL}
+            primary={manager.primary}
             secondary={manager.secondary || undefined}
             tertiary={manager.tertiary || undefined}
-            primaryClassName={manager.muted ? 'font-medium text-[var(--color-text-muted)] italic' : ''}
+            lines={manager.lines || undefined}
+            primaryClassName={
+              manager.placeholder
+                ? '!font-normal !text-xs text-[var(--color-text-muted)]'
+                : manager.muted
+                  ? 'font-medium text-[var(--color-text-muted)] italic'
+                  : ''
+            }
           />
         );
       }
@@ -987,7 +1064,9 @@ export default function Requests() {
       headerClassName: 'text-center',
       cellClassName: 'align-middle whitespace-nowrap text-center',
       render: (_, row) => {
-        const viaTags = sentViaTableRequestTags(row.tags || []);
+        const viaTags = sentViaTableRequestTags(row.tags || [], {
+          isAdminEntry: isAdminEntry(row),
+        });
         if (!viaTags.length) {
           return (
             <span className="text-xs font-medium text-[var(--color-text-muted)]">—</span>
@@ -1109,6 +1188,26 @@ export default function Requests() {
   ];
 
   const displayedRows = filteredRequests;
+  const listResetKey = [
+    actionTab,
+    searchQuery,
+    filterDate,
+    filterLocation,
+    filterClub,
+    filterSentVia,
+    filterNeedsReview,
+    filterStatus,
+    sortPreset,
+  ].join('|');
+  const {
+    pageItems,
+    page,
+    setPage,
+    totalPages,
+    total,
+    pageStart,
+    pageEnd,
+  } = useClientPagination(displayedRows, { pageSize: 20, resetKey: listResetKey });
 
   return (
     <AdminPageScroll>
@@ -1197,7 +1296,7 @@ export default function Requests() {
       />
 
       <NewRequestsMobileList
-        rows={displayedRows}
+        rows={pageItems}
         loading={tableLoading}
         emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
         onOpenRequest={handleOpenRequest}
@@ -1209,7 +1308,7 @@ export default function Requests() {
       <div className="hidden w-full sm:block">
         <DataTable
           columns={newColumns}
-          rows={displayedRows}
+          rows={pageItems}
           onRowClick={handleOpenRequest}
           getRowClassName={getRequestRowClassName}
           emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
@@ -1220,10 +1319,15 @@ export default function Requests() {
         />
       </div>
 
-      {/* Footer */}
-      <div className="px-2 text-xs font-medium text-[var(--color-text-secondary)]">
-        {filteredRequests.length} requests
-      </div>
+      <TablePagination
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        pageStart={pageStart}
+        pageEnd={pageEnd}
+        onPageChange={setPage}
+        noun="requests"
+      />
 
       {/* ── Add Manually Modal ── */}
       <Modal
@@ -1260,7 +1364,7 @@ export default function Requests() {
               onClick={handleCreateRequest}
               className={`px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm cursor-pointer ${
                 isModalFormValid
-                  ? 'bg-[var(--color-brand-accent)] hover:bg-[var(--color-brand-accent-hover)]'
+                  ? 'bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)]'
                   : 'bg-gray-300'
               }`}
             >
@@ -1271,7 +1375,9 @@ export default function Requests() {
       >
         <form onSubmit={handleCreateRequest} noValidate className="space-y-4 text-left">
           <div className="space-y-3">
-            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Manager Details</span>
+            <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
+              Manager Details <span className="font-semibold normal-case tracking-normal text-[var(--color-text-muted)]">(optional)</span>
+            </span>
             <div className={formGridClass}>
               {[['First Name', 'firstName', 'text'], ['Last Name', 'lastName', 'text']].map(([label, field, type]) => (
                 <div key={field}>
@@ -1458,7 +1564,7 @@ export default function Requests() {
           <p>
             Confirm you have {confirmActionRequest.request.action === 'Add' ? 'added' : 'removed'}{' '}
             <strong>
-              {confirmActionRequest.request.person.firstName} {confirmActionRequest.request.person.lastName}
+              {formatPersonName(confirmActionRequest.request.person)}
             </strong>{' '}
             in Power Music before continuing. This cannot be undone.
             {confirmActionRequest.adminNote ? (

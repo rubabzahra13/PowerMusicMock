@@ -54,6 +54,7 @@ def _create_manager_request_row(
         manager_notes=notes,
         manager_id=_manager_id_for_submitter(db, submitted_by, manager_user_id=manager_user_id),
         new_id=new_id,
+        submitted_by=submitted_by,
     )
 
 

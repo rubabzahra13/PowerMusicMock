@@ -140,6 +140,36 @@ def is_live() -> bool:
     return config.GMAIL_MODE == "live"
 
 
+def is_auth_revoked_error(exc: BaseException) -> bool:
+    """True when Google rejected the refresh token (expired, revoked, or deleted)."""
+    text = str(exc).lower()
+    name = type(exc).__name__.lower()
+    return (
+        "invalid_grant" in text
+        or "token has been expired or revoked" in text
+        or ("refresherror" in name and "revoked" in text)
+    )
+
+
+def mark_account_auth_revoked(db, account: models.EmailAccount, exc: BaseException) -> None:
+    """Record that Gmail OAuth stopped working, without disconnecting the inbox.
+
+    Status stays Connected until an admin clicks Disconnect or completes Reconnect
+    (same mental model as Google's connected apps). Clears the unusable refresh
+    token and flags the inbox so the UI can prompt for reconnect.
+    """
+    logger.error(
+        "Gmail OAuth revoked for %s — staying Connected, needs reconnect (%s)",
+        account.email,
+        exc,
+    )
+    account.status = "Connected"
+    account.oauth_refresh_token = None
+    account.watch_expiration = None
+    account.backfill_error = "oauth_revoked"
+    db.commit()
+
+
 # ── OAuth ────────────────────────────────────────────────────
 
 
@@ -180,8 +210,12 @@ def get_authorization_url(state: str) -> str:
     return url
 
 
-def exchange_code(code: str, state: str) -> Tuple[str, str]:
-    """Exchange the OAuth callback code. Returns (email, refresh_token)."""
+def exchange_code(code: str, state: str) -> Tuple[str, Optional[str]]:
+    """Exchange the OAuth callback code. Returns (email, refresh_token).
+
+    refresh_token may be None on re-consent when Google does not re-issue one —
+    callers must keep the previously stored token in that case.
+    """
     flow = _flow()
     verifier = _code_verifiers.pop(state, None)
     if verifier:

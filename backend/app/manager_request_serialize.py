@@ -133,26 +133,67 @@ def _backfill_auto_mail_from_gmail(
     return {"inboxEmail": current.get("inboxEmail") or ""} if current.get("inboxEmail") else {}
 
 
+def _prefetch_source_emails(
+    db: Session, requests: List[models.ManagerRequest],
+) -> Dict[str, models.Email]:
+    """Map request id → source Email row in one/two queries (list path)."""
+    by_req: Dict[str, models.Email] = {}
+    email_ids = [r.source_email_id for r in requests if r.source_email_id]
+    gmail_ids = [
+        r.source_gmail_message_id
+        for r in requests
+        if not r.source_email_id and r.source_gmail_message_id
+    ]
+    by_id: Dict[Any, models.Email] = {}
+    by_gmail: Dict[str, models.Email] = {}
+    if email_ids:
+        for row in db.query(models.Email).filter(models.Email.id.in_(email_ids)).all():
+            by_id[row.id] = row
+    if gmail_ids:
+        for row in (
+            db.query(models.Email)
+            .filter(models.Email.gmail_message_id.in_(gmail_ids))
+            .all()
+        ):
+            by_gmail[row.gmail_message_id] = row
+    for req in requests:
+        if req.source_email_id and req.source_email_id in by_id:
+            by_req[req.id] = by_id[req.source_email_id]
+        elif req.source_gmail_message_id and req.source_gmail_message_id in by_gmail:
+            by_req[req.id] = by_gmail[req.source_gmail_message_id]
+    return by_req
+
+
 def _automated_email_meta(
     db: Session,
     req: models.ManagerRequest,
+    *,
+    allow_gmail_lookup: bool = False,
+    persist_side_effects: bool = True,
+    email_row: Optional[models.Email] = None,
+    connected_inbox: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Sender + inbox + time for roster auto-mail, when present."""
+    """Sender + inbox + time for roster auto-mail, when present.
+
+    Keep allow_gmail_lookup=False on list endpoints — live Gmail recovery per row
+    makes New Requests take tens of seconds and the UI falls back to a stale cache.
+    Set persist_side_effects=False on list paths to avoid per-row commits.
+    """
     from app.intake_persons import get_auto_mail_meta, set_auto_mail_meta
 
-    email_row = None
-    if req.source_email_id:
-        email_row = (
-            db.query(models.Email)
-            .filter(models.Email.id == req.source_email_id)
-            .first()
-        )
-    elif req.source_gmail_message_id:
-        email_row = (
-            db.query(models.Email)
-            .filter(models.Email.gmail_message_id == req.source_gmail_message_id)
-            .first()
-        )
+    if email_row is None:
+        if req.source_email_id:
+            email_row = (
+                db.query(models.Email)
+                .filter(models.Email.id == req.source_email_id)
+                .first()
+            )
+        elif req.source_gmail_message_id:
+            email_row = (
+                db.query(models.Email)
+                .filter(models.Email.gmail_message_id == req.source_gmail_message_id)
+                .first()
+            )
 
     meta = get_auto_mail_meta(req)
     inbox_email = (
@@ -183,7 +224,13 @@ def _automated_email_meta(
     details = (meta.get("details") or "").strip() or notes_auto or subject or ""
 
     has_auto_tag = TAG_AUTO_MAIL in (req.tags or [])
-    if not from_email and req.source_gmail_message_id and (has_auto_tag or req.source_gmail_message_id):
+    if (
+        allow_gmail_lookup
+        and not from_email
+        and req.source_gmail_message_id
+        and (has_auto_tag or req.source_gmail_message_id)
+        and not meta.get("fromEmailLookupFailed")
+    ):
         recovered = _backfill_auto_mail_from_gmail(db, req)
         if recovered:
             from_email = recovered.get("fromEmail") or from_email
@@ -192,8 +239,12 @@ def _automated_email_meta(
             received_at = recovered.get("receivedAt") or received_at
 
     if not inbox_email and (has_auto_tag or req.source_gmail_message_id or from_email):
-        inbox_email = _connected_inbox_email(db)
-        if inbox_email and not meta.get("inboxEmail"):
+        inbox_email = (
+            connected_inbox
+            if connected_inbox is not None
+            else _connected_inbox_email(db)
+        )
+        if persist_side_effects and inbox_email and not meta.get("inboxEmail"):
             set_auto_mail_meta(req, inbox_email=inbox_email)
             try:
                 db.add(req)
@@ -202,7 +253,7 @@ def _automated_email_meta(
                 db.rollback()
 
     # Persist details migrated out of polluted manager_notes (legacy rows).
-    if notes_auto and not (meta.get("details") or "").strip():
+    if persist_side_effects and notes_auto and not (meta.get("details") or "").strip():
         manager_only, _ = _split_manager_and_automated_notes(req.manager_notes)
         set_auto_mail_meta(req, details=notes_auto)
         req.manager_notes = manager_only
@@ -285,6 +336,9 @@ def request_to_api_dict(
     admin_user: Optional[models.PowermusicUser] = None,
     directory_row: Optional[models.ManagerRequest] = None,
     db: Optional[Session] = None,
+    email_row: Optional[models.Email] = None,
+    connected_inbox: Optional[str] = None,
+    persist_auto_mail_side_effects: bool = True,
 ) -> Dict[str, Any]:
     if manager_user is None:
         manager_user = getattr(req, "_manager_user", None)
@@ -297,6 +351,26 @@ def request_to_api_dict(
     directory_match = build_directory_match(req, directory_row)
     tags = _effective_tags(req, directory_row)
     manager_notes, _ = _split_manager_and_automated_notes(req.manager_notes)
+
+    # Admin "Add Manually" creates partner/verified rows with no manager_id.
+    # Prefer linked manager user; otherwise use admin-entered attribution.
+    if not req.manager_id:
+        from app.intake_persons import get_submitted_by_attribution
+
+        attributed = get_submitted_by_attribution(req)
+        if any(attributed.values()):
+            submitted_by = {
+                "firstName": attributed["firstName"] or submitted_by.get("firstName") or "",
+                "lastName": attributed["lastName"] or submitted_by.get("lastName") or "",
+                "email": attributed["email"] or submitted_by.get("email") or "",
+                "club": attributed["club"] or submitted_by.get("club") or "",
+            }
+        if has_tag(tags, TAG_PARTNER_REQUEST):
+            # Keep Manual entry marker when admin left club blank.
+            if not (submitted_by.get("club") or "").strip():
+                submitted_by = {**submitted_by, "club": "Manual entry"}
+            if not created_by:
+                created_by = "Admin"
 
     payload = {
         "id": req.id,
@@ -324,8 +398,25 @@ def request_to_api_dict(
         payload["intakeMatch"] = intake_match
     if directory_match:
         payload["directoryMatch"] = directory_match
+
+    from app.intake_persons import get_admin_snapshot, get_admin_submitted_by
+    from app.person_compare import person_to_mapping
+
+    admin_person = get_admin_snapshot(req)
+    if admin_person is not None:
+        payload["adminPerson"] = person_to_mapping(admin_person)
+    admin_submitted = get_admin_submitted_by(req)
+    if any(admin_submitted.values()):
+        payload["adminSubmittedBy"] = admin_submitted
+
     if db is not None:
-        automated = _automated_email_meta(db, req)
+        automated = _automated_email_meta(
+            db,
+            req,
+            email_row=email_row,
+            connected_inbox=connected_inbox,
+            persist_side_effects=persist_auto_mail_side_effects,
+        )
         if automated is not None:
             payload["automatedEmail"] = automated
     return payload
@@ -334,11 +425,30 @@ def request_to_api_dict(
 def requests_to_api_dicts(db: Session, requests: List[models.ManagerRequest]) -> List[Dict[str, Any]]:
     rows = list(requests)
     hydrate_request_users(db, rows)
+    # One directory load for the whole page — per-row probes were ~0.4s each over
+    # the remote DB and made /admin/requests/page exceed the frontend timeout.
+    from app.directory_person_match import handled_directory_rows
+
+    directory_rows = handled_directory_rows(db) if rows else []
+    email_by_req = _prefetch_source_emails(db, rows) if rows else {}
+    connected_inbox = _connected_inbox_email(db) if rows else ""
     results: List[Dict[str, Any]] = []
     for req in rows:
-        directory_row = _directory_conflict_for_request(db, req)
+        person = request_person_for_match(req)
+        directory_row = find_directory_conflict(
+            person=person,
+            action=req.action or "",
+            directory_rows=directory_rows,
+        )
         results.append(
-            request_to_api_dict(req, directory_row=directory_row, db=db),
+            request_to_api_dict(
+                req,
+                directory_row=directory_row,
+                db=db,
+                email_row=email_by_req.get(req.id),
+                connected_inbox=connected_inbox,
+                persist_auto_mail_side_effects=False,
+            ),
         )
     return results
 
@@ -360,6 +470,22 @@ def directory_person_to_api_dict(
     manager_name = resolve_manager_name(req, manager_user=manager_user)
     handled_by = resolve_handled_by_name(req, admin_user=admin_user)
     manager_notes, _ = _split_manager_and_automated_notes(req.manager_notes)
+
+    if not req.manager_id:
+        from app.intake_persons import get_submitted_by_attribution
+
+        attributed = get_submitted_by_attribution(req)
+        if any(attributed.values()):
+            manager_fields = {
+                "firstName": attributed["firstName"] or manager_fields.get("firstName") or "",
+                "lastName": attributed["lastName"] or manager_fields.get("lastName") or "",
+                "email": attributed["email"] or manager_fields.get("email") or "",
+                "club": attributed["club"] or manager_fields.get("club") or "",
+            }
+            manager_name = (
+                f"{manager_fields['firstName']} {manager_fields['lastName']}".strip()
+                or manager_name
+            )
 
     history_source = related_rows if related_rows is not None else [req]
     request_history = _build_directory_request_history(db, history_source)
@@ -448,6 +574,7 @@ def _build_directory_request_history(
                 seen.add(event_id)
                 subject = (auto.get("subject") or "").strip()
                 from_email = (auto.get("fromEmail") or "").strip()
+                inbox_email = (auto.get("inboxEmail") or "").strip()
                 detail_bits = []
                 if from_email:
                     detail_bits.append(f"From {from_email}")
@@ -465,6 +592,7 @@ def _build_directory_request_history(
                         "detail": " · ".join(detail_bits) if detail_bits else None,
                         "fromEmail": from_email or None,
                         "subject": subject or None,
+                        "inboxEmail": inbox_email or None,
                     }
                 )
 
@@ -477,7 +605,9 @@ def _build_directory_request_history(
             event_id = f"{req.id}-manager-request"
             if event_id not in seen:
                 seen.add(event_id)
-                who = manager_name or "a manager"
+                is_admin_entry = not req.manager_id and has_tag(tags, TAG_PARTNER_REQUEST)
+                who = manager_name or ("an admin" if is_admin_entry else "a manager")
+                title_prefix = "Admin entry" if is_admin_entry else "Manager request"
                 events.append(
                     {
                         "id": event_id,
@@ -486,9 +616,9 @@ def _build_directory_request_history(
                         "requestId": req.id,
                         "displayId": display_id,
                         "action": action,
-                        "title": f"Manager request to {action_verb or 'update'}",
+                        "title": f"{title_prefix} to {action_verb or 'update'}",
                         "detail": f"Submitted by {who}",
-                        "managerName": manager_name or None,
+                        "managerName": manager_name or ("Admin" if is_admin_entry else None),
                     }
                 )
 

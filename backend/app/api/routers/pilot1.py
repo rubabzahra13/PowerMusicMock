@@ -311,6 +311,7 @@ def _create_manager_request_row(
         manager_notes=notes,
         manager_id=_manager_id_for_submitter(db, submitted_by, manager_user_id=manager_user_id),
         new_id=new_id,
+        submitted_by=submitted_by,
     )
 
 
@@ -473,8 +474,7 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
         email=req_in.submittedBy.email,
         club=req_in.submittedBy.club,
     )
-    request_ids = allocate_request_ids(db, len(req_in.people))
-
+    # Allocate ids only when intake creates a new row (merges reuse the matched id).
     new_requests = [
         _create_manager_request_row(
             db,
@@ -482,9 +482,9 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
             person=person_in,
             action=req_in.action,
             notes=person_in.notes or req_in.notes,
-            new_id=new_id,
+            new_id=None,
         )
-        for new_id, person_in in zip(request_ids, req_in.people)
+        for person_in in req_in.people
     ]
 
     db.commit()

@@ -10,6 +10,7 @@ import {
   patchCache,
   refreshCache,
   writeCache,
+  REQUESTS_PAGE_CACHE_KEY,
 } from '../utils/pilot2Api';
 import { getManagerDisplayName } from '../utils/manualEntry';
 import {
@@ -17,6 +18,7 @@ import {
   markRequestViewed,
   removeRequestHighlight,
 } from '../utils/adminUiHighlights';
+import { formatPersonName } from '../utils/personDisplay';
 
 export default function RequestDetail() {
   const { requestId } = useParams();
@@ -56,7 +58,7 @@ export default function RequestDetail() {
   useEffect(() => {
     setLoading(true);
     setNotFound(false);
-    loadWithCache('requests_page', getNewRequestsPage, applyPage).catch((err) => {
+    loadWithCache(REQUESTS_PAGE_CACHE_KEY, getNewRequestsPage, applyPage).catch((err) => {
       console.error(err);
       setLoading(false);
       setNotFound(true);
@@ -64,7 +66,7 @@ export default function RequestDetail() {
   }, [applyPage]);
 
   const completeRequest = async (req, adminNote = '') => {
-    const personName = `${req.person.firstName} ${req.person.lastName}`.trim();
+    const personName = formatPersonName(req.person);
     const outcome = req.action === 'Add' ? 'Added' : 'Removed';
     const handledAt = new Date().toISOString();
 
@@ -72,7 +74,7 @@ export default function RequestDetail() {
     removeRequestHighlight(req.id);
 
     const cached = await new Promise((resolve) => {
-      loadWithCache('requests_page', getNewRequestsPage, (data) => resolve(data)).catch(() => resolve(null));
+      loadWithCache(REQUESTS_PAGE_CACHE_KEY, getNewRequestsPage, (data) => resolve(data)).catch(() => resolve(null));
     });
 
     const currentRequests = Array.isArray(cached?.requests) ? cached.requests : [];
@@ -117,7 +119,7 @@ export default function RequestDetail() {
           ...currentDirectory,
         ];
 
-    patchCache('requests_page', { requests: nextRequests, persons: nextDirectory });
+    patchCache(REQUESTS_PAGE_CACHE_KEY, { requests: nextRequests, persons: nextDirectory });
     writeCache('directory_persons', nextDirectory);
     markDirectoryPersonHighlight(req.person.email);
     sessionStorage.setItem('pm_directory_pending_tab', outcome === 'Added' ? 'Added' : 'Removed');
@@ -207,7 +209,7 @@ export default function RequestDetail() {
           <p>
             Confirm you have {confirmAction.request.action === 'Add' ? 'added' : 'removed'}{' '}
             <strong>
-              {confirmAction.request.person.firstName} {confirmAction.request.person.lastName}
+              {formatPersonName(confirmAction.request.person)}
             </strong>{' '}
             in Power Music before continuing. This cannot be undone.
             {confirmAction.adminNote ? (

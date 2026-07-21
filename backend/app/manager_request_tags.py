@@ -9,6 +9,7 @@ TAG_PARTNER_REQUEST = "partner req"
 TAG_AUTO_MAIL = "auto mail"
 TAG_VERIFIED = "verified"
 TAG_UNVERIFIED = "unverified"
+TAG_SENT_BY_ADMIN = "sent by admin"
 
 # Backward-compatible aliases
 TAG_AUTO_EMAIL = TAG_AUTO_MAIL
@@ -25,6 +26,7 @@ ALLOWED_TAGS = frozenset(
         TAG_AUTO_MAIL,
         TAG_VERIFIED,
         TAG_UNVERIFIED,
+        TAG_SENT_BY_ADMIN,
     }
 )
 
@@ -32,6 +34,7 @@ TAG_DISPLAY_ORDER = [
     TAG_VERIFIED,
     TAG_UNVERIFIED,
     TAG_PARTNER_REQUEST,
+    TAG_SENT_BY_ADMIN,
     TAG_AUTO_MAIL,
     TAG_ALREADY_EXISTS,
 ]

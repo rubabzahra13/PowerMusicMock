@@ -2,12 +2,12 @@ import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2 } from 'lucide-react';
 
-import { parseISO } from 'date-fns';
 import { formatTimestampSplit } from '../utils/dateTime';
-import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll } from '../components/ui';
+import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
+import { useClientPagination } from '../hooks/useClientPagination';
 import {
   registerDirectoryPageVisit,
   isDirectoryPersonHighlighted,
@@ -17,6 +17,8 @@ import {
 import { formatRequestDisplayId, formatAdminDateTime, formatAdminDate } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes, MANAGER_NOTES_EMPTY_LABEL } from '../utils/managerNotes';
 import { csvCell } from '../utils/csvSafe';
+import { getDirectoryManagerColumnContent } from '../utils/manualEntry';
+import { formatPersonFields } from '../utils/personDisplay';
 
 const directoryHighlightClass = (row) =>
   isDirectoryPersonHighlighted(row.email) ? ADMIN_NEW_ROW_HIGHLIGHT_CLASS : '';
@@ -330,8 +332,8 @@ function DirectoryMobileList({
       {rows.map((row) => {
         void highlightVersion;
         const extraClass = getRowClassName ? getRowClassName(row) : '';
-        const name = `${row.firstName} ${row.lastName}`.trim();
-        const managerName = personManagerName(row);
+        const { name, email, location } = formatPersonFields(row);
+        const manager = getDirectoryManagerColumnContent(row);
         const managerNotes = readManagerNotes(row);
         const adminNotes = personAdminNotes(row).trim();
 
@@ -356,9 +358,9 @@ function DirectoryMobileList({
 
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{name}</p>
-                    <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{row.email}</p>
+                    <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{email}</p>
                     <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
-                      {row.location || EMPTY_CELL}
+                      {location}
                     </p>
                   </div>
 
@@ -366,17 +368,22 @@ function DirectoryMobileList({
                     <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
                       Manager
                     </p>
-                    <p className="mt-0.5 truncate text-xs font-semibold text-[var(--color-text-primary)]">
-                      {managerName || EMPTY_CELL}
+                    <p className={`mt-0.5 truncate text-xs font-semibold ${
+                      manager.muted ? 'text-[var(--color-text-muted)] italic' : 'text-[var(--color-text-primary)]'
+                    }`}>
+                      {manager.primary}
                     </p>
-                    <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-secondary)]">
-                      {row.managerEmail || EMPTY_CELL}
-                    </p>
+                    {manager.secondary ? (
+                      <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-secondary)]">
+                        {manager.secondary}
+                      </p>
+                    ) : null}
+                    {manager.tertiary ? (
+                      <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
+                        <span className="font-semibold">Club:</span> {manager.tertiary}
+                      </p>
+                    ) : null}
                   </div>
-
-                  <p className="truncate text-[11px] text-[var(--color-text-muted)]">
-                    <span className="font-semibold">Club:</span> {row.club || EMPTY_CELL}
-                  </p>
 
                   <div className="space-y-1.5 border-t border-[var(--color-border-default)]/70 pt-2">
                     <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
@@ -619,12 +626,12 @@ export default function UserLedger() {
       headerClassName: 'text-center',
       cellClassName: 'align-top text-left',
       render: (_, row) => {
-        const name = `${row.firstName} ${row.lastName}`.trim();
+        const { name, email, location } = formatPersonFields(row);
         return (
           <StackedTextCell
             primary={name}
-            secondary={row.email}
-            tertiary={row.location || EMPTY_CELL}
+            secondary={email}
+            tertiary={location}
             truncate={false}
           />
         );
@@ -637,14 +644,18 @@ export default function UserLedger() {
       wrap: true,
       headerClassName: 'text-center',
       cellClassName: 'align-top text-left',
-      render: (_, row) => (
-        <StackedTextCell
-          primary={personManagerName(row) || EMPTY_CELL}
-          secondary={row.managerEmail || undefined}
-          tertiary={row.club || EMPTY_CELL}
-          truncate={false}
-        />
-      )
+      render: (_, row) => {
+        const manager = getDirectoryManagerColumnContent(row);
+        return (
+          <StackedTextCell
+            primary={manager.primary}
+            secondary={manager.secondary || undefined}
+            tertiary={manager.tertiary || undefined}
+            primaryClassName={manager.muted ? 'font-medium text-[var(--color-text-muted)] italic' : ''}
+            truncate={false}
+          />
+        );
+      }
     },
     {
       key: 'managerNotes',
@@ -714,6 +725,17 @@ export default function UserLedger() {
     { key: 'Removed', label: 'Removed', count: removedCount }
   ];
 
+  const listResetKey = [statusTab, searchQuery, filterLocation, filterClub, sortPreset].join('|');
+  const {
+    pageItems,
+    page,
+    setPage,
+    totalPages,
+    total,
+    pageStart,
+    pageEnd,
+  } = useClientPagination(filteredLedger, { pageSize: 20, resetKey: listResetKey });
+
   return (
     <AdminPageScroll>
       <PageHeader
@@ -766,7 +788,7 @@ export default function UserLedger() {
 
       {/* Table */}
       <DirectoryMobileList
-        rows={filteredLedger}
+        rows={pageItems}
         loading={tableLoading}
         emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
         onOpenUser={handleOpenUser}
@@ -780,7 +802,7 @@ export default function UserLedger() {
       <div className="hidden w-full sm:block">
         <DataTable
           columns={columns}
-          rows={filteredLedger}
+          rows={pageItems}
           onRowClick={handleOpenUser}
           getRowClassName={(row) => {
             void highlightVersion;
@@ -794,10 +816,15 @@ export default function UserLedger() {
         />
       </div>
 
-      {/* Footer */}
-      <div className="px-2 text-xs font-medium text-[var(--color-text-secondary)]">
-        {filteredLedger.length} records
-      </div>
+      <TablePagination
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        pageStart={pageStart}
+        pageEnd={pageEnd}
+        onPageChange={setPage}
+        noun="records"
+      />
 
       {/* History Drawer */}
       <Drawer
@@ -811,8 +838,14 @@ export default function UserLedger() {
             Array.isArray(selectedUser.requestHistory) && selectedUser.requestHistory.length
               ? selectedUser.requestHistory
               : buildFallbackHistory(selectedUser);
-          const initials = `${selectedUser.firstName?.[0] || ''}${selectedUser.lastName?.[0] || ''}`.toUpperCase() || '?';
-          const fullName = `${selectedUser.firstName || ''} ${selectedUser.lastName || ''}`.trim() || 'Unknown';
+          const { name: fullName, email: personEmail, location: personLocation } = formatPersonFields(selectedUser);
+          const manager = getDirectoryManagerColumnContent(selectedUser);
+          const nameParts = fullName === 'No name' ? [] : fullName.split(/\s+/).filter(Boolean);
+          const initials = (
+            nameParts.length >= 2
+              ? `${nameParts[0][0] || ''}${nameParts[nameParts.length - 1][0] || ''}`
+              : (nameParts[0] || '?').slice(0, 2)
+          ).toUpperCase();
           const isAdded = selectedUser.status === 'Added';
 
           return (
@@ -834,10 +867,10 @@ export default function UserLedger() {
                       />
                     </div>
                     <p className="mt-0.5 truncate font-mono text-xs text-[var(--color-text-secondary)]">
-                      {selectedUser.email || EMPTY_CELL}
+                      {personEmail}
                     </p>
                     <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                      {selectedUser.location || EMPTY_CELL}
+                      {personLocation}
                     </p>
                   </div>
                 </div>
@@ -849,12 +882,18 @@ export default function UserLedger() {
               </div>
 
               <DrawerSection title="Manager details">
-                <p className="text-sm font-semibold text-[var(--color-text-primary)]">
-                  {personManagerName(selectedUser) || EMPTY_CELL}
+                <p className={`text-sm font-semibold ${
+                  manager.muted ? 'italic text-[var(--color-text-muted)]' : 'text-[var(--color-text-primary)]'
+                }`}>
+                  {manager.primary}
                 </p>
                 <dl className="mt-2.5 space-y-2">
-                  <DrawerMetaRow label="Email" value={selectedUser.managerEmail || EMPTY_CELL} mono />
-                  <DrawerMetaRow label="Club" value={selectedUser.club || EMPTY_CELL} />
+                  {manager.secondary ? (
+                    <DrawerMetaRow label="Detail" value={manager.secondary} mono={!manager.muted} />
+                  ) : null}
+                  {manager.tertiary ? (
+                    <DrawerMetaRow label="Club" value={manager.tertiary} />
+                  ) : null}
                 </dl>
               </DrawerSection>
 

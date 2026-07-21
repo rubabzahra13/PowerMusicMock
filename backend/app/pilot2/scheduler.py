@@ -26,6 +26,10 @@ def _poll_job():
             logger.info("Gmail sync processed %d changes", processed)
     except Exception:
         logger.exception("Gmail poll job failed")
+        try:
+            db.rollback()
+        except Exception:
+            pass
     finally:
         db.close()
 
@@ -40,6 +44,10 @@ def _ai_job():
             logger.info("AI batch processed %d emails", n)
     except Exception:
         logger.exception("AI batch job failed")
+        try:
+            db.rollback()
+        except Exception:
+            pass
     finally:
         db.close()
 
@@ -77,19 +85,40 @@ def start() -> None:
     if not config.SCHEDULER_ENABLED or _scheduler is not None:
         return
     _scheduler = BackgroundScheduler(timezone="UTC")
+    job_defaults = {
+        "max_instances": 1,
+        "coalesce": True,
+        "misfire_grace_time": 60,
+    }
     if config.GMAIL_MODE == "live":
-        _scheduler.add_job(_poll_job, "interval", minutes=config.POLL_INTERVAL_MINUTES)
+        _scheduler.add_job(
+            _poll_job,
+            "interval",
+            minutes=config.POLL_INTERVAL_MINUTES,
+            **job_defaults,
+        )
         _scheduler.add_job(
             _ai_job,
             "interval",
             seconds=config.AI_JOB_INTERVAL_SECONDS,
+            **job_defaults,
         )
         # Keep Gmail push alive: watches expire after 7 days, so re-arm daily.
         if config.gmail_push_enabled():
             _scheduler.add_job(
-                _watch_renew_job, "cron", hour=config.WATCH_RENEW_HOUR_UTC, minute=0
+                _watch_renew_job,
+                "cron",
+                hour=config.WATCH_RENEW_HOUR_UTC,
+                minute=0,
+                **job_defaults,
             )
-    _scheduler.add_job(_distill_job, "cron", hour=config.DISTILL_HOUR_UTC, minute=0)
+    _scheduler.add_job(
+        _distill_job,
+        "cron",
+        hour=config.DISTILL_HOUR_UTC,
+        minute=0,
+        **job_defaults,
+    )
     _scheduler.start()
 
 

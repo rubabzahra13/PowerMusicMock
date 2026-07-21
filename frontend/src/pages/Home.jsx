@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { formatDashboardActivity } from '../utils/dateTime';
+import { format, isToday, isYesterday, parseISO } from 'date-fns';
 import {
   AlertTriangle,
   ArrowRight,
@@ -41,7 +41,14 @@ const EMPTY_INSIGHTS = {
 };
 
 function formatActivityDate(isoString) {
-  return formatDashboardActivity(isoString);
+  try {
+    const date = parseISO(isoString);
+    if (isToday(date)) return `Today, ${format(date, 'HH:mm')}`;
+    if (isYesterday(date)) return `Yesterday, ${format(date, 'HH:mm')}`;
+    return format(date, 'dd MMM, HH:mm');
+  } catch {
+    return isoString;
+  }
 }
 
 function InsightCard({ label, value, hint, icon: Icon, accent, onClick }) {

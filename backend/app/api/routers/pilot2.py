@@ -296,9 +296,21 @@ def oauth_callback(code: str, state: str, db: Session = Depends(get_db)):
             ),
             status_code=400,
         )
-    account.oauth_refresh_token = token_crypto.encrypt_token(refresh_token)
+    if refresh_token:
+        account.oauth_refresh_token = token_crypto.encrypt_token(refresh_token)
+    elif not account.oauth_refresh_token:
+        return HTMLResponse(
+            oauth_pages.oauth_error_page(
+                message=(
+                    "Google did not return a refresh token. Remove this app from your "
+                    "Google Account → Security → Third-party access, then connect again."
+                )
+            ),
+            status_code=400,
+        )
     account.status = "Connected"
     account.connected_at = datetime.now(timezone.utc)
+    account.backfill_error = None
     try:
         profile = gmail.get_profile(account)
         account.gmail_history_id = str(profile.get("historyId", "")) or None
@@ -1249,25 +1261,44 @@ def trigger_poll(request: Request, secret: Optional[str] = None, db: Session = D
         .all()
     )
     processed = pipeline.poll_all_accounts(db)
-    for account in connected:
-        db.refresh(account)
+    refreshed = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.status == "Connected")
+        .order_by(models.EmailAccount.email)
+        .all()
+    )
+    needs_reconnect = [
+        account.email
+        for account in refreshed
+        if not account.oauth_refresh_token or account.backfill_error == "oauth_revoked"
+    ]
+    syncable = [account for account in refreshed if account.oauth_refresh_token]
     result = {
         "emailsProcessed": processed,
         "gmailMode": config.GMAIL_MODE,
-        "connectedInboxes": len(connected),
+        "connectedInboxes": len(refreshed),
         "inboxes": [
             {
                 "email": account.email,
+                "status": account.status,
+                "needsReconnect": account.email in set(needs_reconnect),
                 "lastSyncedAt": account.last_synced_at.isoformat() if account.last_synced_at else None,
                 "backfillStatus": account.backfill_status,
                 "hasRefreshToken": bool(account.oauth_refresh_token),
             }
-            for account in connected
+            for account in refreshed
         ],
     }
-    if config.GMAIL_MODE != "live":
+    if needs_reconnect:
+        result["needsReconnect"] = needs_reconnect
+        result["warning"] = (
+            "Gmail access expired for: "
+            + ", ".join(needs_reconnect)
+            + ". Reconnect the inbox in Partner settings (status stays Connected until you disconnect)."
+        )
+    elif config.GMAIL_MODE != "live":
         result["warning"] = "PILOT2_GMAIL_MODE is not 'live' — poll is a no-op until set on Vercel."
-    elif not connected:
+    elif not syncable:
         result["warning"] = "No connected inboxes — connect Gmail on Email accounts in the admin dashboard."
     return result
 

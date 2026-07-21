@@ -336,6 +336,94 @@ def resume_interrupted_backfills() -> None:
         db.close()
 
 
+def catch_up_recent_messages(
+    db: Session,
+    account: models.EmailAccount,
+    *,
+    query: str = "newer_than:6h",
+    max_messages: int = 30,
+) -> int:
+    """Recover missed *roster* mail when History API cursor drifts.
+
+    Only allowlisted automated senders are considered — a full-inbox catch-up
+    was importing bank/promo mail, hitting email id collisions, poisoning the
+    DB session, and leaving the poll job stuck (later polls skipped forever).
+    """
+    if not gmail.is_live():
+        return 0
+
+    from app.automated_person_intake import intake_roster_message, sender_is_allowlisted
+    from app.partner_allowlists import list_automated_sources
+    from app.partner_requests_realtime import notify_admin_requests_changed
+
+    ids, _ = gmail.list_message_ids(account, query=query, max_results=max_messages)
+    if not ids:
+        return 0
+
+    known_req_ids = {
+        row.source_gmail_message_id
+        for row in (
+            db.query(models.ManagerRequest.source_gmail_message_id)
+            .filter(models.ManagerRequest.source_gmail_message_id.in_(ids))
+            .all()
+        )
+        if row.source_gmail_message_id
+    }
+    sources = list_automated_sources(db)
+    imported = 0
+
+    for message_id in ids:
+        if message_id in known_req_ids:
+            continue
+        try:
+            message = gmail.fetch_message(account, message_id)
+        except Exception:
+            logger.exception("Catch-up fetch failed for %s", message_id)
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            continue
+        if message is None:
+            continue
+        if not sender_is_allowlisted(message.from_email, db=db, sources=sources):
+            continue
+
+        try:
+            created = intake_roster_message(
+                db,
+                from_email=message.from_email,
+                from_name=message.from_name or "",
+                subject=message.subject or "",
+                body=message.body or "",
+                received_at=message.received_at,
+                gmail_message_id=message.gmail_message_id,
+                inbox_email=account.email,
+            )
+            if created:
+                db.commit()
+                imported += 1
+                known_req_ids.add(message_id)
+                notify_admin_requests_changed("auto_mail")
+            else:
+                db.rollback()
+        except Exception:
+            logger.exception("Catch-up roster intake failed for %s", message_id)
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        time.sleep(config.GMAIL_API_PAUSE_SECONDS)
+
+    if imported:
+        logger.info(
+            "Catch-up imported %d missed roster message(s) for %s",
+            imported,
+            account.email,
+        )
+    return imported
+
+
 def sync_account_history(db: Session, account: models.EmailAccount) -> int:
     """Apply Gmail History API deltas for one connected inbox."""
     if not gmail.is_live():
@@ -397,7 +485,21 @@ def sync_account_history(db: Session, account: models.EmailAccount) -> int:
     if latest_history_id != start_id:
         account.gmail_history_id = latest_history_id
     account.last_synced_at = datetime.now(timezone.utc)
+    if account.backfill_error == "oauth_revoked":
+        account.backfill_error = None
     db.commit()
+
+    # History cursor can skip messages when another host advances historyId in
+    # the shared DB. Scan recent allowlisted mail for gaps — isolated so a
+    # failure here cannot poison the poll session.
+    try:
+        changes += catch_up_recent_messages(db, account)
+    except Exception:
+        logger.exception("Roster catch-up failed for %s", account.email)
+        try:
+            db.rollback()
+        except Exception:
+            pass
     return changes
 
 
@@ -642,7 +744,20 @@ def handle_push_notification(
     # within a time budget so the webhook never approaches the serverless
     # timeout under a burst. Whatever doesn't fit stays queued and drains on the
     # next push/poll.
-    changes = sync_account_history(db, account)
+    try:
+        changes = sync_account_history(db, account)
+    except Exception as exc:
+        logger.exception("Push history sync failed for %s", email_address)
+        db.rollback()
+        if gmail.is_auth_revoked_error(exc):
+            account = (
+                db.query(models.EmailAccount)
+                .filter(models.EmailAccount.email == email_address)
+                .first()
+            )
+            if account is not None:
+                gmail.mark_account_auth_revoked(db, account, exc)
+        return 0
     try:
         process_ai_batch(db, deadline=time.monotonic() + config.AI_BATCH_TIME_BUDGET_SECONDS)
     except Exception:

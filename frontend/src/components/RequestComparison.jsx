@@ -2,10 +2,20 @@ import { useMemo } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { formatAdminDateTime } from '../utils/requestDisplayId';
 import {
+  autoMailFromDirectoryRecord,
   hasAnyDataDiffs,
   hasComparisonContext,
 } from '../utils/requestComparison';
-import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST } from '../utils/requestTags';
+import {
+  isAdminEntry,
+  formatAttributedManagerFields,
+  MANUAL_ENTRY_CLUB,
+  NO_MANAGER_EMAIL,
+  NO_MANAGER_LOCATION,
+  NO_MANAGER_NAME,
+  SENT_BY_ADMIN_LABEL,
+} from '../utils/manualEntry';
+import { ADMIN_FORM_LABEL, TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_SENT_BY_ADMIN } from '../utils/requestTags';
 
 const norm = (value) => {
   if (value == null) return '';
@@ -22,6 +32,7 @@ const norm = (value) => {
 const hasValue = (value) => {
   if (value == null) return false;
   if (typeof value === 'object') {
+    if (value.kind === 'admin-details-link') return true;
     return Boolean(
       (value.role || '').trim()
       || (value.name || '').trim()
@@ -200,13 +211,43 @@ function TableReviewCell({ hasDiffs: showYes, onViewDetails }) {
 }
 
 function renderManagerValue(value, differs) {
+  if (value?.kind === 'admin-details-link') {
+    const href = value.href || '#admin-form-heading';
+    return (
+      <>
+        <span className={`block text-[11px] font-semibold uppercase tracking-wide ${differs ? '' : 'text-[var(--color-text-secondary)]'}`}>
+          Admin
+        </span>
+        <span className="mt-0.5 block text-[12px] font-normal leading-snug text-[var(--color-text-secondary)] sm:text-[13px]">
+          Manager details added
+        </span>
+        <a
+          href={href}
+          className="mt-1 inline-block text-[12px] font-semibold text-[var(--color-brand-secondary)] hover:underline"
+          onClick={(event) => {
+            event.preventDefault();
+            const target = document.getElementById(href.replace(/^#/, ''));
+            target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+        >
+          View
+        </a>
+      </>
+    );
+  }
   const parsed = parseManagerValue(value);
   if (!parsed.role && !parsed.name && !parsed.email && !parsed.club) {
     return <span className="text-[var(--color-text-muted)]">-</span>;
   }
+  const isPlaceholder = (text) => (
+    text === NO_MANAGER_NAME
+    || text === NO_MANAGER_EMAIL
+    || text === NO_MANAGER_LOCATION
+  );
   const secondaryClass = differs
     ? ''
     : 'font-normal text-[var(--color-text-secondary)]';
+  const placeholderClass = 'font-normal text-[var(--color-text-muted)]';
   return (
     <>
       {parsed.role ? (
@@ -215,15 +256,17 @@ function renderManagerValue(value, differs) {
         </span>
       ) : null}
       {parsed.name ? (
-        <span className={`block ${parsed.role ? 'mt-0.5' : ''}`}>{parsed.name}</span>
+        <span className={`block ${parsed.role ? 'mt-0.5' : ''} ${isPlaceholder(parsed.name) ? placeholderClass : ''}`.trim()}>
+          {parsed.name}
+        </span>
       ) : null}
       {parsed.email ? (
-        <span className={`mt-0.5 block font-mono text-[12px] sm:text-[13px] ${secondaryClass}`}>
+        <span className={`mt-0.5 block text-[12px] sm:text-[13px] ${isPlaceholder(parsed.email) ? placeholderClass : `font-mono ${secondaryClass}`}`.trim()}>
           {parsed.email}
         </span>
       ) : null}
       {parsed.club ? (
-        <span className={`mt-0.5 block text-[12px] sm:text-[13px] ${secondaryClass}`}>
+        <span className={`mt-0.5 block text-[12px] sm:text-[13px] ${isPlaceholder(parsed.club) ? placeholderClass : secondaryClass}`.trim()}>
           {parsed.club}
         </span>
       ) : null}
@@ -260,8 +303,9 @@ function managerCell({ role = '', name = '', email = '', club = '' } = {}) {
   const displayEmail = (email || '').trim();
   const displayClub = (club || '').trim();
   if (!displayName && !displayEmail && !displayClub) {
-    // Role-only is allowed for Auto email so the label still shows when the address is missing.
-    if (displayRole.toLowerCase() !== 'auto email') return null;
+    // Role-only is allowed for Auto email / Admin so the label still shows.
+    const roleKey = displayRole.toLowerCase();
+    if (roleKey !== 'auto email' && roleKey !== 'admin') return null;
   }
   if (!displayRole && !displayName && !displayEmail && !displayClub) return null;
   return {
@@ -272,12 +316,44 @@ function managerCell({ role = '', name = '', email = '', club = '' } = {}) {
   };
 }
 
+function directorySenderFromRecord(directoryRecord) {
+  const name = (directoryRecord?.managerName || '').trim();
+  const email = (directoryRecord?.managerEmail || '').trim();
+  const club = (directoryRecord?.club || '').trim();
+  if (name || email || club) {
+    return managerCell({
+      role: 'Manager',
+      name,
+      email,
+      club,
+    });
+  }
+
+  const history = Array.isArray(directoryRecord?.requestHistory)
+    ? directoryRecord.requestHistory
+    : [];
+  const autoEvent = history.find((event) => {
+    if (event?.type !== 'auto_mail') return false;
+    return Boolean((event.fromEmail || '').trim());
+  });
+  if (autoEvent) {
+    return managerCell({
+      role: 'Auto email',
+      email: autoEvent.fromEmail,
+    });
+  }
+  return null;
+}
+
 function personValuesFromRequest(requestPerson) {
   if (!requestPerson) return null;
+  const first = (requestPerson.firstName || '').trim();
+  const last = (requestPerson.lastName || '').trim();
+  const name = [first, last].filter((part) => part && part.toLowerCase() !== 'null').join(' ');
   return {
-    name: `${requestPerson.firstName || ''} ${requestPerson.lastName || ''}`.trim(),
-    email: requestPerson.email,
-    location: requestPerson.location,
+    name,
+    email: (requestPerson.email || '').trim(),
+    location: (requestPerson.location || '').trim(),
   };
 }
 
@@ -287,22 +363,35 @@ export default function RequestComparison({
   directory = [],
   requestPerson,
   requestManager = null,
+  adminPerson = null,
+  adminSubmittedBy = null,
   autoSenderEmail = null,
   managerSubmittedAt = null,
   autoReceivedAt = null,
   tags = [],
+  managerId = null,
+  submittedBy = null,
   variant = 'table',
   onViewDetails,
   className = '',
   embedded = false,
 }) {
-  const directoryRecord = useMemo(
-    () => directory.find((record) => record.id === directoryMatch?.directoryId) || null,
-    [directory, directoryMatch?.directoryId],
-  );
+  const directoryRecord = useMemo(() => {
+    if (!directoryMatch) return null;
+    const byId = directory.find((record) => record.id === directoryMatch.directoryId);
+    if (byId) return byId;
+    const matchEmail = (
+      directoryMatch.fields?.find((f) => f.field === 'email')?.rightValue
+      || ''
+    ).trim().toLowerCase();
+    if (!matchEmail) return null;
+    return directory.find(
+      (record) => (record.email || '').trim().toLowerCase() === matchEmail,
+    ) || null;
+  }, [directory, directoryMatch]);
 
-  const anyDiffs = hasAnyDataDiffs(intakeMatch, directoryMatch);
-  const hasContext = hasComparisonContext(intakeMatch, directoryMatch);
+  const anyDiffs = hasAnyDataDiffs(intakeMatch, directoryMatch, adminPerson);
+  const hasContext = hasComparisonContext(intakeMatch, directoryMatch, tags, adminPerson);
 
   if (variant === 'table') {
     return (
@@ -321,65 +410,95 @@ export default function RequestComparison({
   const intakeField = (field, side) =>
     intakeMatch?.fields?.find((f) => f.field === field)?.[side] || '';
 
+  const adminEntry = isAdminEntry({ tags, managerId, submittedBy });
+  const hasAdminOverlay = (tags || []).includes(TAG_SENT_BY_ADMIN) || Boolean(adminPerson);
   const hasManagerForm = (tags || []).includes(TAG_PARTNER_REQUEST)
     || Boolean(intakeMatch?.fields?.some((field) => (field.leftValue || '').trim()));
+  const directoryAuto = autoMailFromDirectoryRecord(directoryRecord);
   const hasAutoMail = (tags || []).includes(TAG_AUTO_MAIL)
-    || Boolean(intakeMatch?.fields?.some((field) => (field.rightValue || '').trim()));
+    || Boolean(intakeMatch?.fields?.some((field) => (field.rightValue || '').trim()))
+    || Boolean(autoSenderEmail)
+    || Boolean(directoryAuto?.fromEmail || directoryAuto?.receivedAt);
 
   const requestPersonValues = personValuesFromRequest(requestPerson);
+  const adminPersonValues = personValuesFromRequest(adminPerson);
+  const adminManagerFields = formatAttributedManagerFields(adminSubmittedBy);
 
   const includeDirectory = Boolean(directoryRecord || directoryMatch);
-  const hasDirectorySender = Boolean(
-    (directoryRecord?.managerName || '').trim()
-    || (directoryRecord?.managerEmail || '').trim()
-    || (directoryRecord?.club || '').trim(),
-  );
-  const directoryManager = hasDirectorySender
-    ? managerCell({
-        role: 'Manager',
-        name: directoryRecord?.managerName,
-        email: directoryRecord?.managerEmail,
-        club: directoryRecord?.club,
-      })
-    : null;
+  const directoryManager = directorySenderFromRecord(directoryRecord);
+  const senderRole = adminEntry && !hasAdminOverlay ? 'Admin' : 'Manager';
   const requestManagerValue = typeof requestManager === 'object' && requestManager !== null
-    ? managerCell({
-        role: 'Manager',
-        name: requestManager.name,
-        email: requestManager.email,
-        club: requestManager.club,
-      })
+    ? (() => {
+        const rawName = (requestManager.name || '').trim();
+        const name = (rawName === 'Admin' || rawName === SENT_BY_ADMIN_LABEL) && adminEntry
+          ? ''
+          : rawName;
+        const email = (requestManager.email || '').trim();
+        const club = (requestManager.club || '').trim();
+        const clubDisplay = club === MANUAL_ENTRY_CLUB ? '' : club;
+        return managerCell({
+          role: senderRole,
+          name,
+          email,
+          club: clubDisplay,
+        }) || (adminEntry && !hasAdminOverlay ? managerCell({ role: 'Admin' }) : null);
+      })()
     : (() => {
         const parsed = parseManagerValue(requestManager);
+        const rawName = (parsed.name || '').trim();
+        const name = (rawName === 'Admin' || rawName === SENT_BY_ADMIN_LABEL) && adminEntry
+          ? ''
+          : rawName;
+        const club = (parsed.club || '').trim();
+        const clubDisplay = club === MANUAL_ENTRY_CLUB ? '' : club;
         return managerCell({
-          role: parsed.name || parsed.email || parsed.club ? 'Manager' : '',
-          ...parsed,
-        });
+          role: adminEntry || name || parsed.email || clubDisplay ? senderRole : '',
+          name,
+          email: parsed.email,
+          club: clubDisplay,
+        }) || (adminEntry && !hasAdminOverlay ? managerCell({ role: 'Admin' }) : null);
       })();
+  const adminSenderValue = adminManagerFields.hasAny
+    ? {
+      kind: 'admin-details-link',
+      href: '#admin-form-heading',
+    }
+    : managerCell({ role: 'Admin' });
+  const effectiveAutoEmail = (autoSenderEmail || directoryAuto?.fromEmail || '').trim();
+  const effectiveAutoAt = autoReceivedAt || directoryAuto?.receivedAt || null;
   const autoSenderValue = managerCell({
     role: 'Auto email',
-    email: autoSenderEmail,
+    email: effectiveAutoEmail,
   });
+
+  const primarySourceTitle = adminEntry && !hasAdminOverlay ? ADMIN_FORM_LABEL : 'Manager request';
 
   const sources = [
     hasManagerForm
       ? {
           key: 'manager',
-          title: 'Manager request',
+          title: primarySourceTitle,
           caption: managerSubmittedAt
             ? formatAdminDateTime(managerSubmittedAt)
             : '',
           values: {
-            name: intakeMatch?.fields?.length
-              ? intakeField('name', 'leftValue')
-              : requestPersonValues?.name || '',
-            email: intakeMatch?.fields?.length
-              ? intakeField('email', 'leftValue')
-              : requestPersonValues?.email || '',
-            location: intakeMatch?.fields?.length
-              ? intakeField('location', 'leftValue')
-              : requestPersonValues?.location || '',
+            name: intakeField('name', 'leftValue') || requestPersonValues?.name || '',
+            email: intakeField('email', 'leftValue') || requestPersonValues?.email || '',
+            location: intakeField('location', 'leftValue') || requestPersonValues?.location || '',
             manager: requestManagerValue,
+          },
+        }
+      : null,
+    hasAdminOverlay
+      ? {
+          key: 'admin',
+          title: ADMIN_FORM_LABEL,
+          caption: '',
+          values: {
+            name: adminPersonValues?.name || '',
+            email: adminPersonValues?.email || '',
+            location: adminPersonValues?.location || '',
+            manager: adminSenderValue,
           },
         }
       : null,
@@ -387,19 +506,24 @@ export default function RequestComparison({
       ? {
           key: 'auto',
           title: 'Automated email',
-          caption: autoReceivedAt
-            ? formatAdminDateTime(autoReceivedAt)
+          caption: effectiveAutoAt
+            ? formatAdminDateTime(effectiveAutoAt)
             : '',
           values: {
-            name: intakeMatch?.fields?.length
-              ? intakeField('name', 'rightValue')
-              : requestPersonValues?.name || '',
-            email: intakeMatch?.fields?.length
-              ? intakeField('email', 'rightValue')
-              : requestPersonValues?.email || '',
-            location: intakeMatch?.fields?.length
-              ? intakeField('location', 'rightValue')
-              : requestPersonValues?.location || '',
+            name: intakeField('name', 'rightValue')
+              || (directoryRecord
+                ? `${directoryRecord.firstName || ''} ${directoryRecord.lastName || ''}`.trim()
+                : '')
+              || requestPersonValues?.name
+              || '',
+            email: intakeField('email', 'rightValue')
+              || directoryRecord?.email
+              || requestPersonValues?.email
+              || '',
+            location: intakeField('location', 'rightValue')
+              || directoryRecord?.location
+              || requestPersonValues?.location
+              || '',
             manager: autoSenderValue,
           },
         }

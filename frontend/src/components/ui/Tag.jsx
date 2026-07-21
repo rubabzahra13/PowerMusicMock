@@ -78,7 +78,7 @@ export default function Tag({ variant, label, compact: _compact = false, prefix:
   }
 
   const equalSentViaWidth =
-    label === 'Manager Form' || label === 'Automated email'
+    label === 'Manager Form' || label === 'Automated email' || label === 'Admin form'
       ? 'w-[7.5rem] justify-center'
       : '';
 

@@ -13,11 +13,23 @@ import {
 } from 'lucide-react';
 import { Tag } from './ui';
 import RequestComparison from './RequestComparison';
-import { hasAnyDataDiffs, hasComparisonContext } from '../utils/requestComparison';
-import { getManagerDisplayName, isManualEntry } from '../utils/manualEntry';
+import {
+  autoMailFromDirectoryRecord,
+  hasAnyDataDiffs,
+  hasComparisonContext,
+  hasMultipleComparisonSources,
+} from '../utils/requestComparison';
+import {
+  formatAttributedManagerFields,
+  getManagerDisplayName,
+  isAdminEntry,
+  isManualEntry,
+  MANUAL_ENTRY_CLUB,
+} from '../utils/manualEntry';
 import {
   TAG_AUTO_MAIL,
-  visibleTableRequestTags,
+  TAG_SENT_BY_ADMIN,
+  displayRequestTags,
   requestTagLabel,
   requestTagVariant,
   isAwaitingManagerSubmission,
@@ -25,24 +37,35 @@ import {
 } from '../utils/requestTags';
 import { formatRequestDisplayId, formatAdminDateTime } from '../utils/requestDisplayId';
 import { formatManagerNotes, readAutomatedSubject, readManagerNotes } from '../utils/managerNotes';
+import { formatPersonFields, formatPersonName } from '../utils/personDisplay';
 
-function initials(first, last) {
-  return `${(first || '')[0] || ''}${(last || '')[0] || ''}`.toUpperCase() || '?';
+function initials(person) {
+  const name = formatPersonName(person, { empty: '' });
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase();
+  }
+  if (parts.length === 1) return (parts[0].slice(0, 2) || '?').toUpperCase();
+  return '?';
 }
 
 function MetaItem({ label, value, mono = false, showEmpty = false }) {
   if (!value && !showEmpty) return null;
+  const text = value == null ? '' : String(value);
+  const isPlaceholder = /^(No name|No email|No location|No club)$/i.test(text);
   return (
     <div className="min-w-0">
       <dt className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
         {label}
       </dt>
       <dd
-        className={`mt-1 break-words text-sm text-[var(--color-text-primary)] ${
-          mono ? 'font-mono text-[13px]' : 'font-medium'
+        className={`mt-1 break-words text-sm ${
+          isPlaceholder
+            ? 'font-normal text-[var(--color-text-muted)]'
+            : `text-[var(--color-text-primary)] ${mono ? 'font-mono text-[13px]' : 'font-medium'}`
         }`}
       >
-        {value || <span className="text-[var(--color-text-muted)]">-</span>}
+        {text || <span className="text-[var(--color-text-muted)]">-</span>}
       </dd>
     </div>
   );
@@ -96,34 +119,108 @@ export default function RequestDetailView({
   if (!request) return null;
 
   const awaitingManager = isAwaitingManagerSubmission(request.tags);
-  const hasAutoMail = isAutomatedIntakeRequest(request.tags)
+  const adminEntry = isAdminEntry(request);
+  const hasAdminOverlay = (request.tags || []).includes(TAG_SENT_BY_ADMIN)
+    || Boolean(request.adminPerson);
+  const adminOverlayFields = formatAttributedManagerFields(request.adminSubmittedBy);
+  const directoryRecord = directory.find(
+    (record) => record.id === request.directoryMatch?.directoryId,
+  )
+    || directory.find((record) => {
+      const matchEmail = (
+        request.directoryMatch?.fields?.find((f) => f.field === 'email')?.rightValue
+        || request.person?.email
+        || ''
+      ).trim().toLowerCase();
+      if (!matchEmail) return false;
+      return (record.email || '').trim().toLowerCase() === matchEmail;
+    })
+    || null;
+  const directoryAuto = autoMailFromDirectoryRecord(directoryRecord);
+  const hasRequestAutoMail = isAutomatedIntakeRequest(request.tags)
     || Boolean(request.automatedEmail)
     || (request.tags || []).includes(TAG_AUTO_MAIL);
+  const hasAutoMail = hasRequestAutoMail
+    || Boolean(directoryAuto?.fromEmail || directoryAuto?.receivedAt || directoryAuto?.subject);
   const isAdd = request.action === 'Add';
-  const personFullName = `${request.person.firstName} ${request.person.lastName}`.trim();
+  const { name: personFullName, email: personEmail, location: personLocation } = formatPersonFields(
+    request.person,
+  );
   const notesText = readManagerNotes(request);
-  const automatedSubject = readAutomatedSubject(request);
-  const showComparison = hasComparisonContext(request.intakeMatch, request.directoryMatch);
-  const hasConflicts = hasAnyDataDiffs(request.intakeMatch, request.directoryMatch);
+  const automatedSubject = readAutomatedSubject(request)
+    || (directoryAuto?.subject || '').trim();
+  const hasConflicts = hasAnyDataDiffs(
+    request.intakeMatch,
+    request.directoryMatch,
+    request.adminPerson,
+  );
+  // Only show the comparison matrix when there are 2+ sources and they disagree.
+  // Matching / single-source cases use the Sent by blocks below instead.
+  const showComparison = hasConflicts
+    && hasComparisonContext(
+      request.intakeMatch,
+      request.directoryMatch,
+      request.tags,
+      request.adminPerson,
+    )
+    && hasMultipleComparisonSources({
+      tags: request.tags,
+      intakeMatch: request.intakeMatch,
+      directoryMatch: request.directoryMatch,
+      hasAutoMail,
+      adminPerson: request.adminPerson,
+    });
   const clubLabel = awaitingManager
     ? null
-    : isManualEntry(request.submittedBy)
-      ? 'Manual entry'
-      : request.submittedBy?.club;
-  const secondaryTags = visibleTableRequestTags(request.tags || []);
+    : (() => {
+      const club = (request.submittedBy?.club || '').trim();
+      if (adminEntry || isManualEntry(request.submittedBy)) {
+        return club && club !== MANUAL_ENTRY_CLUB ? club : null;
+      }
+      return club || null;
+    })();
+  const secondaryTags = displayRequestTags(request.tags || [], { isAdminEntry: adminEntry });
+  const attributedFields = formatAttributedManagerFields(request.submittedBy);
+  const attributedManager = attributedFields.hasAny;
+  const hasAdminOverlayDetails = hasAdminOverlay && adminOverlayFields.hasAny;
+  // Real manager sender, or pure admin entry showing attributed/manager fields in the primary block.
+  const hasManagerSender = !awaitingManager && (
+    (!adminEntry && Boolean(request.managerId || getManagerDisplayName(request.submittedBy, request.tags, request)))
+    || (adminEntry && attributedManager)
+  );
+  // For overlay rows, the primary card is the real manager — not admin attribution.
   const managerDetails = awaitingManager
     ? null
-    : {
-      name: getManagerDisplayName(request.submittedBy, request.tags),
-      email: request.submittedBy?.email || '',
-      club: clubLabel || '',
-    };
-  const personDisplayName = personFullName
-    || formatRequestDisplayId(request.displayId)
-    || 'Request';
-  const autoFromEmail = (request.automatedEmail?.fromEmail || '').trim();
-  const autoInboxEmail = (request.automatedEmail?.inboxEmail || '').trim();
-  const autoReceivedAt = request.automatedEmail?.receivedAt || (hasAutoMail ? request.receivedAt : null);
+    : adminEntry
+      ? (attributedManager
+        ? {
+          name: attributedFields.name,
+          email: attributedFields.email,
+          club: attributedFields.club,
+        }
+        : { name: '', email: '', club: '' })
+      : {
+        name: getManagerDisplayName(request.submittedBy, request.tags, request),
+        email: request.submittedBy?.email || '',
+        club: clubLabel || '',
+      };
+  const personDisplayName = formatPersonName(request.person, {
+    empty: formatRequestDisplayId(request.displayId) || 'Request',
+  });
+  const autoFromEmail = (
+    request.automatedEmail?.fromEmail
+    || directoryAuto?.fromEmail
+    || ''
+  ).trim();
+  const autoInboxEmail = (
+    request.automatedEmail?.inboxEmail
+    || directoryAuto?.inboxEmail
+    || ''
+  ).trim();
+  const autoReceivedAt = request.automatedEmail?.receivedAt
+    || (hasRequestAutoMail ? request.receivedAt : null)
+    || directoryAuto?.receivedAt
+    || null;
 
   return (
     <div className="relative z-0 min-w-0 w-full bg-[var(--color-surface-bg)] pb-16 select-none">
@@ -179,7 +276,7 @@ export default function RequestDetailView({
               className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[var(--color-surface-bg)] text-lg font-semibold tracking-tight text-[var(--color-brand-secondary)] ring-1 ring-[var(--color-border-default)] sm:h-16 sm:w-16 sm:text-xl"
               aria-hidden="true"
             >
-              {initials(request.person.firstName, request.person.lastName)}
+              {initials(request.person)}
             </div>
 
             <div className="min-w-0 flex-1">
@@ -189,23 +286,17 @@ export default function RequestDetailView({
                     {personFullName}
                   </h1>
                   <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[var(--color-text-secondary)]">
-                    {request.person.email ? (
-                      <span className="inline-flex min-w-0 items-center gap-1.5">
-                        <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                        <span className="truncate font-mono text-[13px] text-[var(--color-text-primary)]">
-                          {request.person.email}
-                        </span>
+                    <span className="inline-flex min-w-0 items-center gap-1.5">
+                      <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span className="truncate font-mono text-[13px] text-[var(--color-text-primary)]">
+                        {personEmail}
                       </span>
-                    ) : null}
-                    {request.person.email && request.person.location ? (
-                      <span className="text-[var(--color-border-default)]" aria-hidden="true">·</span>
-                    ) : null}
-                    {request.person.location ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                        <span className="text-[var(--color-text-primary)]">{request.person.location}</span>
-                      </span>
-                    ) : null}
+                    </span>
+                    <span className="text-[var(--color-border-default)]" aria-hidden="true">·</span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span className="text-[var(--color-text-primary)]">{personLocation}</span>
+                    </span>
                   </p>
                 </div>
 
@@ -278,59 +369,116 @@ export default function RequestDetailView({
             directory={directory}
             requestPerson={request.person}
             requestManager={managerDetails}
+            adminPerson={request.adminPerson}
+            adminSubmittedBy={request.adminSubmittedBy}
             autoSenderEmail={autoFromEmail}
             managerSubmittedAt={request.receivedAt}
             autoReceivedAt={autoReceivedAt}
             tags={request.tags}
+            managerId={request.managerId}
+            submittedBy={request.submittedBy}
             variant="detail"
           />
         </section>
-      ) : (
-        <p
-          className="pt-5 pb-5 text-sm text-[var(--color-text-secondary)]"
-          role="status"
-        >
-          {isAdd ? 'Add' : 'Remove'} in Power Music, then mark complete below.
-        </p>
-      )}
+      ) : null}
 
       <SourceInfoBlock
         id="manager-heading"
-        className={awaitingManager ? 'mt-1' : ''}
+        className={awaitingManager || (adminEntry && !attributedManager && !hasAdminOverlay) ? 'mt-1' : ''}
         title={
           awaitingManager
-            ? (isAdd
-              ? 'This user addition was not requested by any manager'
-              : 'This user removal was not requested by any manager')
-            : (isAdd
-              ? 'This user addition was requested by'
-              : 'This user removal was requested by')
+            ? 'No manager request yet'
+            : hasManagerSender && hasAdminOverlayDetails
+              ? 'Sent by'
+              : adminEntry
+                ? 'Entered via Admin form'
+                : hasManagerSender
+                  ? 'Sent by Manager Form'
+                  : hasAdminOverlayDetails
+                    ? 'Manager details from Admin form'
+                    : 'Sent by'
         }
         icon={UserRound}
       >
-        {!awaitingManager ? (
-          <>
-            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-x-8">
-              <MetaItem label="Manager name" value={getManagerDisplayName(request.submittedBy, request.tags)} />
-              <MetaItem label="Manager email" value={request.submittedBy?.email} mono />
-              <MetaItem label="Manager club" value={clubLabel} />
-            </dl>
+        {!awaitingManager && (hasManagerSender || hasAdminOverlayDetails) ? (
+          <div className="space-y-6">
+            {hasManagerSender ? (
+              <div>
+                {hasManagerSender && hasAdminOverlayDetails ? (
+                  <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]">
+                    Manager Form
+                  </h3>
+                ) : null}
+                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-x-8">
+                  <MetaItem
+                    label="Manager name"
+                    value={
+                      attributedManager && adminEntry
+                        ? attributedFields.name
+                        : getManagerDisplayName(request.submittedBy, request.tags, request)
+                    }
+                  />
+                  <MetaItem
+                    label="Manager email"
+                    value={
+                      attributedManager && adminEntry
+                        ? attributedFields.email
+                        : (request.submittedBy?.email || null)
+                    }
+                    mono={!(attributedManager && adminEntry) || Boolean(attributedFields.rawEmail)}
+                  />
+                  <MetaItem
+                    label="Manager location"
+                    value={
+                      attributedManager && adminEntry
+                        ? attributedFields.club
+                        : clubLabel
+                    }
+                  />
+                </dl>
 
-            <div className="mt-5">
-              <h3 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
-                Manager notes
-              </h3>
-              <p
-                className={`max-w-3xl text-sm leading-relaxed whitespace-pre-wrap ${
-                  notesText
-                    ? 'text-[var(--color-text-primary)]'
-                    : 'text-[var(--color-text-secondary)] italic'
-                }`}
+                <div className="mt-5">
+                  <h3 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
+                    Manager notes
+                  </h3>
+                  <p
+                    className={`max-w-3xl text-sm leading-relaxed whitespace-pre-wrap ${
+                      notesText
+                        ? 'text-[var(--color-text-primary)]'
+                        : 'text-[var(--color-text-secondary)] italic'
+                    }`}
+                  >
+                    {formatManagerNotes(request)}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            {hasAdminOverlayDetails ? (
+              <div
+                id="admin-form-heading"
+                className={hasManagerSender ? 'border-t border-[var(--color-border-default)] pt-6' : undefined}
               >
-                {formatManagerNotes(request)}
-              </p>
-            </div>
-          </>
+                {hasManagerSender ? (
+                  <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]">
+                    Admin form
+                  </h3>
+                ) : null}
+                <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
+                  Optional manager details entered when this was added via Admin form.
+                </p>
+                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-x-8">
+                  <MetaItem label="Manager name" value={adminOverlayFields.name} />
+                  <MetaItem
+                    label="Manager email"
+                    value={adminOverlayFields.email}
+                    mono={Boolean(adminOverlayFields.rawEmail)}
+                  />
+                  <MetaItem label="Manager location" value={adminOverlayFields.club} />
+                </dl>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </SourceInfoBlock>
 
@@ -338,12 +486,10 @@ export default function RequestDetailView({
         id="automated-email-heading"
         title={
           hasAutoMail
-            ? (isAdd
-              ? 'We received auto mail for adding this user as well'
-              : 'We received auto mail for removing this user as well')
-            : (isAdd
-              ? 'We did not receive auto mail for adding this user'
-              : 'We did not receive auto mail for removing this user')
+            ? (hasRequestAutoMail
+              ? 'Automated email received'
+              : 'Previously received via automated email')
+            : 'No automated email'
         }
         icon={Mail}
       >
