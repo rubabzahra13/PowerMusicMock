@@ -25,8 +25,8 @@ from app.manager_request_serialize import (
     request_to_api_dict,
     requests_to_api_dicts,
 )
+from app.manager_request_intake import create_handled_manual_request, intake_manager_submission, manager_id_for_email
 from app.manager_request_activity import list_partner_activity
-from app.manager_request_intake import intake_manager_submission, manager_id_for_email
 from app.manager_request_views import (
     mark_all_handled_seen,
     mark_request_seen,
@@ -467,32 +467,46 @@ def mark_request_handled(
     return request_to_api_dict(req)
 
 @router.post("/api/admin/requests/manual", response_model=List[schemas.RequestOut])
-def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
+def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depends(get_db), admin=Depends(require_admin)):
     manual_submitter = schemas.SubmittedBy(
         firstName=req_in.submittedBy.firstName,
         lastName=req_in.submittedBy.lastName,
         email=req_in.submittedBy.email,
         club=req_in.submittedBy.club,
     )
-    # Allocate ids only when intake creates a new row (merges reuse the matched id).
-    new_requests = [
-        _create_manager_request_row(
-            db,
-            submitted_by=manual_submitter,
-            person=person_in,
-            action=req_in.action,
-            notes=person_in.notes or req_in.notes,
-            new_id=None,
-        )
-        for person_in in req_in.people
-    ]
+    if req_in.action == "Add":
+        new_requests = [
+            create_handled_manual_request(
+                db,
+                person=person_in,
+                action=req_in.action,
+                submitted_by=manual_submitter,
+                manager_notes=person_in.notes or req_in.notes,
+                admin_id=admin.id,
+            )
+            for person_in in req_in.people
+        ]
+    else:
+        # Keep existing pending-request behavior for manual removals.
+        new_requests = [
+            _create_manager_request_row(
+                db,
+                submitted_by=manual_submitter,
+                person=person_in,
+                action=req_in.action,
+                notes=person_in.notes or req_in.notes,
+                new_id=None,
+            )
+            for person_in in req_in.people
+        ]
 
     db.commit()
 
     for req in new_requests:
         db.refresh(req)
     hydrate_request_display(new_requests)
-    notify_admin_requests_changed("admin_manual")
+    if req_in.action != "Add":
+        notify_admin_requests_changed("admin_manual")
     return requests_to_api_dicts(db, new_requests)
 
 

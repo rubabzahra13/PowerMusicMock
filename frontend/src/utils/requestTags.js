@@ -5,6 +5,8 @@ export const TAG_VERIFIED = 'verified';
 export const TAG_UNVERIFIED = 'unverified';
 /** Stored when admin overlays an existing manager request; also display alias for pure admin entries. */
 export const TAG_SENT_BY_ADMIN = 'sent by admin';
+export const TAG_CONFIRMED_DUPLICATE = 'confirmed duplicate';
+export const TAG_POTENTIAL_DUPLICATE = 'potential duplicate';
 export const ADMIN_FORM_LABEL = 'Admin form';
 
 /** @deprecated use TAG_AUTO_MAIL */
@@ -33,6 +35,8 @@ export function requestTagVariant(tag) {
   if (tag === TAG_UNVERIFIED) return 'archived';
   if (tag === TAG_PARTNER_REQUEST) return 'neutral';
   if (tag === TAG_SENT_BY_ADMIN) return 'neutral';
+  if (tag === TAG_CONFIRMED_DUPLICATE) return 'review-removed';
+  if (tag === TAG_POTENTIAL_DUPLICATE) return 'review-exists';
   if (tag === TAG_AUTO_MAIL) return 'neutral';
   return 'neutral';
 }
@@ -43,6 +47,8 @@ export function sortRequestTags(tags = []) {
     TAG_UNVERIFIED,
     TAG_PARTNER_REQUEST,
     TAG_SENT_BY_ADMIN,
+    TAG_CONFIRMED_DUPLICATE,
+    TAG_POTENTIAL_DUPLICATE,
     TAG_AUTO_MAIL,
     TAG_ALREADY_EXISTS,
   ];
@@ -59,7 +65,7 @@ export function sortRequestTags(tags = []) {
 /** Tags hidden in admin tables — still used for filtering logic. */
 export function visibleTableRequestTags(tags = []) {
   return sortRequestTags(tags).filter(
-    (tag) => tag !== TAG_VERIFIED && tag !== TAG_UNVERIFIED,
+    (tag) => tag !== TAG_VERIFIED && tag !== TAG_UNVERIFIED && tag !== TAG_CONFIRMED_DUPLICATE && tag !== TAG_POTENTIAL_DUPLICATE,
   );
 }
 
@@ -76,8 +82,13 @@ export function displayRequestTags(tags = [], { isAdminEntry = false } = {}) {
 }
 
 /** Intake source tags for the Sent via column (excludes review-only tags). */
-export function sentViaTableRequestTags(tags = [], { isAdminEntry = false } = {}) {
-  return displayRequestTags(tags, { isAdminEntry }).filter((tag) => tag !== TAG_ALREADY_EXISTS);
+export function sentViaTableRequestTags(
+  tags = [],
+  { isAdminEntry = false, includeAdminForm = true } = {},
+) {
+  return displayRequestTags(tags, { isAdminEntry })
+    .filter((tag) => tag !== TAG_ALREADY_EXISTS)
+    .filter((tag) => includeAdminForm || tag !== TAG_SENT_BY_ADMIN);
 }
 
 export const SENT_VIA_BOTH = 'both';
@@ -96,8 +107,31 @@ export function matchesSentViaFilter(tags = [], filterValue) {
 export function requestTagLabel(tag) {
   if (tag === TAG_PARTNER_REQUEST) return 'Manager Form';
   if (tag === TAG_SENT_BY_ADMIN) return ADMIN_FORM_LABEL;
+  if (tag === TAG_CONFIRMED_DUPLICATE) return 'Confirmed Duplicate';
+  if (tag === TAG_POTENTIAL_DUPLICATE) return 'Potential Duplicate';
   if (tag === TAG_AUTO_MAIL) return 'Automated email';
   return tag;
+}
+
+export function requestStatusTag(request) {
+  const tags = request?.tags || [];
+  if (tags.includes(TAG_CONFIRMED_DUPLICATE)) {
+    return {
+      variant: 'review-removed',
+      label: 'Confirmed Duplicate',
+      prefix: '',
+      plain: false,
+    };
+  }
+  if (tags.includes(TAG_POTENTIAL_DUPLICATE)) {
+    return {
+      variant: 'review-exists',
+      label: 'Potential Duplicate',
+      prefix: '',
+      plain: false,
+    };
+  }
+  return directoryStatusTag(request);
 }
 
 /** Directory presence for New requests Status column. */

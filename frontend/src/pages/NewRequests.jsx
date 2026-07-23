@@ -27,9 +27,10 @@ import { useAuth } from '../context/AuthContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 import { formatPersonFields, formatPersonName, formatPersonEmail, formatPersonLocation } from '../utils/personDisplay';
-import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, directoryStatusTag, matchesSentViaFilter, SENT_VIA_BOTH } from '../utils/requestTags';
+import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, requestStatusTag, matchesSentViaFilter, SENT_VIA_BOTH } from '../utils/requestTags';
 import { hasAnyDataDiffs } from '../utils/requestComparison';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
+import { writeDirectoryCache } from '../utils/managerDirectoryCache';
 import { formGridClass } from '../utils/responsiveLayout';
 import {
   PERSON_FIELD_LIMITS,
@@ -243,7 +244,6 @@ function NewRequestsMobileList({
             <li key={index} className="space-y-2 px-4 py-3">
               <div className="h-3.5 w-20 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
               <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
-              <div className="h-3 w-1/2 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
             </li>
           ))}
         </ul>
@@ -268,8 +268,9 @@ function NewRequestsMobileList({
         const isAdd = row.action === 'Add';
         const sentViaTags = sentViaTableRequestTags(row.tags || [], {
           isAdminEntry: isAdminEntry(row),
+          includeAdminForm: false,
         });
-        const directoryStatus = directoryStatusTag(row);
+        const directoryStatus = requestStatusTag(row);
 
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
@@ -498,6 +499,8 @@ export default function Requests() {
       && statusDeepLink !== 'Not added'
       && statusDeepLink !== 'Not removed'
       && statusDeepLink !== 'Already exists'
+      && statusDeepLink !== 'Confirmed Duplicate'
+      && statusDeepLink !== 'Potential Duplicate'
     ) return;
     setFilterStatus(
       statusDeepLink === 'New' || statusDeepLink === 'Not added/removed'
@@ -728,7 +731,7 @@ export default function Requests() {
         filterNeedsReview === 'All' ||
         (filterNeedsReview === 'Yes' && needsReview) ||
         (filterNeedsReview === 'No' && !needsReview);
-      const statusLabel = directoryStatusTag(req).label;
+      const statusLabel = requestStatusTag(req).label;
       const matchesStatus =
         filterStatus === 'All' || statusLabel === filterStatus;
 
@@ -847,47 +850,28 @@ export default function Requests() {
         })
       });
 
-      bumpCacheEpoch(REQUESTS_PAGE_CACHE_KEY);
-      const existingIds = new Set(newRequests.map((row) => row.id));
-      let mergedIntoExisting = 0;
-      for (const row of created) {
-        if (!row?.id) continue;
-        if (existingIds.has(row.id)) mergedIntoExisting += 1;
-        else pendingCreatedIdsRef.current.add(row.id);
+      if (action === 'Add') {
+        const directoryRows = await fetchJson('/api/persons');
+        const nextDirectory = Array.isArray(directoryRows) ? directoryRows : [];
+        setLiveDirectory(nextDirectory);
+        writeCache('directory_persons', nextDirectory);
+        if (profile?.id) {
+          writeDirectoryCache(profile.id, nextDirectory, 'Added');
+        }
+        sessionStorage.setItem('pm_directory_pending_tab', 'Added');
       }
-      setNewRequests((prev) => {
-        const createdIds = new Set(created.map((row) => row.id));
-        const next = [...created, ...prev.filter((row) => !createdIds.has(row.id))];
-        patchCache(REQUESTS_PAGE_CACHE_KEY, { requests: next });
-        return next;
-      });
-      const createdCount = created.length - mergedIntoExisting;
-      if (mergedIntoExisting > 0 && createdCount === 0) {
-        showToast(
-          mergedIntoExisting === 1
-            ? 'Matched an existing request and added Admin form.'
-            : `Updated ${mergedIntoExisting} existing requests.`,
-          'success',
-        );
-      } else if (mergedIntoExisting > 0) {
-        showToast(
-          `Created ${createdCount} and updated ${mergedIntoExisting} existing.`,
-          'success',
-        );
-      } else {
-        showToast(
-          created.length === 1 ? 'Request created.' : `${created.length} requests created.`,
-          'success',
-        );
-      }
+
+      showToast(
+        action === 'Add'
+          ? (created.length === 1 ? 'Added to Directory.' : `${created.length} users added to Directory.`)
+          : (created.length === 1 ? 'Request created.' : `${created.length} requests created.`),
+        'success',
+      );
       setShowAddManualModal(false);
       resetManualForm();
-      // Revalidate in the background; epoch + pending ids keep the new rows visible
-      // if an older in-flight /page response arrives first.
-      refreshRequestsPage({ networkOnly: true }).catch(() => {});
     } catch (err) {
       console.error(err);
-      showToast('Failed to create request.', 'error');
+      showToast(action === 'Add' ? 'Failed to add to Directory.' : 'Failed to create request.', 'error');
     }
   };
 
@@ -1066,6 +1050,7 @@ export default function Requests() {
       render: (_, row) => {
         const viaTags = sentViaTableRequestTags(row.tags || [], {
           isAdminEntry: isAdminEntry(row),
+          includeAdminForm: false,
         });
         if (!viaTags.length) {
           return (
@@ -1090,7 +1075,7 @@ export default function Requests() {
       headerClassName: 'text-center',
       cellClassName: 'align-middle overflow-hidden text-center px-1',
       render: (_, row) => {
-        const status = directoryStatusTag(row);
+        const status = requestStatusTag(row);
         if (status.plain) {
           return (
             <span className="text-xs font-medium text-[var(--color-text-secondary)]">
@@ -1288,6 +1273,8 @@ export default function Requests() {
               { value: 'Not added', label: 'Not added' },
               { value: 'Not removed', label: 'Not removed' },
               { value: 'Already exists', label: 'Already exists' },
+              { value: 'Confirmed Duplicate', label: 'Confirmed Duplicate' },
+              { value: 'Potential Duplicate', label: 'Potential Duplicate' },
             ]
           },
         ]}
@@ -1368,7 +1355,9 @@ export default function Requests() {
                   : 'bg-gray-300'
               }`}
             >
-              {personForms.length === 1 ? 'Create Request' : `Create ${personForms.length} Requests`}
+              {action === 'Add'
+                ? (personForms.length === 1 ? 'Add to Directory' : `Add ${personForms.length} Users to Directory`)
+                : (personForms.length === 1 ? 'Create Request' : `Create ${personForms.length} Requests`)}
             </button>
           </>
         }

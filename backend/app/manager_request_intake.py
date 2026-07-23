@@ -11,9 +11,11 @@ from app import models, schemas
 from app.directory_person_match import duplicate_tags_for_person
 from app.manager_request_tags import (
     MANAGER_SUBMIT_TAGS,
+    TAG_CONFIRMED_DUPLICATE,
     TAG_AUTO_MAIL,
     TAG_PARTNER_REQUEST,
     TAG_SENT_BY_ADMIN,
+    TAG_POTENTIAL_DUPLICATE,
     TAG_UNVERIFIED,
     TAG_VERIFIED,
     has_tag,
@@ -60,7 +62,54 @@ def build_tags(
     action: str,
     extra_tags: Optional[List[str]] = None,
 ) -> List[str]:
-    return merge_tags(extra_tags, duplicate_tags_for_person(db, person, action=action))
+    return merge_tags(
+        extra_tags,
+        request_duplicate_tags_for_person(db, person, action=action),
+        duplicate_tags_for_person(db, person, action=action),
+    )
+
+
+def request_duplicate_tags_for_person(
+    db: Session,
+    person: schemas.PersonInfo,
+    action: str,
+) -> List[str]:
+    first = (person.firstName or "").strip().lower()
+    last = (person.lastName or "").strip().lower()
+    email = (person.email or "").strip().lower()
+    location = (person.location or "").strip().lower()
+
+    if not first or not last:
+        return []
+
+    confirmed = False
+    potential = False
+
+    for row in (
+        db.query(models.ManagerRequest)
+        .filter(models.ManagerRequest.action == action)
+        .all()
+    ):
+        row_first = (row.person_first_name or "").strip().lower()
+        row_last = (row.person_last_name or "").strip().lower()
+        row_email = (row.person_email or "").strip().lower()
+        row_location = (row.person_location or "").strip().lower()
+
+        if row_first != first or row_last != last:
+            continue
+
+        if email and row_email and email == row_email:
+            confirmed = True
+            break
+
+        if location and row_location and location == row_location and email and row_email and email != row_email:
+            potential = True
+
+    if confirmed:
+        return [TAG_CONFIRMED_DUPLICATE]
+    if potential:
+        return [TAG_POTENTIAL_DUPLICATE]
+    return []
 
 
 def find_unverified_auto_mail_match(
@@ -238,40 +287,16 @@ def intake_manager_submission(
     new_id: Optional[str] = None,
     submitted_by: Optional[schemas.SubmittedBy] = None,
 ) -> models.ManagerRequest:
-    """Manager portal / admin manual submit — merge onto matching New row or create verified."""
-    is_admin_entry = manager_id is None and submitted_by is not None
-
-    pending = find_unverified_auto_mail_match(db, person, action)
-    if pending:
-        row = verify_unverified_request(
-            db,
-            pending,
-            person=person,
-            manager_id=manager_id,
-            manager_notes=manager_notes,
-        )
-    else:
-        verified = find_verified_new_match(db, person, action)
-        if verified:
-            row = attach_partner_submission_to_request(
-                db,
-                verified,
-                person=person,
-                manager_id=manager_id,
-                manager_notes=manager_notes,
-                is_admin_entry=is_admin_entry,
-                submitted_by=submitted_by,
-            )
-        else:
-            row = create_manager_request(
-                db,
-                person=person,
-                action=action,
-                manager_notes=manager_notes,
-                manager_id=manager_id,
-                extra_tags=MANAGER_SUBMIT_TAGS,
-                new_id=new_id,
-            )
+    """Manager portal / admin manual submit — always insert a fresh request row."""
+    row = create_manager_request(
+        db,
+        person=person,
+        action=action,
+        manager_notes=manager_notes,
+        manager_id=manager_id,
+        extra_tags=MANAGER_SUBMIT_TAGS,
+        new_id=new_id,
+    )
 
     if submitted_by is not None and not row.manager_id:
         set_submitted_by_attribution(
@@ -306,36 +331,6 @@ def intake_automated_email_request(
         )
         if existing:
             return existing
-
-    verified = find_verified_new_match(db, person, action)
-    if verified:
-        if source_gmail_message_id:
-            verified.source_gmail_message_id = source_gmail_message_id
-        if source_email_id:
-            verified.source_email_id = source_email_id
-        return attach_auto_mail_to_request(
-            db,
-            verified,
-            person=person,
-            manager_notes=manager_notes,
-            from_email=from_email,
-            received_at=received_at,
-            subject=subject,
-            inbox_email=inbox_email,
-        )
-
-    pending = find_unverified_auto_mail_match(db, person, action)
-    if pending:
-        return attach_auto_mail_to_request(
-            db,
-            pending,
-            person=person,
-            manager_notes=manager_notes,
-            from_email=from_email,
-            received_at=received_at,
-            subject=subject,
-            inbox_email=inbox_email,
-        )
 
     row = create_manager_request(
         db,
@@ -418,4 +413,39 @@ def create_manager_request(
         apply_person_to_row(row, person, source="autoMail")
     sync_display_person(row)
     db.add(row)
+    return row
+
+
+def create_handled_manual_request(
+    db: Session,
+    *,
+    person: schemas.PersonInfo,
+    action: str,
+    submitted_by: Optional[schemas.SubmittedBy] = None,
+    manager_notes: Optional[str] = None,
+    admin_id: Optional[str] = None,
+    new_id: Optional[str] = None,
+    outcome: Optional[str] = None,
+) -> models.ManagerRequest:
+    row = create_manager_request(
+        db,
+        person=person,
+        action=action,
+        manager_notes=manager_notes,
+        extra_tags=MANAGER_SUBMIT_TAGS,
+        new_id=new_id,
+    )
+    row.status = "handled"
+    row.outcome = outcome or ("Added" if action == "Add" else "Removed")
+    row.handled_at = datetime.now(timezone.utc)
+    if admin_id and admin_id != "dev-bypass":
+        row.handled_by_admin_id = admin_id
+    if submitted_by is not None:
+        set_submitted_by_attribution(
+            row,
+            first_name=submitted_by.firstName or "",
+            last_name=submitted_by.lastName or "",
+            email=submitted_by.email or "",
+            club=submitted_by.club or "",
+        )
     return row

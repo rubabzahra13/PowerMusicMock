@@ -16,7 +16,9 @@ from app.manager_request_intake import (
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
     TAG_AUTO_MAIL,
+    TAG_CONFIRMED_DUPLICATE,
     TAG_PARTNER_REQUEST,
+    TAG_POTENTIAL_DUPLICATE,
     TAG_UNVERIFIED,
     TAG_VERIFIED,
 )
@@ -102,11 +104,13 @@ class TestManagerRequestIntake:
         )
         db.flush()
 
-        assert verified.id == auto_row.id
+        assert verified.id != auto_row.id
         assert TAG_VERIFIED in verified.tags
         assert TAG_PARTNER_REQUEST in verified.tags
-        assert TAG_AUTO_MAIL in verified.tags
-        assert TAG_UNVERIFIED not in verified.tags
+        assert TAG_AUTO_MAIL not in verified.tags
+        assert TAG_CONFIRMED_DUPLICATE not in verified.tags
+        assert TAG_POTENTIAL_DUPLICATE not in verified.tags
+        assert TAG_UNVERIFIED in auto_row.tags
         assert verified.manager_id is not None
         assert verified.person_last_name == "Mal"
         assert verified.person_location == "Leeds"
@@ -136,17 +140,17 @@ class TestManagerRequestIntake:
         )
         db.flush()
 
-        assert linked.id == mgr_row.id
+        assert linked.id != mgr_row.id
         assert TAG_AUTO_MAIL in linked.tags
-        assert linked.person_email == mgr_person.email
-        assert linked.intake_persons["partner"]["email"] == mgr_person.email
+        assert linked.person_email == auto_person.email
         assert linked.intake_persons["autoMail"]["email"] == auto_person.email
-        assert TAG_VERIFIED in linked.tags
-        assert TAG_PARTNER_REQUEST in linked.tags
+        assert TAG_VERIFIED not in linked.tags
+        assert TAG_PARTNER_REQUEST not in linked.tags
+        assert TAG_CONFIRMED_DUPLICATE not in linked.tags
+        assert TAG_POTENTIAL_DUPLICATE not in linked.tags
 
-    def test_admin_manual_merges_onto_manager_plus_auto_by_name_location(self, db: Session, manager_id: str):
-        """Admin Add Manually should attach Sent by admin to an existing New request."""
-        from app.manager_request_tags import TAG_SENT_BY_ADMIN
+    def test_admin_manual_creates_fresh_row(self, db: Session, manager_id: str):
+        """Admin/manual submit should no longer reuse an existing request row."""
 
         suffix = uuid.uuid4().hex[:8]
         # Letter-only uniqueness so we do not collide with live New Requests rows.
@@ -178,7 +182,7 @@ class TestManagerRequestIntake:
             source_gmail_message_id=f"gmail-{uuid.uuid4().hex}",
         )
         db.flush()
-        assert linked.id == mgr_row.id
+        assert linked.id != mgr_row.id
         assert TAG_AUTO_MAIL in linked.tags
 
         admin_row = intake_manager_submission(
@@ -195,15 +199,53 @@ class TestManagerRequestIntake:
         )
         db.flush()
 
-        assert admin_row.id == mgr_row.id
+        assert admin_row.id != mgr_row.id
         assert TAG_PARTNER_REQUEST in admin_row.tags
-        assert TAG_AUTO_MAIL in admin_row.tags
-        assert TAG_SENT_BY_ADMIN in admin_row.tags
-        assert admin_row.manager_id is not None
-        # Keep the original manager-submitted person on the row.
-        assert admin_row.person_email == mgr_person.email
-        assert admin_row.intake_persons.get("admin", {}).get("email") == admin_person.email
-        assert admin_row.intake_persons.get("adminSubmittedBy", {}).get("firstName") == "Mil"
+        assert TAG_AUTO_MAIL not in admin_row.tags
+        assert admin_row.manager_id is None
+        assert admin_row.person_email == admin_person.email
+
+    def test_exact_duplicate_gets_confirmed_duplicate_status(self, db: Session, manager_id: str):
+        person = _person(firstName="Arthur", lastName="John", email=f"exact-{uuid.uuid4().hex[:8]}@example.com", location="USA")
+        intake_manager_submission(
+            db,
+            person=person,
+            action="Add",
+            manager_id=manager_id,
+        )
+        db.flush()
+
+        duplicate = intake_manager_submission(
+            db,
+            person=_person(firstName="Arthur", lastName="John", email=person.email, location="USA"),
+            action="Add",
+            manager_id=manager_id,
+        )
+        db.flush()
+
+        assert TAG_CONFIRMED_DUPLICATE in duplicate.tags
+        assert TAG_POTENTIAL_DUPLICATE not in duplicate.tags
+
+    def test_name_location_duplicate_gets_potential_duplicate_status(self, db: Session, manager_id: str):
+        person = _person(firstName="Arthur", lastName="John", email=f"potential-{uuid.uuid4().hex[:8]}@example.com", location="USA")
+        intake_manager_submission(
+            db,
+            person=person,
+            action="Add",
+            manager_id=manager_id,
+        )
+        db.flush()
+
+        duplicate = intake_manager_submission(
+            db,
+            person=_person(firstName="Arthur", lastName="John", email=f"other-{uuid.uuid4().hex[:8]}@example.com", location="USA"),
+            action="Add",
+            manager_id=manager_id,
+        )
+        db.flush()
+
+        assert TAG_POTENTIAL_DUPLICATE in duplicate.tags
+        assert TAG_CONFIRMED_DUPLICATE not in duplicate.tags
 
     def test_same_email_different_action_does_not_merge(self, db: Session, manager_id: str):
         email = f"action-mismatch-{uuid.uuid4().hex[:8]}@example.com"
