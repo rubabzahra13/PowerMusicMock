@@ -29,7 +29,6 @@ from app.intake_persons import (
     set_submitted_by_attribution,
     sync_display_person,
 )
-from app.person_match import same_person
 from app.manager_request_stats import increment_manager_request_stats
 from app.request_display import allocate_request_ids
 
@@ -110,45 +109,6 @@ def request_duplicate_tags_for_person(
     if potential:
         return [TAG_POTENTIAL_DUPLICATE]
     return []
-
-
-def find_unverified_auto_mail_match(
-    db: Session,
-    person: schemas.PersonInfo,
-    action: str,
-) -> Optional[models.ManagerRequest]:
-    candidates = (
-        _new_requests_query(db)
-        .filter(
-            models.ManagerRequest.action == action,
-            models.ManagerRequest.tags.contains([TAG_UNVERIFIED]),
-            models.ManagerRequest.tags.contains([TAG_AUTO_MAIL]),
-        )
-        .all()
-    )
-    for row in candidates:
-        if same_person(row, person):
-            return row
-    return None
-
-
-def find_verified_new_match(
-    db: Session,
-    person: schemas.PersonInfo,
-    action: str,
-) -> Optional[models.ManagerRequest]:
-    candidates = (
-        _new_requests_query(db)
-        .filter(
-            models.ManagerRequest.action == action,
-            models.ManagerRequest.tags.contains([TAG_VERIFIED]),
-        )
-        .all()
-    )
-    for row in candidates:
-        if same_person(row, person):
-            return row
-    return None
 
 
 def attach_auto_mail_to_request(
@@ -288,7 +248,7 @@ def intake_manager_submission(
     submitted_by: Optional[schemas.SubmittedBy] = None,
 ) -> models.ManagerRequest:
     """Manager portal / admin manual submit — always insert a fresh request row."""
-    row = create_manager_request(
+    row = create_fresh_manager_request(
         db,
         person=person,
         action=action,
@@ -367,8 +327,9 @@ def create_manager_request(
     received_at: Optional[datetime] = None,
     source_email_id: Optional[str] = None,
     source_gmail_message_id: Optional[str] = None,
+    allow_existing_lookup: bool = True,
 ) -> models.ManagerRequest:
-    if source_gmail_message_id:
+    if allow_existing_lookup and source_gmail_message_id:
         existing = (
             db.query(models.ManagerRequest)
             .filter(models.ManagerRequest.source_gmail_message_id == source_gmail_message_id)
@@ -377,7 +338,7 @@ def create_manager_request(
         if existing:
             return existing
 
-    if source_email_id:
+    if allow_existing_lookup and source_email_id:
         existing = (
             db.query(models.ManagerRequest)
             .filter(models.ManagerRequest.source_email_id == source_email_id)
@@ -416,6 +377,37 @@ def create_manager_request(
     return row
 
 
+def create_fresh_manager_request(
+    db: Session,
+    *,
+    person: schemas.PersonInfo,
+    action: str,
+    manager_notes: Optional[str] = None,
+    manager_user_id: Optional[str] = None,
+    manager_id: Optional[str] = None,
+    extra_tags: Optional[List[str]] = None,
+    new_id: Optional[str] = None,
+    received_at: Optional[datetime] = None,
+) -> models.ManagerRequest:
+    """Insert-only helper for manager/admin submissions.
+
+    This path never performs an existing-row lookup and cannot reuse or
+    overwrite a pending request.
+    """
+    return create_manager_request(
+        db,
+        person=person,
+        action=action,
+        manager_notes=manager_notes,
+        manager_user_id=manager_user_id,
+        manager_id=manager_id,
+        extra_tags=extra_tags,
+        new_id=new_id,
+        received_at=received_at,
+        allow_existing_lookup=False,
+    )
+
+
 def create_handled_manual_request(
     db: Session,
     *,
@@ -427,7 +419,7 @@ def create_handled_manual_request(
     new_id: Optional[str] = None,
     outcome: Optional[str] = None,
 ) -> models.ManagerRequest:
-    row = create_manager_request(
+    row = create_fresh_manager_request(
         db,
         person=person,
         action=action,

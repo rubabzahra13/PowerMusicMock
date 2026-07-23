@@ -207,6 +207,7 @@ class TestManagerRequestIntake:
 
     def test_exact_duplicate_gets_confirmed_duplicate_status(self, db: Session, manager_id: str):
         person = _person(firstName="Arthur", lastName="John", email=f"exact-{uuid.uuid4().hex[:8]}@example.com", location="USA")
+        start_count = db.query(models.ManagerRequest).count()
         intake_manager_submission(
             db,
             person=person,
@@ -223,11 +224,26 @@ class TestManagerRequestIntake:
         )
         db.flush()
 
+        assert db.query(models.ManagerRequest).count() == start_count + 2
+        rows = (
+            db.query(models.ManagerRequest)
+            .filter(models.ManagerRequest.person_email == person.email)
+            .order_by(models.ManagerRequest.id.asc())
+            .all()
+        )
+        assert len(rows) == 2
+        assert rows[0].person_first_name == "Arthur"
+        assert rows[0].person_last_name == "John"
+        assert rows[0].person_location == "USA"
+        assert rows[0].tags.count(TAG_CONFIRMED_DUPLICATE) == 0
         assert TAG_CONFIRMED_DUPLICATE in duplicate.tags
         assert TAG_POTENTIAL_DUPLICATE not in duplicate.tags
+        assert TAG_CONFIRMED_DUPLICATE not in rows[0].tags
+        assert TAG_CONFIRMED_DUPLICATE in rows[1].tags
 
     def test_name_location_duplicate_gets_potential_duplicate_status(self, db: Session, manager_id: str):
         person = _person(firstName="Arthur", lastName="John", email=f"potential-{uuid.uuid4().hex[:8]}@example.com", location="USA")
+        start_count = db.query(models.ManagerRequest).count()
         intake_manager_submission(
             db,
             person=person,
@@ -244,8 +260,19 @@ class TestManagerRequestIntake:
         )
         db.flush()
 
+        assert db.query(models.ManagerRequest).count() == start_count + 2
+        rows = (
+            db.query(models.ManagerRequest)
+            .filter(models.ManagerRequest.person_first_name == "Arthur")
+            .filter(models.ManagerRequest.person_last_name == "John")
+            .order_by(models.ManagerRequest.id.asc())
+            .all()
+        )
+        assert len(rows) == 2
         assert TAG_POTENTIAL_DUPLICATE in duplicate.tags
         assert TAG_CONFIRMED_DUPLICATE not in duplicate.tags
+        assert TAG_POTENTIAL_DUPLICATE not in rows[0].tags
+        assert TAG_POTENTIAL_DUPLICATE in rows[1].tags
 
     def test_same_email_different_action_does_not_merge(self, db: Session, manager_id: str):
         email = f"action-mismatch-{uuid.uuid4().hex[:8]}@example.com"
