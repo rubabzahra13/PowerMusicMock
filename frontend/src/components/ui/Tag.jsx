@@ -1,4 +1,10 @@
-export default function Tag({ variant, label, compact: _compact = false, prefix: prefixOverride }) {
+export default function Tag({
+  variant,
+  label,
+  compact: _compact = false,
+  prefix: prefixOverride,
+  wide = false,
+}) {
   let bgClass = '';
   let textClass = '';
   let extraClass = '';
@@ -20,6 +26,16 @@ export default function Tag({ variant, label, compact: _compact = false, prefix:
       textClass = 'text-[var(--color-tag-review-exists-text)]';
       extraClass = 'ring-1 ring-inset ring-[var(--color-tag-review-exists-border)]';
       if (prefixOverride == null) prefix = '⚠ ';
+      break;
+    case 'duplicate-confirmed':
+      bgClass = 'bg-[var(--color-tag-duplicate-confirmed-bg)]';
+      textClass = 'text-[var(--color-tag-duplicate-confirmed-text)]';
+      extraClass = 'ring-1 ring-inset ring-[var(--color-tag-duplicate-confirmed-border)]';
+      break;
+    case 'duplicate-potential':
+      bgClass = 'bg-[var(--color-tag-duplicate-potential-bg)]';
+      textClass = 'text-[var(--color-tag-duplicate-potential-text)]';
+      extraClass = 'ring-1 ring-inset ring-[var(--color-tag-duplicate-potential-border)]';
       break;
     case 'new-person':
       bgClass = 'bg-[var(--color-tag-auto-mail-bg)]';
@@ -78,13 +94,13 @@ export default function Tag({ variant, label, compact: _compact = false, prefix:
   }
 
   const equalSentViaWidth =
-    label === 'Manager Form' || label === 'Automated email' || label === 'Admin form'
-      ? 'w-[7.5rem] justify-center'
+    wide || label === 'Manager Form' || label === 'Automated email' || label === 'Admin form'
+      ? 'min-w-[7.5rem] justify-center px-3'
       : '';
 
   return (
     <span
-      className={`inline-flex h-5 items-center rounded-full px-2 py-0 text-xs font-semibold leading-none select-none ${equalSentViaWidth} ${bgClass} ${textClass} ${extraClass}`}
+      className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 py-0 text-xs font-semibold leading-none select-none ${equalSentViaWidth} ${bgClass} ${textClass} ${extraClass}`}
       style={{ fontSize: 'var(--font-size-xs)' }}
     >
       {prefix}

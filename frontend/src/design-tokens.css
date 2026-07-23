@@ -51,6 +51,12 @@
   --color-tag-review-exists-bg: #fef3c7;
   --color-tag-review-exists-text: #92400e;
   --color-tag-review-exists-border: #fcd34d;
+  --color-tag-duplicate-confirmed-bg: #fee2e2;
+  --color-tag-duplicate-confirmed-text: #991b1b;
+  --color-tag-duplicate-confirmed-border: #fca5a5;
+  --color-tag-duplicate-potential-bg: #ffedd5;
+  --color-tag-duplicate-potential-text: #9a3412;
+  --color-tag-duplicate-potential-border: #fdba74;
   --color-tag-review-mismatch-bg: #e8f3fc;
   --color-tag-review-mismatch-text: #1e3a5f;
   --color-tag-review-mismatch-border: #b8d4ea;

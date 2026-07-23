@@ -113,23 +113,40 @@ export function requestTagLabel(tag) {
   return tag;
 }
 
-export function requestStatusTag(request) {
+const STATUS_TAGS = [
+  {
+    tag: TAG_ALREADY_EXISTS,
+    label: 'Already Exists',
+    variant: 'already-exists',
+  },
+  {
+    tag: TAG_CONFIRMED_DUPLICATE,
+    label: 'Confirmed Duplicate',
+    variant: 'duplicate-confirmed',
+  },
+  {
+    tag: TAG_POTENTIAL_DUPLICATE,
+    label: 'Potential Duplicate',
+    variant: 'duplicate-potential',
+  },
+];
+
+export function requestStatusTags(request) {
   const tags = request?.tags || [];
-  if (tags.includes(TAG_CONFIRMED_DUPLICATE)) {
-    return {
-      variant: 'review-removed',
-      label: 'Confirmed Duplicate',
+  return STATUS_TAGS
+    .filter((item) => tags.includes(item.tag))
+    .map(({ label, variant }) => ({
+      variant,
+      label,
       prefix: '',
       plain: false,
-    };
-  }
-  if (tags.includes(TAG_POTENTIAL_DUPLICATE)) {
-    return {
-      variant: 'review-exists',
-      label: 'Potential Duplicate',
-      prefix: '',
-      plain: false,
-    };
+    }));
+}
+
+export function requestStatusTag(request) {
+  const statusTags = requestStatusTags(request);
+  if (statusTags.length > 0) {
+    return statusTags[0];
   }
   return directoryStatusTag(request);
 }

@@ -27,7 +27,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 import { formatPersonFields, formatPersonName, formatPersonEmail, formatPersonLocation } from '../utils/personDisplay';
-import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, requestStatusTag, matchesSentViaFilter, SENT_VIA_BOTH } from '../utils/requestTags';
+import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, requestStatusTag, requestStatusTags, matchesSentViaFilter, SENT_VIA_BOTH } from '../utils/requestTags';
 import { hasAnyDataDiffs } from '../utils/requestComparison';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
 import { writeDirectoryCache } from '../utils/managerDirectoryCache';
@@ -270,7 +270,8 @@ function NewRequestsMobileList({
           isAdminEntry: isAdminEntry(row),
           includeAdminForm: false,
         });
-        const directoryStatus = requestStatusTag(row);
+        const statusTags = requestStatusTags(row);
+        const directoryStatus = statusTags.length > 0 ? null : requestStatusTag(row);
 
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
@@ -287,7 +288,20 @@ function NewRequestsMobileList({
                         {formatRequestDisplayId(row.displayId)}
                       </span>
                       <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={row.action} compact />
-                      {directoryStatus.plain ? (
+                      {statusTags.length > 0 ? (
+                        <span className="flex flex-wrap items-center justify-start gap-1.5">
+                          {statusTags.map((tag) => (
+                            <Tag
+                              key={tag.label}
+                              variant={tag.variant}
+                              label={tag.label}
+                              prefix={tag.prefix}
+                              compact
+                              wide
+                            />
+                          ))}
+                        </span>
+                      ) : directoryStatus.plain ? (
                         <span className="text-xs font-medium text-[var(--color-text-secondary)]">
                           {directoryStatus.label}
                         </span>
@@ -297,6 +311,7 @@ function NewRequestsMobileList({
                           label={directoryStatus.label}
                           prefix={directoryStatus.prefix}
                           compact
+                          wide
                         />
                       )}
                       {sentViaTags.map((tag) => (
@@ -731,9 +746,13 @@ export default function Requests() {
         filterNeedsReview === 'All' ||
         (filterNeedsReview === 'Yes' && needsReview) ||
         (filterNeedsReview === 'No' && !needsReview);
-      const statusLabel = requestStatusTag(req).label;
+      const statusLabels = requestStatusTags(req).map((tag) => tag.label.toLowerCase());
+      const directoryStatus = requestStatusTag(req);
+      const selectedStatus = filterStatus.toLowerCase();
       const matchesStatus =
-        filterStatus === 'All' || statusLabel === filterStatus;
+        filterStatus === 'All'
+        || statusLabels.includes(selectedStatus)
+        || directoryStatus.label.toLowerCase() === selectedStatus;
 
       return (
         matchesSearch &&
@@ -1069,13 +1088,30 @@ export default function Requests() {
     {
       key: 'status',
       label: 'Status',
-      width: '7.75rem',
-      minWidth: '7.75rem',
+      width: '13rem',
+      minWidth: '13rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'align-middle overflow-hidden text-center px-1',
       render: (_, row) => {
-        const status = requestStatusTag(row);
+        const statusTags = requestStatusTags(row);
+        const status = statusTags.length > 0 ? null : requestStatusTag(row);
+        if (statusTags.length > 0) {
+          return (
+            <span className="flex flex-wrap items-center justify-center gap-1.5">
+              {statusTags.map((tag) => (
+                <Tag
+                  key={tag.label}
+                  variant={tag.variant}
+                  label={tag.label}
+                  prefix={tag.prefix}
+                  compact
+                  wide
+                />
+              ))}
+            </span>
+          );
+        }
         if (status.plain) {
           return (
             <span className="text-xs font-medium text-[var(--color-text-secondary)]">
@@ -1089,6 +1125,7 @@ export default function Requests() {
             label={status.label}
             prefix={status.prefix}
             compact
+            wide
           />
         );
       },
