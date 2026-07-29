@@ -36,7 +36,7 @@ import {
   isAutomatedIntakeRequest,
 } from '../utils/requestTags';
 import { formatRequestDisplayId, formatAdminDateTime } from '../utils/requestDisplayId';
-import { formatManagerNotes, readAutomatedSubject, readManagerNotes } from '../utils/managerNotes';
+import { formatManagerNotes, readAutomatedSubject, readLeaveDate, readManagerNotes } from '../utils/managerNotes';
 import { formatPersonFields, formatPersonName } from '../utils/personDisplay';
 
 function initials(person) {
@@ -149,6 +149,7 @@ export default function RequestDetailView({
   const notesText = readManagerNotes(request);
   const automatedSubject = readAutomatedSubject(request)
     || (directoryAuto?.subject || '').trim();
+  const leaveDate = readLeaveDate(request);
   const hasConflicts = hasAnyDataDiffs(
     request.intakeMatch,
     request.directoryMatch,
@@ -503,6 +504,9 @@ export default function RequestDetailView({
                 value={autoReceivedAt ? formatAdminDateTime(autoReceivedAt) : null}
                 showEmpty
               />
+              {leaveDate ? (
+                <MetaItem label="Leave date" value={leaveDate} />
+              ) : null}
             </dl>
 
             {automatedSubject ? (

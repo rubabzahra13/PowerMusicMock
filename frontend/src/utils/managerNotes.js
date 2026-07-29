@@ -61,6 +61,25 @@ export function readAutomatedSubject(source) {
   return '';
 }
 
+/** Extract a Leave date value from automatedEmail.details or notes (stored as "Leave date: YYYY-MM-DD"). */
+export function readLeaveDate(source) {
+  if (!source) return '';
+  const candidates = [
+    source.automatedEmail?.details,
+    source.managerNotes,
+    source.notes,
+    source.details,
+  ];
+  for (const text of candidates) {
+    if (!text) continue;
+    const match = String(text).match(/(?:^|\n)\s*Leave date:\s*(.+?)(?:\r?\n|$)/i);
+    if (match && match[1].trim()) {
+      return match[1].trim();
+    }
+  }
+  return '';
+}
+
 export function readManagerNotes(source) {
   if (!source) return '';
   const raw = source.managerNotes ?? source.notes ?? '';
