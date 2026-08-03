@@ -35,7 +35,7 @@ ADD_SUBJECT = "new puregym user"
 REMOVE_SUBJECT = "puregym leaver"
 
 _NAME_RE = re.compile(r"^Name:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
-_EMAIL_RE = re.compile(r"^Email:\s*(\S+)\s*$", re.MULTILINE | re.IGNORECASE)
+_EMAIL_RE = re.compile(r"^Email:\s*(\S+)", re.MULTILINE | re.IGNORECASE)
 _CLUB_RE = re.compile(r"^Club:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 _LEAVE_DATE_RE = re.compile(r"^Leave date:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 
