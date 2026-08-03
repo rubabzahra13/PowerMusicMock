@@ -67,6 +67,7 @@ MAX_CONNECTED_INBOXES = int(os.getenv("PILOT2_MAX_CONNECTED_INBOXES", "7"))
 CRON_SECRET = os.getenv("PILOT2_CRON_SECRET") or os.getenv("CRON_SECRET") or ""
 
 # Background jobs — disabled on Vercel by default (use cron + PILOT2_CRON_SECRET).
+POLL_INTERVAL_SECONDS = int(os.getenv("PILOT2_POLL_INTERVAL_SECONDS", "15"))
 POLL_INTERVAL_MINUTES = int(os.getenv("PILOT2_POLL_INTERVAL_MINUTES", "1"))
 DISTILL_HOUR_UTC = int(os.getenv("PILOT2_DISTILL_HOUR_UTC", "2"))
 _default_scheduler = "false" if os.getenv("VERCEL") else "true"

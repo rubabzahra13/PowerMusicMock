@@ -94,7 +94,7 @@ def start() -> None:
         _scheduler.add_job(
             _poll_job,
             "interval",
-            minutes=config.POLL_INTERVAL_MINUTES,
+            seconds=config.POLL_INTERVAL_SECONDS,
             **job_defaults,
         )
         _scheduler.add_job(
