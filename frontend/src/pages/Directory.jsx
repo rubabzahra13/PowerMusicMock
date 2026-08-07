@@ -111,6 +111,10 @@ const SORT_PRESETS = [
   { value: 'dateAdded-asc', label: 'Timestamp (oldest first)' },
   { value: 'personName-asc', label: 'Person name (A–Z)' },
   { value: 'personName-desc', label: 'Person name (Z–A)' },
+  { value: 'personEmail-asc', label: 'Person email (A–Z)' },
+  { value: 'personEmail-desc', label: 'Person email (Z–A)' },
+  { value: 'personLocation-asc', label: 'Person location (A–Z)' },
+  { value: 'personLocation-desc', label: 'Person location (Z–A)' },
   { value: 'managerName-asc', label: 'Manager name (A–Z)' },
   { value: 'managerName-desc', label: 'Manager name (Z–A)' }
 ];
@@ -335,8 +339,6 @@ function DirectoryMobileList({
         const extraClass = getRowClassName ? getRowClassName(row) : '';
         const { name, email, location } = formatPersonFields(row);
         const manager = getDirectoryManagerColumnContent(row);
-        const managerNotes = readManagerNotes(row);
-        const adminNotes = personAdminNotes(row).trim();
 
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
@@ -384,21 +386,6 @@ function DirectoryMobileList({
                         <span className="font-semibold">Club:</span> {manager.tertiary}
                       </p>
                     ) : null}
-                  </div>
-
-                  <div className="space-y-1.5 border-t border-[var(--color-border-default)]/70 pt-2">
-                    <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
-                      <span className="font-semibold text-[var(--color-text-muted)]">Manager notes: </span>
-                      <span className={managerNotes ? '' : 'text-[var(--color-text-muted)]'}>
-                        {formatManagerNotes(row)}
-                      </span>
-                    </p>
-                    <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
-                      <span className="font-semibold text-[var(--color-text-muted)]">Admin notes: </span>
-                      <span className={adminNotes ? '' : 'text-[var(--color-text-muted)]'}>
-                        {formatAdminNotes(row)}
-                      </span>
-                    </p>
                   </div>
                 </div>
                 <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
@@ -459,6 +446,9 @@ export default function UserLedger() {
     }
     return 'All';
   });
+  const [filterFirstName, setFilterFirstName] = useState('All');
+  const [filterLastName, setFilterLastName] = useState('All');
+  const [filterEmail, setFilterEmail] = useState('All');
   const [filterLocation, setFilterLocation] = useState('All');
   const [filterClub, setFilterClub] = useState('All');
   const [selectedUser, setSelectedUser] = useState(null);
@@ -470,6 +460,9 @@ export default function UserLedger() {
   const handleStatusTabSwitch = (tab) => {
     setStatusTab(tab);
     setSearchQuery('');
+    setFilterFirstName('All');
+    setFilterLastName('All');
+    setFilterEmail('All');
     setFilterLocation('All');
     setFilterClub('All');
     setSortPreset(DEFAULT_SORT);
@@ -483,6 +476,27 @@ export default function UserLedger() {
   const statusTabRows = useMemo(
     () => (statusTab === 'All' ? liveUserLedger : liveUserLedger.filter((u) => u.status === statusTab)),
     [statusTab, liveUserLedger]
+  );
+
+  const firstNameOptions = useMemo(
+    () => buildFilterOptions(
+      [...new Set(statusTabRows.map((u) => u.firstName).filter(Boolean))].sort()
+    ),
+    [statusTabRows]
+  );
+
+  const lastNameOptions = useMemo(
+    () => buildFilterOptions(
+      [...new Set(statusTabRows.map((u) => u.lastName).filter(Boolean))].sort()
+    ),
+    [statusTabRows]
+  );
+
+  const emailOptions = useMemo(
+    () => buildFilterOptions(
+      [...new Set(statusTabRows.map((u) => u.email).filter(Boolean))].sort()
+    ),
+    [statusTabRows]
   );
 
   const locationOptions = useMemo(
@@ -516,9 +530,12 @@ export default function UserLedger() {
         user.club.toLowerCase().includes(query) ||
         (readManagerNotes(user) && readManagerNotes(user).toLowerCase().includes(query)) ||
         (personAdminNotes(user) && personAdminNotes(user).toLowerCase().includes(query));
+      const matchesFirstName = filterFirstName === 'All' || user.firstName === filterFirstName;
+      const matchesLastName = filterLastName === 'All' || user.lastName === filterLastName;
+      const matchesEmail = filterEmail === 'All' || user.email === filterEmail;
       const matchesLocation = filterLocation === 'All' || user.location === filterLocation;
       const matchesClub = filterClub === 'All' || user.club === filterClub;
-      return matchesSearch && matchesLocation && matchesClub;
+      return matchesSearch && matchesFirstName && matchesLastName && matchesEmail && matchesLocation && matchesClub;
     });
 
     return [...filtered].sort((a, b) => {
@@ -528,12 +545,21 @@ export default function UserLedger() {
         const nB = `${b.firstName} ${b.lastName}`.toLowerCase();
         return nA.localeCompare(nB) * sortDir;
       }
+      if (field === 'personEmail') {
+        return (a.email || '').localeCompare(b.email || '') * sortDir;
+      }
+      if (field === 'personLocation') {
+        return (a.location || '').localeCompare(b.location || '') * sortDir;
+      }
       if (field === 'dateAdded') return (new Date(a.dateAdded) - new Date(b.dateAdded)) * sortDir;
       return (a.displayId - b.displayId) * sortDir;
     });
-  }, [statusTabRows, searchQuery, filterLocation, filterClub, sortPreset]);
+  }, [statusTabRows, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, filterClub, sortPreset]);
 
   const activeFilterCount = [
+    filterFirstName !== 'All',
+    filterLastName !== 'All',
+    filterEmail !== 'All',
     filterLocation !== 'All',
     filterClub !== 'All'
   ].filter(Boolean).length;
@@ -623,28 +649,54 @@ export default function UserLedger() {
       render: (val) => <TimestampCell val={val} />
     },
     {
-      key: 'person',
-      label: 'Person',
-      width: '24%',
-      wrap: true,
+      key: 'personName',
+      label: 'Person Name',
+      width: '18%',
       headerClassName: 'text-center',
-      cellClassName: 'align-top text-left',
+      cellClassName: 'align-middle text-left max-w-0 overflow-hidden',
       render: (_, row) => {
-        const { name, email, location } = formatPersonFields(row);
+        const { name } = formatPersonFields(row);
         return (
-          <StackedTextCell
-            primary={name}
-            secondary={email}
-            tertiary={location}
-            truncate={false}
-          />
+          <TruncateCell className="text-xs font-semibold text-[var(--color-text-primary)]" title={name}>
+            {name}
+          </TruncateCell>
+        );
+      },
+    },
+    {
+      key: 'personEmail',
+      label: 'Person Email',
+      width: '20%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle text-left max-w-0 overflow-hidden',
+      render: (_, row) => {
+        const { email } = formatPersonFields(row);
+        return (
+          <TruncateCell className="text-xs font-mono text-[var(--color-text-secondary)]" title={email}>
+            {email}
+          </TruncateCell>
+        );
+      },
+    },
+    {
+      key: 'personLocation',
+      label: 'Person Location',
+      width: '16%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle text-left max-w-0 overflow-hidden',
+      render: (_, row) => {
+        const { location } = formatPersonFields(row);
+        return (
+          <TruncateCell className="text-xs text-[var(--color-text-muted)]" title={location}>
+            {location}
+          </TruncateCell>
         );
       },
     },
     {
       key: 'manager',
       label: 'Manager',
-      width: '24%',
+      width: '22%',
       wrap: true,
       headerClassName: 'text-center',
       cellClassName: 'align-top text-left',
@@ -658,44 +710,6 @@ export default function UserLedger() {
             primaryClassName={manager.muted ? 'font-medium text-[var(--color-text-muted)] italic' : ''}
             truncate={false}
           />
-        );
-      }
-    },
-    {
-      key: 'managerNotes',
-      label: 'Manager notes',
-      width: '14%',
-      cellClassName: 'align-middle max-w-0 overflow-hidden',
-      render: (_, row) => {
-        const notes = readManagerNotes(row);
-        return (
-          <TruncateCell
-            className={`text-xs leading-relaxed ${
-              notes ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'
-            }`}
-            title={notes || undefined}
-          >
-            {formatManagerNotes(row)}
-          </TruncateCell>
-        );
-      }
-    },
-    {
-      key: 'adminNotes',
-      label: 'Admin notes',
-      width: '14%',
-      cellClassName: 'align-middle max-w-0 overflow-hidden',
-      render: (_, row) => {
-        const notes = personAdminNotes(row).trim();
-        return (
-          <TruncateCell
-            className={`text-xs leading-relaxed ${
-              notes ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'
-            }`}
-            title={notes || undefined}
-          >
-            {formatAdminNotes(row)}
-          </TruncateCell>
         );
       }
     },
@@ -729,7 +743,7 @@ export default function UserLedger() {
     { key: 'Removed', label: 'Removed', count: removedCount }
   ];
 
-  const listResetKey = [statusTab, searchQuery, filterLocation, filterClub, sortPreset].join('|');
+  const listResetKey = [statusTab, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, filterClub, sortPreset].join('|');
   const {
     pageItems,
     page,
@@ -774,7 +788,25 @@ export default function UserLedger() {
         activeFilterCount={activeFilterCount}
         filterSlots={[
           {
-            label: 'User Location',
+            label: 'Person First Name',
+            value: filterFirstName,
+            onChange: setFilterFirstName,
+            options: firstNameOptions
+          },
+          {
+            label: 'Person Last Name',
+            value: filterLastName,
+            onChange: setFilterLastName,
+            options: lastNameOptions
+          },
+          {
+            label: 'Person Email',
+            value: filterEmail,
+            onChange: setFilterEmail,
+            options: emailOptions
+          },
+          {
+            label: 'Person Location',
             value: filterLocation,
             onChange: setFilterLocation,
             options: locationOptions
