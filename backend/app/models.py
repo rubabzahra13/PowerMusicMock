@@ -63,6 +63,7 @@ class ManagerRequest(Base):
     source_gmail_message_id = Column(String, nullable=True, unique=True)
     intake_persons = Column(JSONB, nullable=False, server_default="{}")
     partner_id = Column(String, ForeignKey("partners.id"), nullable=True, index=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
 
 class ManagerRequestView(Base):

@@ -1,11 +1,11 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
-import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2 } from 'lucide-react';
+import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2, Pencil, Loader2, Archive, RotateCcw } from 'lucide-react';
 
 import { formatTimestampSplit } from '../utils/dateTime';
-import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination } from '../components/ui';
+import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, Modal, Toast, useToast } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
-import { loadWithCache } from '../utils/pilot2Api';
+import { loadWithCache, updatePerson, archivePerson, restorePerson, fetchArchivedPeople } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import { useClientPagination } from '../hooks/useClientPagination';
 import {
@@ -300,20 +300,195 @@ const TimestampCell = ({ val }) => {
   );
 };
 
+function EditPersonModal({ isOpen, onClose, user, onSave }) {
+  const { showToast } = useToast();
+  const { selectedPartnerId } = usePartners();
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    location: '',
+  });
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setFormData({
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        email: user.email || '',
+        location: user.location || '',
+      });
+      setErrors({});
+    }
+  }, [user]);
+
+  if (!isOpen || !user) return null;
+
+  const validate = () => {
+    const errs = {};
+    if (!formData.firstName.trim()) errs.firstName = 'First name is required.';
+    if (!formData.lastName.trim()) errs.lastName = 'Last name is required.';
+    if (!formData.email.trim()) {
+      errs.email = 'Email is required.';
+    } else if (!/\S+@\S+\.\S+/.test(formData.email.trim())) {
+      errs.email = 'Enter a valid email address.';
+    }
+    if (!formData.location.trim()) errs.location = 'Location is required.';
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validate()) return;
+    setSubmitting(true);
+    try {
+      const payload = {
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+        email: formData.email.trim().toLowerCase(),
+        location: formData.location.trim(),
+      };
+      const updated = await updatePerson(user.id, payload, selectedPartnerId || '');
+      showToast('Directory record updated successfully.', 'success');
+      onSave(updated);
+      onClose();
+    } catch (err) {
+      showToast(err.message || 'Could not update record.', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={() => !submitting && onClose()}
+      title={`Edit ${user.firstName ? user.firstName + ' ' + (user.lastName || '') : 'Directory Record'}`}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-semibold hover:bg-gray-50 disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-40"
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Saving…</span>
+              </>
+            ) : (
+              'Save changes'
+            )}
+          </button>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4 text-left">
+        <div>
+          <label htmlFor="edit-person-firstname" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            First Name <span className="text-red-500">*</span>
+          </label>
+          <input
+            id="edit-person-firstname"
+            type="text"
+            value={formData.firstName}
+            onChange={(e) => setFormData((prev) => ({ ...prev, firstName: e.target.value }))}
+            className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+              errors.firstName
+                ? 'border-red-300 focus:border-red-500 focus:ring-red-200 bg-red-50/30'
+                : 'border-[var(--color-border-default)] focus:border-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)]/20'
+            }`}
+          />
+          {errors.firstName && <p className="mt-1 text-xs font-medium text-red-600">{errors.firstName}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="edit-person-lastname" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            Last Name <span className="text-red-500">*</span>
+          </label>
+          <input
+            id="edit-person-lastname"
+            type="text"
+            value={formData.lastName}
+            onChange={(e) => setFormData((prev) => ({ ...prev, lastName: e.target.value }))}
+            className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+              errors.lastName
+                ? 'border-red-300 focus:border-red-500 focus:ring-red-200 bg-red-50/30'
+                : 'border-[var(--color-border-default)] focus:border-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)]/20'
+            }`}
+          />
+          {errors.lastName && <p className="mt-1 text-xs font-medium text-red-600">{errors.lastName}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="edit-person-email" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            Email <span className="text-red-500">*</span>
+          </label>
+          <input
+            id="edit-person-email"
+            type="email"
+            value={formData.email}
+            onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+            className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+              errors.email
+                ? 'border-red-300 focus:border-red-500 focus:ring-red-200 bg-red-50/30'
+                : 'border-[var(--color-border-default)] focus:border-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)]/20'
+            }`}
+          />
+          {errors.email && <p className="mt-1 text-xs font-medium text-red-600">{errors.email}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="edit-person-location" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            Location <span className="text-red-500">*</span>
+          </label>
+          <input
+            id="edit-person-location"
+            type="text"
+            value={formData.location}
+            onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
+            className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+              errors.location
+                ? 'border-red-300 focus:border-red-500 focus:ring-red-200 bg-red-50/30'
+                : 'border-[var(--color-border-default)] focus:border-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)]/20'
+            }`}
+          />
+          {errors.location && <p className="mt-1 text-xs font-medium text-red-600">{errors.location}</p>}
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function DirectoryMobileList({
   rows,
   loading,
   emptyMessage,
   onOpenUser,
+  onEditUser,
+  onArchiveUser,
+  onRestoreUser,
   highlightVersion,
   getRowClassName,
 }) {
   if (loading) {
     return (
-      <div className="overflow-hidden rounded-md border border-[var(--color-border-default)] bg-white sm:hidden">
-        <ul className="divide-y divide-[var(--color-border-default)]">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <li key={index} className="space-y-2 px-4 py-3">
+      <div className="rounded-md border border-[var(--color-border-default)] bg-white p-4 sm:hidden">
+        <ul className="space-y-3">
+          {Array.from({ length: 4 }).map((_, idx) => (
+            <li key={idx} className="space-y-2 border-b border-[var(--color-border-default)] pb-3 last:border-b-0 last:pb-0">
               <div className="h-3.5 w-20 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
               <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
               <div className="h-3 w-1/2 animate-pulse rounded bg-[var(--color-surface-highlight)]" />
@@ -355,6 +530,50 @@ function DirectoryMobileList({
                       {formatRequestDisplayId(row.displayId)}
                     </span>
                     <Tag variant={row.status === 'Added' ? 'added' : 'removed'} label={row.status} compact />
+                    <div className="ml-auto flex items-center gap-1.5">
+                      {onEditUser && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditUser(row);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-0.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
+                          aria-label={`Edit ${name}`}
+                        >
+                          <Pencil className="h-3 w-3" />
+                          <span>Edit</span>
+                        </button>
+                      )}
+                      {onArchiveUser && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onArchiveUser(row);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-0.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
+                          aria-label={`Archive ${name}`}
+                        >
+                          <Archive className="h-3 w-3" />
+                          <span>Archive</span>
+                        </button>
+                      )}
+                      {onRestoreUser && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRestoreUser(row);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-0.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
+                          aria-label={`Restore ${name}`}
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          <span>Restore</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <TimestampCell val={row.dateAdded} />
@@ -408,6 +627,13 @@ export default function UserLedger() {
   const [liveUserLedger, setLiveUserLedger] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
   const [highlightVersion, setHighlightVersion] = useState(0);
+  const toast = useToast();
+
+  const [directoryView, setDirectoryView] = useState('active');
+  const [archivedUserLedger, setArchivedUserLedger] = useState([]);
+  const [archivingUser, setArchivingUser] = useState(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [restoringUserId, setRestoringUserId] = useState(null);
 
   useEffect(() => {
     registerDirectoryPageVisit(location.key);
@@ -416,19 +642,25 @@ export default function UserLedger() {
 
   useEffect(() => {
     const cacheKey = selectedPartnerId ? `directory_persons:${selectedPartnerId}` : 'directory_persons';
+    const archivedCacheKey = selectedPartnerId ? `directory_persons_archived:${selectedPartnerId}` : 'directory_persons_archived';
     const query = selectedPartnerId ? `?partner_id=${encodeURIComponent(selectedPartnerId)}` : '';
-    // Cached copy renders instantly; fresh data replaces it.
+
     const applyPersons = (data) => {
       setLiveUserLedger(Array.isArray(data) ? data : []);
       setTableLoading(false);
     };
+
+    const applyArchived = (data) => {
+      setArchivedUserLedger(Array.isArray(data) ? data : []);
+    };
+
     const load = () => {
-      loadWithCache(cacheKey, () =>
-        fetchJson(`/api/persons${query}`),
-        applyPersons,
-      ).catch((err) => {
+      loadWithCache(cacheKey, () => fetchJson(`/api/persons${query}`), applyPersons).catch((err) => {
         console.error(err);
         setTableLoading(false);
+      });
+      loadWithCache(archivedCacheKey, () => fetchJson(`/api/persons/archived${query}`), applyArchived).catch((err) => {
+        console.error(err);
       });
     };
     load();
@@ -452,10 +684,62 @@ export default function UserLedger() {
   const [filterLocation, setFilterLocation] = useState('All');
   const [filterClub, setFilterClub] = useState('All');
   const [selectedUser, setSelectedUser] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
   const selectedUserRef = useRef(selectedUser);
   selectedUserRef.current = selectedUser;
   const [sortPreset, setSortPreset] = useState(DEFAULT_SORT);
   const [filterOpen, setFilterOpen] = useState(true);
+
+  const handleSaveEditUser = (updatedUser) => {
+    setLiveUserLedger((prev) =>
+      prev.map((row) => (row.id === updatedUser.id ? { ...row, ...updatedUser } : row))
+    );
+    setArchivedUserLedger((prev) =>
+      prev.map((row) => (row.id === updatedUser.id ? { ...row, ...updatedUser } : row))
+    );
+    if (selectedUser?.id === updatedUser.id) {
+      setSelectedUser((prev) => ({ ...prev, ...updatedUser }));
+    }
+  };
+
+  const handleConfirmArchive = async (user) => {
+    if (!user) return;
+    setArchiveLoading(true);
+    try {
+      const archived = await archivePerson(user.id, selectedPartnerId);
+      setLiveUserLedger((prev) => prev.filter((r) => r.id !== user.id));
+      setArchivedUserLedger((prev) => [archived, ...prev.filter((r) => r.id !== user.id)]);
+      if (selectedUser?.id === user.id) {
+        setSelectedUser(null);
+      }
+      setArchivingUser(null);
+      toast.show('Record archived successfully', 'success');
+    } catch (err) {
+      console.error(err);
+      toast.show(err.message || 'Failed to archive record', 'error');
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  const handleRestoreUser = async (user) => {
+    if (!user) return;
+    setRestoringUserId(user.id);
+    try {
+      const restored = await restorePerson(user.id, selectedPartnerId);
+      setArchivedUserLedger((prev) => prev.filter((r) => r.id !== user.id));
+      setLiveUserLedger((prev) => [restored, ...prev.filter((r) => r.id !== user.id)]);
+      if (selectedUser?.id === user.id) {
+        setSelectedUser(restored);
+      }
+      toast.show('Record restored to active Directory', 'success');
+    } catch (err) {
+      console.error(err);
+      toast.show(err.message || 'Failed to restore record', 'error');
+    } finally {
+      setRestoringUserId(null);
+    }
+  };
 
   const handleStatusTabSwitch = (tab) => {
     setStatusTab(tab);
@@ -469,13 +753,15 @@ export default function UserLedger() {
     setFilterOpen(true);
   };
 
-  const addedCount = liveUserLedger.filter((u) => u.status === 'Added').length;
-  const removedCount = liveUserLedger.filter((u) => u.status === 'Removed').length;
-  const allCount = liveUserLedger.length;
+  const currentLedger = directoryView === 'archived' ? archivedUserLedger : liveUserLedger;
+
+  const addedCount = currentLedger.filter((u) => u.status === 'Added').length;
+  const removedCount = currentLedger.filter((u) => u.status === 'Removed').length;
+  const allCount = currentLedger.length;
 
   const statusTabRows = useMemo(
-    () => (statusTab === 'All' ? liveUserLedger : liveUserLedger.filter((u) => u.status === statusTab)),
-    [statusTab, liveUserLedger]
+    () => (statusTab === 'All' ? currentLedger : currentLedger.filter((u) => u.status === statusTab)),
+    [statusTab, currentLedger]
   );
 
   const firstNameOptions = useMemo(
@@ -725,13 +1011,61 @@ export default function UserLedger() {
     {
       key: 'open',
       label: '',
-      width: '40px',
+      width: directoryView === 'active' ? '150px' : '100px',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'text-center align-middle whitespace-nowrap px-1',
-      render: () => (
-        <div className="flex items-center justify-center" aria-hidden="true">
-          <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" />
+      render: (_, row) => (
+        <div className="flex items-center justify-end gap-1.5">
+          {directoryView === 'active' ? (
+            <>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingUser(row);
+                }}
+                className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
+                aria-label={`Edit ${row.firstName || 'record'}`}
+              >
+                <Pencil className="h-3 w-3" />
+                <span>Edit</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setArchivingUser(row);
+                }}
+                className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
+                aria-label={`Archive ${row.firstName || 'record'}`}
+              >
+                <Archive className="h-3 w-3" />
+                <span>Archive</span>
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={restoringUserId === row.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRestoreUser(row);
+              }}
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors"
+              aria-label={`Restore ${row.firstName || 'record'}`}
+            >
+              {restoringUserId === row.id ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3 w-3" />
+              )}
+              <span>Restore</span>
+            </button>
+          )}
+          <div className="flex items-center justify-center p-1" aria-hidden="true">
+            <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" />
+          </div>
         </div>
       )
     }
@@ -743,7 +1077,12 @@ export default function UserLedger() {
     { key: 'Removed', label: 'Removed', count: removedCount }
   ];
 
-  const listResetKey = [statusTab, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, filterClub, sortPreset].join('|');
+  const directoryViewTabs = [
+    { key: 'active', label: 'Active Directory', count: liveUserLedger.length },
+    { key: 'archived', label: 'Archive', count: archivedUserLedger.length }
+  ];
+
+  const listResetKey = [directoryView, statusTab, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, filterClub, sortPreset].join('|');
   const {
     pageItems,
     page,
@@ -756,6 +1095,7 @@ export default function UserLedger() {
 
   return (
     <AdminPageScroll>
+      <Toast />
       <PageHeader
         section="Partner Support"
         title="Users"
@@ -771,11 +1111,27 @@ export default function UserLedger() {
           </button>
         }
         footer={
-          <CountTabs
-            value={statusTab}
-            onChange={handleStatusTabSwitch}
-            tabs={statusTabs}
-          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <CountTabs
+              value={directoryView}
+              onChange={(v) => {
+                setDirectoryView(v);
+                setStatusTab('All');
+                setSearchQuery('');
+                setFilterFirstName('All');
+                setFilterLastName('All');
+                setFilterEmail('All');
+                setFilterLocation('All');
+                setFilterClub('All');
+              }}
+              tabs={directoryViewTabs}
+            />
+            <CountTabs
+              value={statusTab}
+              onChange={handleStatusTabSwitch}
+              tabs={statusTabs}
+            />
+          </div>
         }
       />
 
@@ -828,6 +1184,9 @@ export default function UserLedger() {
         loading={tableLoading}
         emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
         onOpenUser={handleOpenUser}
+        onEditUser={directoryView === 'active' ? setEditingUser : null}
+        onArchiveUser={directoryView === 'active' ? setArchivingUser : null}
+        onRestoreUser={directoryView === 'archived' ? handleRestoreUser : null}
         highlightVersion={highlightVersion}
         getRowClassName={(row) => {
           void highlightVersion;
@@ -891,16 +1250,54 @@ export default function UserLedger() {
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[var(--color-brand-secondary-muted)] text-sm font-bold tracking-tight text-[var(--color-brand-primary)] ring-1 ring-[var(--color-brand-secondary-border)]/50">
                     {initials}
                   </div>
-                  <div className="min-w-0 flex-1 pr-10">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="truncate text-base font-bold text-[var(--color-text-primary)]">
-                        {fullName}
-                      </h3>
-                      <Tag
-                        variant={isAdded ? 'added' : 'removed'}
-                        label={selectedUser.status}
-                        compact
-                      />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        <h3 className="truncate text-base font-bold text-[var(--color-text-primary)]">
+                          {fullName}
+                        </h3>
+                        <Tag
+                          variant={isAdded ? 'added' : 'removed'}
+                          label={selectedUser.status}
+                          compact
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {directoryView === 'active' ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setEditingUser(selectedUser)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors shadow-2xs"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setArchivingUser(selectedUser)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] bg-white text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors shadow-2xs"
+                            >
+                              <Archive className="w-3.5 h-3.5" />
+                              <span>Archive</span>
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={restoringUserId === selectedUser.id}
+                            onClick={() => handleRestoreUser(selectedUser)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] bg-white text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors shadow-2xs"
+                          >
+                            {restoringUserId === selectedUser.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <RotateCcw className="w-3.5 h-3.5" />
+                            )}
+                            <span>Restore</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <p className="mt-0.5 truncate font-mono text-xs text-[var(--color-text-secondary)]">
                       {personEmail}
@@ -1006,6 +1403,59 @@ export default function UserLedger() {
           );
         })()}
       </Drawer>
+
+      {/* Archive Confirmation Modal */}
+      {archivingUser && (
+        <Modal
+          isOpen={Boolean(archivingUser)}
+          onClose={() => setArchivingUser(null)}
+          title="Archive Directory Record"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-text-secondary)]">
+              Are you sure you want to archive{' '}
+              <strong className="font-semibold text-[var(--color-text-primary)]">
+                {archivingUser.firstName} {archivingUser.lastName}
+              </strong>
+              ?
+            </p>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              Archiving removes this person from active Directory views and exports.
+              Their historical record will be preserved and can be restored anytime from the Archive.
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setArchivingUser(null)}
+                className="rounded-md border border-[var(--color-border-default)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={archiveLoading}
+                onClick={() => handleConfirmArchive(archivingUser)}
+                className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-brand-primary)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50"
+              >
+                {archiveLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Archive className="h-3.5 w-3.5" />
+                )}
+                <span>Archive Record</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Edit Person Modal */}
+      <EditPersonModal
+        isOpen={editingUser !== null}
+        onClose={() => setEditingUser(null)}
+        user={editingUser}
+        onSave={handleSaveEditUser}
+      />
     </AdminPageScroll>
   );
 }

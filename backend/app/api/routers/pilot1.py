@@ -71,6 +71,7 @@ from app.manager_request_tags import (
     TAG_VERIFIED,
 )
 from app.directory_person_match import (
+    archived_snapshot_rows,
     find_roster_person,
     roster_match_candidates,
     removed_snapshot_rows,
@@ -255,6 +256,103 @@ def get_people(
         get_partner_or_404(db, partner_id)
     rows = roster_snapshot_rows(db, limit=2000, partner_id=partner_id)
     return directory_rows_to_api_dicts(db, rows)
+
+
+@router.patch("/api/persons/{person_id}", response_model=schemas.PersonOut)
+def update_person(
+    person_id: str,
+    payload: schemas.PersonUpdateIn,
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    req = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == person_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Directory record not found")
+
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+        if req.partner_id and req.partner_id != partner_id:
+            raise HTTPException(status_code=404, detail="Directory record not found for partner")
+
+    req.person_first_name = payload.firstName
+    req.person_last_name = payload.lastName
+    req.person_email = payload.email
+    req.person_location = payload.location
+
+    if req.intake_persons and isinstance(req.intake_persons, dict):
+        updated_dict = dict(req.intake_persons)
+        new_snapshot = {
+            "firstName": payload.firstName,
+            "lastName": payload.lastName,
+            "email": payload.email,
+            "location": payload.location,
+        }
+        for key in ("partner", "autoMail", "admin"):
+            if key in updated_dict and isinstance(updated_dict[key], dict):
+                updated_dict[key] = {**updated_dict[key], **new_snapshot}
+        req.intake_persons = updated_dict
+
+    db.commit()
+    db.refresh(req)
+    return directory_rows_to_api_dicts(db, [req])[0]
+
+
+@router.get("/api/persons/archived", response_model=List[schemas.PersonOut])
+def get_archived_people(
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+    rows = archived_snapshot_rows(db, limit=2000, partner_id=partner_id)
+    return directory_rows_to_api_dicts(db, rows)
+
+
+@router.post("/api/persons/{person_id}/archive", response_model=schemas.PersonOut)
+def archive_person(
+    person_id: str,
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    req = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == person_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Directory record not found")
+
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+        if req.partner_id and req.partner_id != partner_id:
+            raise HTTPException(status_code=404, detail="Directory record not found for partner")
+
+    req.archived_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(req)
+    return directory_rows_to_api_dicts(db, [req])[0]
+
+
+@router.post("/api/persons/{person_id}/restore", response_model=schemas.PersonOut)
+def restore_person(
+    person_id: str,
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    req = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == person_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Directory record not found")
+
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+        if req.partner_id and req.partner_id != partner_id:
+            raise HTTPException(status_code=404, detail="Directory record not found for partner")
+
+    req.archived_at = None
+    db.commit()
+    db.refresh(req)
+    return directory_rows_to_api_dicts(db, [req])[0]
+
 
 def _visible_new_requests_query(db: Session):
     return (

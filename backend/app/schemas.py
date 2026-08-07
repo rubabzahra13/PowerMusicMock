@@ -73,6 +73,29 @@ class PersonInfo(BaseModel):
         return normalize_email(value)
 
 
+class PersonUpdateIn(BaseModel):
+    firstName: str = Field(min_length=1, max_length=100)
+    lastName: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=3, max_length=254)
+    location: str = Field(min_length=1, max_length=200)
+
+    @field_validator("firstName", "lastName", mode="before")
+    @classmethod
+    def clean_person_name(cls, value, info):
+        label = "User first name" if info.field_name == "firstName" else "User last name"
+        return normalize_roster_person_name(value, field_name=label)
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def clean_person_location(cls, value):
+        return normalize_roster_person_location(value, field_name="User location")
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_person_email(cls, value):
+        return normalize_email(value)
+
+
 class RequestIn(BaseModel):
     submittedBy: SubmittedBy
     person: PersonInfo
@@ -279,6 +302,7 @@ class PersonOut(BaseModel):
     managerNotes: Optional[str] = None
     adminNotes: Optional[str] = None
     notes: Optional[str] = None  # alias for managerNotes (legacy)
+    archivedAt: Optional[datetime] = None
     requestHistory: List[PersonHistoryEventOut] = []
     partnerId: Optional[str] = None
 

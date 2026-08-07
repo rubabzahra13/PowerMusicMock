@@ -18,11 +18,14 @@ def handled_directory_rows(
     db: Session,
     *,
     partner_id: Optional[str] = None,
+    include_archived: bool = False,
 ) -> List[models.ManagerRequest]:
     query = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
         models.ManagerRequest.outcome.isnot(None),
     )
+    if not include_archived:
+        query = query.filter(models.ManagerRequest.archived_at.is_(None))
     if partner_id:
         query = query.filter(models.ManagerRequest.partner_id == partner_id)
     return query.order_by(models.ManagerRequest.handled_at.desc()).all()
@@ -107,6 +110,7 @@ def _roster_sql_candidates(
     query = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
         models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.archived_at.is_(None),
         or_(*clauses),
     )
     if partner_id:
@@ -138,6 +142,7 @@ def _probe_handled_rows(
         query = db.query(models.ManagerRequest).filter(
             models.ManagerRequest.status == "handled",
             models.ManagerRequest.outcome.isnot(None),
+            models.ManagerRequest.archived_at.is_(None),
             func.lower(models.ManagerRequest.person_email) == email,
         )
         if partner_id:
@@ -204,6 +209,7 @@ def search_roster_rows(
     query_obj = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
         models.ManagerRequest.outcome == "Added",
+        models.ManagerRequest.archived_at.is_(None),
         or_(
             models.ManagerRequest.person_first_name.ilike(pattern),
             models.ManagerRequest.person_last_name.ilike(pattern),
@@ -231,6 +237,7 @@ def roster_snapshot_rows(
     query = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
         models.ManagerRequest.outcome == "Added",
+        models.ManagerRequest.archived_at.is_(None),
     )
     if partner_id:
         query = query.filter(models.ManagerRequest.partner_id == partner_id)
@@ -248,11 +255,30 @@ def removed_snapshot_rows(
     query = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
         models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.archived_at.is_(None),
     )
     if partner_id:
         query = query.filter(models.ManagerRequest.partner_id == partner_id)
     rows = query.order_by(models.ManagerRequest.handled_at.desc()).limit(max(limit * 4, limit)).all()
     return _dedupe_current_outcome(rows, "Removed")[:limit]
+
+
+def archived_snapshot_rows(
+    db: Session,
+    *,
+    limit: int = 1000,
+    partner_id: Optional[str] = None,
+) -> List[models.ManagerRequest]:
+    """People currently archived from the directory."""
+    query = db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.archived_at.isnot(None),
+    )
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+    rows = query.order_by(models.ManagerRequest.archived_at.desc()).limit(limit).all()
+    return rows
 
 
 def active_roster_rows(db: Session, *, partner_id: Optional[str] = None) -> List[models.ManagerRequest]:

@@ -511,6 +511,7 @@ def directory_person_to_api_dict(
         "managerNotes": manager_notes,
         "adminNotes": req.admin_notes,
         "notes": manager_notes,
+        "archivedAt": req.archived_at,
         "requestHistory": request_history,
         "partnerId": getattr(req, "partner_id", None),
     }

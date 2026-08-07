@@ -178,6 +178,31 @@ export const getNewRequestsPage = (partnerId = '') => {
 };
 export const getPilot2Workspace = () => request('/api/pilot2/workspace');
 
+// Directory persons
+export const updatePerson = (id, data, partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/persons/${id}${query}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+};
+
+export const archivePerson = (id, partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/persons/${id}/archive${query}`, { method: 'POST' });
+};
+
+export const restorePerson = (id, partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/persons/${id}/restore${query}`, { method: 'POST' });
+};
+
+export const fetchArchivedPeople = (partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/persons/archived${query}`);
+};
+
+
 // Partners
 export const getPartners = () => request('/api/partners');
 export const getPartner = (id) => request(`/api/partners/${id}`);
