@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Search, Plus, SortAsc, ChevronDown, Filter, ArrowRight, Trash2
+  Search, Plus, SortAsc, ChevronDown, Filter, ArrowRight, X
 } from 'lucide-react';
 import { formatTimestampSplit, isTodayInTimeZone, isYesterdayInTimeZone } from '../utils/dateTime';
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination } from '../components/ui';
@@ -277,7 +277,18 @@ function NewRequestsMobileList({
 
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
-            <div className={`px-4 py-3 ${extraClass}`}>
+            <div className={`px-4 py-3 relative ${extraClass}`}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDismiss(row);
+                }}
+                aria-label="Dismiss request"
+                className="absolute top-2 right-2 inline-flex items-center justify-center p-1.5 text-[var(--color-text-muted)] hover:text-[#dc2626] hover:bg-red-50 rounded-md transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
               <button
                 type="button"
                 onClick={() => onOpenRequest(row)}
@@ -398,14 +409,6 @@ function NewRequestsMobileList({
               </div>
 
               <div className="mt-3 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => onDismiss(row)}
-                  aria-label="Dismiss request"
-                  className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-md border border-[var(--color-border-default)] text-[var(--color-text-muted)] transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                </button>
                 <button
                   type="button"
                   onClick={() => onMarkAs(row)}
@@ -1226,21 +1229,13 @@ export default function Requests() {
     {
       key: 'markAs',
       label: 'Mark as',
-      width: '7.5rem',
-      minWidth: '7.5rem',
+      width: '5rem',
+      minWidth: '5rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'text-center align-middle whitespace-nowrap pl-1 pr-0 py-2',
       render: (_, row) => (
-        <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => setConfirmDismissRequest({ request: row })}
-            aria-label="Dismiss request"
-            className="inline-flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white text-[var(--color-text-muted)] shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+        <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
             onClick={() => {
@@ -1268,10 +1263,21 @@ export default function Requests() {
       minWidth: '1.5rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap pl-0 pr-1 py-2',
-      render: () => (
-        <div className="flex items-center justify-center" aria-hidden="true">
-          <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" />
+      cellClassName: 'text-center align-middle whitespace-nowrap pl-0 pr-1 py-2 relative',
+      render: (_, row) => (
+        <div className="flex h-full flex-col items-center justify-center pt-5 pb-1">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmDismissRequest({ request: row });
+            }}
+            aria-label="Dismiss request"
+            className="absolute top-1 right-1 inline-flex items-center justify-center p-1 text-[var(--color-text-muted)] hover:text-[#dc2626] transition-colors rounded hover:bg-red-50"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" aria-hidden="true" />
         </div>
       )
     },
