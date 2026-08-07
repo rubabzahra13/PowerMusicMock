@@ -46,4 +46,4 @@ def allocate_request_ids(db: Session, count: int) -> List[str]:
 
 def request_id_numeric_desc():
     """Sort req-NNN ids newest-first (req-027 before req-001)."""
-    return cast(func.nullif(func.substring(models.ManagerRequest.id, 5), ""), Integer).desc()
+    return cast(func.nullif(func.substring(models.ManagerRequest.id, r"^req-(\d+)$"), ""), Integer).desc().nulls_last()
