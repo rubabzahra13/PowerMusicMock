@@ -49,6 +49,12 @@ export default function RequestDetail() {
 
     const match = requests.find((row) => row.id === requestId) || null;
     if (match) {
+      // Guard: if this request belongs to a duplicate group, redirect to the
+      // group resolution page so it cannot be mark-handled as a simple request.
+      if (match.duplicateGroupId) {
+        navigate(`/new-requests/group/${encodeURIComponent(match.duplicateGroupId)}`, { replace: true });
+        return;
+      }
       setRequest(match);
       setNotFound(false);
       markRequestViewed(match.id);
@@ -57,7 +63,7 @@ export default function RequestDetail() {
       setNotFound(true);
     }
     setLoading(false);
-  }, [requestId]);
+  }, [requestId, navigate]);
 
   useEffect(() => {
     setLoading(true);

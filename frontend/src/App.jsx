@@ -8,6 +8,7 @@ import Home from './pages/Home';
 import ManagerForm from './pages/ManagerForm';
 import NewRequests from './pages/NewRequests';
 import RequestDetail from './pages/RequestDetail';
+import GroupDetail from './pages/GroupDetail';
 import Directory from './pages/Directory';
 import PartnerSettings from './pages/PartnerSettings';
 import AdminLogin from './pages/AdminLogin';
@@ -49,6 +50,7 @@ export default function App() {
               <Route element={<AdminShellLayout />}>
                 <Route path="/" element={<Home />} />
                 <Route path="/new-requests" element={<NewRequests />} />
+                <Route path="/new-requests/group/:groupId" element={<GroupDetail />} />
                 <Route path="/new-requests/:requestId" element={<RequestDetail />} />
                 <Route path="/directory" element={<Directory />} />
                 <Route path="/partner-settings" element={<PartnerSettings />} />

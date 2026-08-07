@@ -495,7 +495,11 @@ export default function Requests() {
   const handleOpenRequest = (row) => {
     markRequestViewed(row.id);
     bumpHighlights();
-    navigate(`/new-requests/${encodeURIComponent(row.id)}`);
+    if (row.duplicateGroupId) {
+      navigate(`/new-requests/group/${encodeURIComponent(row.duplicateGroupId)}`);
+    } else {
+      navigate(`/new-requests/${encodeURIComponent(row.id)}`);
+    }
   };
 
   useEffect(() => {
@@ -745,7 +749,9 @@ export default function Requests() {
         filterClub === 'All' || req.submittedBy?.club === filterClub;
       const tags = req.tags || [];
       const matchesSentVia = matchesSentViaFilter(tags, filterSentVia);
-      const needsReview = hasAnyDataDiffs(req.intakeMatch, req.directoryMatch, req.adminPerson);
+      const needsReview =
+        req.needsReview === true ||
+        hasAnyDataDiffs(req.intakeMatch, req.directoryMatch, req.adminPerson);
       const matchesNeedsReview =
         filterNeedsReview === 'All' ||
         (filterNeedsReview === 'Yes' && needsReview) ||
@@ -1171,10 +1177,12 @@ export default function Requests() {
           directoryMatch={row.directoryMatch}
           directory={liveDirectory}
           requestPerson={row.person}
+          needsReview={row.needsReview}
+          duplicateGroupId={row.duplicateGroupId}
           variant="table"
           onViewDetails={() => handleOpenRequest(row)}
         />
-      )
+      ),
     },
     {
       key: 'markAs',
@@ -1188,7 +1196,13 @@ export default function Requests() {
         <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
-            onClick={() => setConfirmActionRequest({ request: row, adminNote: '' })}
+            onClick={() => {
+              if (row.duplicateGroupId) {
+                handleOpenRequest(row);
+              } else {
+                setConfirmActionRequest({ request: row, adminNote: '' });
+              }
+            }}
             className={`min-w-[4.75rem] w-[4.75rem] text-center px-1.5 py-1.5 text-xs font-semibold rounded-md border transition-all cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.12)] active:translate-y-px active:shadow-none shrink-0 ${
               row.action === 'Add'
                 ? 'bg-[#16a34a] text-white border-[#15803d] hover:bg-[#15803d]'
@@ -1198,7 +1212,7 @@ export default function Requests() {
             {row.action === 'Add' ? 'Added' : 'Removed'}
           </button>
         </div>
-      )
+      ),
     },
     {
       key: 'open',

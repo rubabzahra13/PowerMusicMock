@@ -372,6 +372,8 @@ export default function RequestComparison({
   managerId = null,
   submittedBy = null,
   variant = 'table',
+  needsReview = false,
+  duplicateGroupId = null,
   onViewDetails,
   className = '',
   embedded = false,
@@ -392,6 +394,7 @@ export default function RequestComparison({
 
   const anyDiffs = hasAnyDataDiffs(intakeMatch, directoryMatch, adminPerson);
   const hasContext = hasComparisonContext(intakeMatch, directoryMatch, tags, adminPerson);
+  const showNeedsReview = Boolean(needsReview || duplicateGroupId || anyDiffs);
 
   if (variant === 'table') {
     return (
@@ -400,7 +403,7 @@ export default function RequestComparison({
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => event.stopPropagation()}
       >
-        <TableReviewCell hasDiffs={anyDiffs} onViewDetails={onViewDetails} />
+        <TableReviewCell hasDiffs={showNeedsReview} onViewDetails={onViewDetails} />
       </div>
     );
   }
