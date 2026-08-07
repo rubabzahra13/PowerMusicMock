@@ -14,7 +14,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { usePartners } from '../../context/PartnerContext';
 import { useToast } from '../ui/useToast';
-import { Modal } from '../ui';
+import { Modal, SelectDropdown } from '../ui';
 
 export default function Sidebar({
   mobileOpen = false,
@@ -188,24 +188,19 @@ export default function Sidebar({
                 Partner
               </span>
             )}
-            <div className={`rounded-lg border border-white/10 bg-white/[0.04] ${showExpanded ? 'px-3 py-2' : 'px-2 py-2'}`}>
-              <select
+            <div className={showExpanded ? 'px-3' : 'px-2'}>
+              <SelectDropdown
+                variant="inverse"
                 value={selectedPartnerId || ''}
-                onChange={(event) => setSelectedPartnerId(event.target.value)}
+                onChange={(val) => setSelectedPartnerId(val)}
                 disabled={partners.length === 0}
-                className="w-full cursor-pointer bg-transparent text-sm font-medium text-white outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                aria-label="Select partner"
-              >
-                {partners.length === 0 ? (
-                  <option value="">No partners yet</option>
-                ) : (
-                  partners.map((partner) => (
-                    <option key={partner.id} value={partner.id} className="text-[var(--color-text-primary)]">
-                      {partner.name}
-                    </option>
-                  ))
-                )}
-              </select>
+                options={
+                  partners.length === 0
+                    ? [{ value: '', label: 'No partners yet' }]
+                    : partners.map((p) => ({ value: p.id, label: p.name }))
+                }
+                className="w-full"
+              />
             </div>
           </div>
 
