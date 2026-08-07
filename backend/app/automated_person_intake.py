@@ -393,6 +393,7 @@ def try_intake_automated_person_request(
         body=email.body,
         received_at=email.received_at,
         gmail_message_id=email.gmail_message_id,
+        inbox_email=email.account_email,
     ):
         return None
 

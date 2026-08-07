@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import RequestDetailView from '../components/RequestDetailDrawer';
 import { AdminPageScroll, Modal, Toast, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { usePartners } from '../context/PartnerContext';
 import { fetchJson } from '../utils/api';
 import {
   getNewRequestsPage,
@@ -24,6 +25,7 @@ export default function RequestDetail() {
   const { requestId } = useParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { selectedPartnerId } = usePartners();
   const { toast, showToast, dismissToast } = useToast();
 
   const [request, setRequest] = useState(null);
@@ -33,6 +35,8 @@ export default function RequestDetail() {
   const [confirmAction, setConfirmAction] = useState(null);
 
   const adminDisplayName = profile?.full_name?.trim() || 'Power Music Admin';
+  const requestsCacheKey = selectedPartnerId ? `${REQUESTS_PAGE_CACHE_KEY}:${selectedPartnerId}` : REQUESTS_PAGE_CACHE_KEY;
+  const directoryCacheKey = selectedPartnerId ? `directory_persons:${selectedPartnerId}` : 'directory_persons';
 
   const goBack = useCallback(() => {
     navigate('/new-requests');
@@ -58,12 +62,12 @@ export default function RequestDetail() {
   useEffect(() => {
     setLoading(true);
     setNotFound(false);
-    loadWithCache(REQUESTS_PAGE_CACHE_KEY, getNewRequestsPage, applyPage).catch((err) => {
+    loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), applyPage).catch((err) => {
       console.error(err);
       setLoading(false);
       setNotFound(true);
     });
-  }, [applyPage]);
+  }, [applyPage, requestsCacheKey, selectedPartnerId]);
 
   const completeRequest = async (req, adminNote = '') => {
     const personName = formatPersonName(req.person);
@@ -74,7 +78,7 @@ export default function RequestDetail() {
     removeRequestHighlight(req.id);
 
     const cached = await new Promise((resolve) => {
-      loadWithCache(REQUESTS_PAGE_CACHE_KEY, getNewRequestsPage, (data) => resolve(data)).catch(() => resolve(null));
+      loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data) => resolve(data)).catch(() => resolve(null));
     });
 
     const currentRequests = Array.isArray(cached?.requests) ? cached.requests : [];
@@ -92,6 +96,7 @@ export default function RequestDetail() {
                 dateAdded: handledAt,
                 handledBy: adminDisplayName,
                 adminNotes: adminNote || '',
+                partnerId: req.partnerId || p.partnerId || null,
               }
             : p,
         )
@@ -115,12 +120,13 @@ export default function RequestDetail() {
             managerNotes: req.notes || '',
             adminNotes: adminNote || '',
             notes: req.notes || '',
+            partnerId: req.partnerId || null,
           },
           ...currentDirectory,
         ];
 
-    patchCache(REQUESTS_PAGE_CACHE_KEY, { requests: nextRequests, persons: nextDirectory });
-    writeCache('directory_persons', nextDirectory);
+    patchCache(requestsCacheKey, { requests: nextRequests, persons: nextDirectory });
+    writeCache(directoryCacheKey, nextDirectory);
     markDirectoryPersonHighlight(req.person.email);
     sessionStorage.setItem('pm_directory_pending_tab', outcome === 'Added' ? 'Added' : 'Removed');
 
@@ -136,7 +142,7 @@ export default function RequestDetail() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adminNote: adminNote || null }),
       });
-      refreshCache('directory_persons', () => fetchJson('/api/persons')).catch(() => {});
+      refreshCache(directoryCacheKey, () => fetchJson(`/api/persons${selectedPartnerId ? `?partner_id=${encodeURIComponent(selectedPartnerId)}` : ''}`)).catch(() => {});
     } catch (err) {
       console.error(err);
       showToast('Marked locally, but the server update failed. Refresh to confirm.', 'error');

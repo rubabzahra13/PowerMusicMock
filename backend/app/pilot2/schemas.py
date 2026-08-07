@@ -16,6 +16,7 @@ class InboxOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str
+    partnerId: Optional[str] = Field(default=None, validation_alias="partner_id")
     email: str
     title: str
     status: str
@@ -31,10 +32,12 @@ class InboxOut(BaseModel):
 class InboxConnectIn(BaseModel):
     title: str
     email: str = ""
+    partnerId: Optional[str] = None
 
 
 class InboxUpdateIn(BaseModel):
     title: str
+    partnerId: Optional[str] = None
 
 
 class IgnoreRuleOut(BaseModel):

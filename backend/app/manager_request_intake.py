@@ -59,12 +59,13 @@ def build_tags(
     person: schemas.PersonInfo,
     *,
     action: str,
+    partner_id: Optional[str] = None,
     extra_tags: Optional[List[str]] = None,
 ) -> List[str]:
     return merge_tags(
         extra_tags,
-        request_duplicate_tags_for_person(db, person, action=action),
-        duplicate_tags_for_person(db, person, action=action),
+        request_duplicate_tags_for_person(db, person, action=action, partner_id=partner_id),
+        duplicate_tags_for_person(db, person, action=action, partner_id=partner_id),
     )
 
 
@@ -72,6 +73,7 @@ def request_duplicate_tags_for_person(
     db: Session,
     person: schemas.PersonInfo,
     action: str,
+    partner_id: Optional[str] = None,
 ) -> List[str]:
     first = (person.firstName or "").strip().lower()
     last = (person.lastName or "").strip().lower()
@@ -84,11 +86,11 @@ def request_duplicate_tags_for_person(
     confirmed = False
     potential = False
 
-    for row in (
-        db.query(models.ManagerRequest)
-        .filter(models.ManagerRequest.action == action)
-        .all()
-    ):
+    query = db.query(models.ManagerRequest).filter(models.ManagerRequest.action == action)
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+
+    for row in query.all():
         row_first = (row.person_first_name or "").strip().lower()
         row_last = (row.person_last_name or "").strip().lower()
         row_email = (row.person_email or "").strip().lower()
@@ -138,7 +140,7 @@ def attach_auto_mail_to_request(
     req.tags = merge_tags(
         req.tags,
         [TAG_AUTO_MAIL],
-        duplicate_tags_for_person(db, person, action=req.action),
+        duplicate_tags_for_person(db, person, action=req.action, partner_id=req.partner_id),
     )
     sync_display_person(req)
     return req
@@ -175,7 +177,7 @@ def verify_unverified_request(
     req.tags = merge_tags(
         base,
         MANAGER_SUBMIT_TAGS,
-        duplicate_tags_for_person(db, person, action=req.action),
+        duplicate_tags_for_person(db, person, action=req.action, partner_id=req.partner_id),
     )
     sync_display_person(req)
     return req
@@ -214,7 +216,7 @@ def attach_partner_submission_to_request(
         req.tags = merge_tags(
             req.tags,
             [TAG_SENT_BY_ADMIN],
-            duplicate_tags_for_person(db, person, action=req.action),
+            duplicate_tags_for_person(db, person, action=req.action, partner_id=req.partner_id),
         )
         return req
 
@@ -231,7 +233,7 @@ def attach_partner_submission_to_request(
     req.tags = merge_tags(
         base,
         extra,
-        duplicate_tags_for_person(db, person, action=req.action),
+        duplicate_tags_for_person(db, person, action=req.action, partner_id=req.partner_id),
     )
     sync_display_person(req)
     return req
@@ -244,6 +246,7 @@ def intake_manager_submission(
     action: str,
     manager_id: Optional[str] = None,
     manager_notes: Optional[str] = None,
+    partner_id: Optional[str] = None,
     new_id: Optional[str] = None,
     submitted_by: Optional[schemas.SubmittedBy] = None,
 ) -> models.ManagerRequest:
@@ -254,6 +257,7 @@ def intake_manager_submission(
         action=action,
         manager_notes=manager_notes,
         manager_id=manager_id,
+        partner_id=partner_id,
         extra_tags=MANAGER_SUBMIT_TAGS,
         new_id=new_id,
     )
@@ -281,8 +285,19 @@ def intake_automated_email_request(
     from_email: Optional[str] = None,
     subject: Optional[str] = None,
     inbox_email: Optional[str] = None,
+    partner_id: Optional[str] = None,
 ) -> models.ManagerRequest:
     """PureGym auto email — attach to verified row or store as unverified (hidden)."""
+    resolved_partner_id = partner_id
+    if resolved_partner_id is None and from_email:
+        from app.partner_allowlists import resolve_partner_for_automated_email
+
+        resolved_partner_id = resolve_partner_for_automated_email(
+            db,
+            from_email=from_email,
+            inbox_email=inbox_email,
+        )
+
     if source_gmail_message_id:
         existing = (
             db.query(models.ManagerRequest)
@@ -298,6 +313,7 @@ def intake_automated_email_request(
         action=action,
         manager_notes=None,
         manager_id=None,
+        partner_id=resolved_partner_id,
         extra_tags=[TAG_UNVERIFIED, TAG_AUTO_MAIL],
         received_at=received_at,
         source_email_id=source_email_id,
@@ -322,6 +338,7 @@ def create_manager_request(
     manager_notes: Optional[str] = None,
     manager_user_id: Optional[str] = None,
     manager_id: Optional[str] = None,
+    partner_id: Optional[str] = None,
     extra_tags: Optional[List[str]] = None,
     new_id: Optional[str] = None,
     received_at: Optional[datetime] = None,
@@ -355,13 +372,14 @@ def create_manager_request(
         id=new_id or allocate_request_ids(db, 1)[0],
         received_at=received_at or datetime.now(timezone.utc),
         manager_id=resolved_manager_id,
+        partner_id=partner_id,
         person_first_name=person.firstName,
         person_last_name=person.lastName,
         person_email=person.email,
         person_location=person.location or "",
         action=action,
         manager_notes=manager_notes,
-        tags=build_tags(db, person, action=action, extra_tags=extra_tags),
+        tags=build_tags(db, person, action=action, partner_id=partner_id, extra_tags=extra_tags),
         status="new",
         source_email_id=source_email_id,
         source_gmail_message_id=source_gmail_message_id,
@@ -385,6 +403,7 @@ def create_fresh_manager_request(
     manager_notes: Optional[str] = None,
     manager_user_id: Optional[str] = None,
     manager_id: Optional[str] = None,
+    partner_id: Optional[str] = None,
     extra_tags: Optional[List[str]] = None,
     new_id: Optional[str] = None,
     received_at: Optional[datetime] = None,
@@ -401,6 +420,7 @@ def create_fresh_manager_request(
         manager_notes=manager_notes,
         manager_user_id=manager_user_id,
         manager_id=manager_id,
+        partner_id=partner_id,
         extra_tags=extra_tags,
         new_id=new_id,
         received_at=received_at,
@@ -416,6 +436,7 @@ def create_handled_manual_request(
     submitted_by: Optional[schemas.SubmittedBy] = None,
     manager_notes: Optional[str] = None,
     admin_id: Optional[str] = None,
+    partner_id: Optional[str] = None,
     new_id: Optional[str] = None,
     outcome: Optional[str] = None,
 ) -> models.ManagerRequest:
@@ -425,6 +446,7 @@ def create_handled_manual_request(
         action=action,
         manager_notes=manager_notes,
         extra_tags=MANAGER_SUBMIT_TAGS,
+        partner_id=partner_id,
         new_id=new_id,
     )
     row.status = "handled"

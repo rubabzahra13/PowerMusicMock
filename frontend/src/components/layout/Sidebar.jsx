@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { usePartners } from '../../context/PartnerContext';
 import { useToast } from '../ui/useToast';
 import { Modal } from '../ui';
 
@@ -22,6 +23,7 @@ export default function Sidebar({
   onExpandedChange,
 }) {
   const { logout, user } = useAuth();
+  const { partners, selectedPartnerId, setSelectedPartnerId } = usePartners();
   const { clearToasts } = useToast();
   const navigate = useNavigate();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -178,6 +180,33 @@ export default function Sidebar({
               <Home className="h-4 w-4 shrink-0" />
               {showExpanded ? <span>Overview</span> : <Tooltip label="Overview" />}
             </NavLink>
+          </div>
+
+          <div className="space-y-2">
+            {showExpanded && (
+              <span className="mb-1 block px-3 text-[11px] font-semibold uppercase tracking-wider text-white/40">
+                Partner
+              </span>
+            )}
+            <div className={`rounded-lg border border-white/10 bg-white/[0.04] ${showExpanded ? 'px-3 py-2' : 'px-2 py-2'}`}>
+              <select
+                value={selectedPartnerId || ''}
+                onChange={(event) => setSelectedPartnerId(event.target.value)}
+                disabled={partners.length === 0}
+                className="w-full cursor-pointer bg-transparent text-sm font-medium text-white outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Select partner"
+              >
+                {partners.length === 0 ? (
+                  <option value="">No partners yet</option>
+                ) : (
+                  partners.map((partner) => (
+                    <option key={partner.id} value={partner.id} className="text-[var(--color-text-primary)]">
+                      {partner.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
           </div>
 
           <div className="space-y-1">

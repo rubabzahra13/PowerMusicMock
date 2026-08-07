@@ -52,12 +52,17 @@ from app.dashboard_insights import build_dashboard_insights
 from app.partner_allowlists import (
     assert_manager_email_allowed,
     create_automated_source,
+    create_partner,
     create_manager_domain,
     delete_automated_source,
     delete_manager_domain,
+    get_partner_or_404,
     list_automated_sources,
+    list_partners,
     list_manager_domain_strings,
     list_manager_domains,
+    resolve_partner_for_manager_email,
+    update_partner_name,
 )
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
@@ -110,6 +115,7 @@ def _person_search_row(row: models.ManagerRequest) -> dict:
         "location": row.person_location,
         "status": row.outcome,
         "dateAdded": row.handled_at,
+        "partnerId": getattr(row, "partner_id", None),
     }
 
 
@@ -123,6 +129,7 @@ def _duplicate_response(row: models.ManagerRequest) -> dict:
         "status": row.outcome,
         "dateAdded": row.handled_at,
         "location": row.person_location,
+        "partnerId": getattr(row, "partner_id", None),
     }
 
 
@@ -136,6 +143,7 @@ def _no_duplicate_response() -> dict:
         "status": None,
         "dateAdded": None,
         "location": None,
+        "partnerId": None,
     }
 
 
@@ -146,6 +154,7 @@ def _find_duplicate_person(
     first_name: str,
     last_name: str,
     location: str,
+    partner_id: Optional[str] = None,
 ) -> models.ManagerRequest | None:
     probe = schemas.PersonInfo(
         firstName=first_name,
@@ -153,7 +162,7 @@ def _find_duplicate_person(
         email=email,
         location=location,
     )
-    return find_roster_person(db, probe)
+    return find_roster_person(db, probe, partner_id=partner_id)
 
 
 def _find_related_people(
@@ -163,6 +172,7 @@ def _find_related_people(
     first_name: str,
     last_name: str,
     location: str,
+    partner_id: Optional[str] = None,
 ) -> list[tuple[models.ManagerRequest, set[str]]]:
     probe = schemas.PersonInfo(
         firstName=first_name,
@@ -170,7 +180,7 @@ def _find_related_people(
         email=email,
         location=location,
     )
-    return [(row, {"Match"}) for row in roster_match_candidates(db, probe)]
+    return [(row, {"Match"}) for row in roster_match_candidates(db, probe, partner_id=partner_id)]
 
 
 def _related_person_candidates(
@@ -180,6 +190,7 @@ def _related_person_candidates(
     first_name: str,
     last_name: str,
     location: str,
+    partner_id: Optional[str] = None,
     limit: int = 10,
 ) -> list[dict]:
     related = _find_related_people(
@@ -188,6 +199,7 @@ def _related_person_candidates(
         first_name=first_name,
         last_name=last_name,
         location=location,
+        partner_id=partner_id,
     )
     rows = []
     for person, reasons in related[:limit]:
@@ -207,8 +219,21 @@ def _form_has_match_criteria(email: str, first_name: str, last_name: str, locati
     return False
 
 
-def _search_people(db: Session, query: str, *, limit: int) -> list[models.ManagerRequest]:
-    return search_roster_rows(db, query, limit=limit)
+def _search_people(
+    db: Session,
+    query: str,
+    *,
+    limit: int,
+    partner_id: Optional[str] = None,
+) -> list[models.ManagerRequest]:
+    return search_roster_rows(db, query, limit=limit, partner_id=partner_id)
+
+
+def _manager_partner_id(db: Session, manager_email: str) -> str:
+    partner_id = resolve_partner_for_manager_email(db, manager_email)
+    if not partner_id:
+        raise HTTPException(status_code=409, detail="Manager account is not assigned to a partner.")
+    return partner_id
 
 @router.get("/api/requests", response_model=List[schemas.RequestOut])
 def get_requests(db: Session = Depends(get_db), _admin=Depends(require_admin)):
@@ -221,8 +246,14 @@ def get_requests(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     return requests_to_api_dicts(db, db_requests)
 
 @router.get("/api/persons", response_model=List[schemas.PersonOut])
-def get_people(db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    rows = roster_snapshot_rows(db, limit=2000)
+def get_people(
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+    rows = roster_snapshot_rows(db, limit=2000, partner_id=partner_id)
     return directory_rows_to_api_dicts(db, rows)
 
 def _visible_new_requests_query(db: Session):
@@ -273,14 +304,14 @@ def get_activity(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     return list_partner_activity(db, limit=10)
 
 
-def _assert_manager_submitter(submitted_by: schemas.SubmittedBy, manager, db: Session) -> None:
+def _assert_manager_submitter(submitted_by: schemas.SubmittedBy, manager, db: Session) -> str:
     sub_email = (submitted_by.email or "").strip()
     if auth_is_required() and sub_email.lower() != manager.email.lower():
         raise HTTPException(
             status_code=403,
             detail="Submitter email must match your signed-in account.",
         )
-    assert_manager_email_allowed(db, sub_email or manager.email)
+    return assert_manager_email_allowed(db, sub_email or manager.email)
 
 
 def _manager_id_for_submitter(
@@ -301,6 +332,7 @@ def _create_manager_request_row(
     person: schemas.PersonInfo,
     action: str,
     notes: Optional[str],
+    partner_id: Optional[str] = None,
     new_id: Optional[str] = None,
     manager_user_id: Optional[str] = None,
 ) -> models.ManagerRequest:
@@ -310,6 +342,7 @@ def _create_manager_request_row(
         action=action,
         manager_notes=notes,
         manager_id=_manager_id_for_submitter(db, submitted_by, manager_user_id=manager_user_id),
+        partner_id=partner_id,
         new_id=new_id,
         submitted_by=submitted_by,
     )
@@ -321,7 +354,7 @@ def create_request(
     db: Session = Depends(get_db),
     manager=Depends(_limit_submit),
 ):
-    _assert_manager_submitter(req_in.submittedBy, manager, db)
+    partner_id = _assert_manager_submitter(req_in.submittedBy, manager, db)
 
     new_request = _create_manager_request_row(
         db,
@@ -329,6 +362,7 @@ def create_request(
         person=req_in.person,
         action=req_in.action,
         notes=req_in.notes,
+        partner_id=partner_id,
         manager_user_id=manager.id,
     )
     increment_manager_request_stats(db, new_request)
@@ -351,7 +385,8 @@ def create_requests_batch(
     db: Session = Depends(get_db),
     manager=Depends(_limit_submit),
 ):
-    _assert_manager_submitter(req_in.submittedBy, manager, db)
+    partner_id = _assert_manager_submitter(req_in.submittedBy, manager, db)
+    req_in = req_in.model_copy(update={"partnerId": partner_id})
 
     job = enqueue_manager_batch(db, manager_id=manager.id, req_in=req_in)
     invalidate_manager_request_summary(manager.id)
@@ -400,8 +435,17 @@ def process_manager_submission_jobs(
     return stats
 
 @router.get("/api/admin/requests", response_model=List[schemas.RequestOut])
-def get_admin_requests(status: Optional[str] = None, db: Session = Depends(get_db), _admin=Depends(require_admin)):
+def get_admin_requests(
+    status: Optional[str] = None,
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    if partner_id:
+        get_partner_or_404(db, partner_id)
     query = db.query(models.ManagerRequest)
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
     if status:
         query = query.filter(models.ManagerRequest.status == status)
     
@@ -414,14 +458,19 @@ def get_admin_requests(status: Optional[str] = None, db: Session = Depends(get_d
     return requests_to_api_dicts(db, db_requests)
 
 @router.get("/api/admin/requests/page", response_model=schemas.NewRequestsPageOut)
-def get_new_requests_page(db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    db_requests = (
-        _visible_new_requests_query(db)
-        .order_by(request_id_numeric_desc())
-        .all()
-    )
+def get_new_requests_page(
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+    query = _visible_new_requests_query(db)
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+    db_requests = query.order_by(request_id_numeric_desc()).all()
     hydrate_request_display(db_requests)
-    directory = roster_snapshot_rows(db, limit=2000)
+    directory = roster_snapshot_rows(db, limit=2000, partner_id=partner_id)
     return {
         "requests": requests_to_api_dicts(db, db_requests),
         "persons": directory_rows_to_api_dicts(db, directory),
@@ -483,6 +532,7 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
                 submitted_by=manual_submitter,
                 manager_notes=person_in.notes or req_in.notes,
                 admin_id=admin.id,
+                partner_id=req_in.partnerId,
             )
             for person_in in req_in.people
         ]
@@ -495,6 +545,7 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
                 person=person_in,
                 action=req_in.action,
                 notes=person_in.notes or req_in.notes,
+                partner_id=req_in.partnerId,
                 new_id=None,
             )
             for person_in in req_in.people
@@ -514,9 +565,10 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
 def check_person_duplicate(
     payload: schemas.DuplicateCheckIn,
     db: Session = Depends(get_db),
-    _manager=Depends(_limit_duplicate),
+    manager=Depends(_limit_duplicate),
 ):
     """Manager-portal helper — match by email, name, or name + location."""
+    partner_id = _manager_partner_id(db, manager.email)
     p_email = (payload.email or "").strip().lower()
     p_first = (payload.firstName or "").strip().lower()
     p_last = (payload.lastName or "").strip().lower()
@@ -531,6 +583,7 @@ def check_person_duplicate(
         first_name=p_first,
         last_name=p_last,
         location=p_location,
+        partner_id=partner_id,
     )
     if match:
         return _duplicate_response(match)
@@ -545,9 +598,10 @@ def match_person_candidates(
     payload: schemas.DuplicateCheckIn,
     limit: int = 10,
     db: Session = Depends(get_db),
-    _manager=Depends(_limit_match),
+    manager=Depends(_limit_match),
 ):
     """All directory rows that share any person-form field (or field + location)."""
+    partner_id = _manager_partner_id(db, manager.email)
     p_email = (payload.email or "").strip().lower()
     p_first = (payload.firstName or "").strip().lower()
     p_last = (payload.lastName or "").strip().lower()
@@ -563,6 +617,7 @@ def match_person_candidates(
         first_name=p_first,
         last_name=p_last,
         location=p_location,
+        partner_id=partner_id,
         limit=capped,
     )
 
@@ -712,15 +767,16 @@ def mark_all_manager_requests_seen(
 def manager_person_directory(
     outcome: str = "Added",
     db: Session = Depends(get_db),
-    _manager=Depends(_limit_directory),
+    manager=Depends(_limit_directory),
 ):
     """Roster snapshot for instant client-side search (load in background)."""
+    partner_id = _manager_partner_id(db, manager.email)
     if outcome not in {"Added", "Removed"}:
         raise HTTPException(status_code=422, detail="outcome must be Added or Removed")
     if outcome == "Removed":
-        rows = removed_snapshot_rows(db, limit=1000)
+        rows = removed_snapshot_rows(db, limit=1000, partner_id=partner_id)
     else:
-        rows = roster_snapshot_rows(db, limit=1000)
+        rows = roster_snapshot_rows(db, limit=1000, partner_id=partner_id)
     return [_person_search_row(row) for row in rows]
 
 
@@ -729,9 +785,10 @@ def search_persons_for_manager(
     q: str = "",
     limit: int = 25,
     db: Session = Depends(get_db),
-    _manager=Depends(_limit_search),
+    manager=Depends(_limit_search),
 ):
     """Scoped search for the manager submit form — name, email, or location."""
+    partner_id = _manager_partner_id(db, manager.email)
     try:
         query = normalize_search_query(q, max_length=100).lower()
     except ValueError as exc:
@@ -740,7 +797,7 @@ def search_persons_for_manager(
         return []
 
     capped = min(max(limit, 1), 25)
-    people = _search_people(db, query, limit=capped)
+    people = _search_people(db, query, limit=capped, partner_id=partner_id)
     return [_person_search_row(person) for person in people]
 
 
@@ -757,8 +814,11 @@ def public_manager_allowed_domains(db: Session = Depends(get_db)):
 def admin_list_manager_domains(
     db: Session = Depends(get_db),
     _admin=Depends(require_admin),
+    partner_id: Optional[str] = None,
 ):
-    return list_manager_domains(db)
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+    return list_manager_domains(db, partner_id=partner_id)
 
 
 @router.post("/api/admin/manager-domains", response_model=schemas.ManagerAllowedDomainOut)
@@ -767,7 +827,10 @@ def admin_create_manager_domain(
     db: Session = Depends(get_db),
     _admin=Depends(require_admin),
 ):
-    return create_manager_domain(db, payload.domain)
+    partner_id = (payload.partnerId or "").strip()
+    if not partner_id:
+        raise HTTPException(status_code=400, detail="partnerId is required")
+    return create_manager_domain(db, payload.domain, partner_id)
 
 
 @router.delete("/api/admin/manager-domains/{domain_id}")
@@ -783,8 +846,11 @@ def admin_delete_manager_domain(
 def admin_list_automated_sources(
     db: Session = Depends(get_db),
     _admin=Depends(require_admin),
+    partner_id: Optional[str] = None,
 ):
-    return list_automated_sources(db)
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+    return list_automated_sources(db, partner_id=partner_id)
 
 
 @router.post("/api/admin/automated-sources", response_model=schemas.AutomatedRosterSourceOut)
@@ -793,7 +859,50 @@ def admin_create_automated_source(
     db: Session = Depends(get_db),
     _admin=Depends(require_admin),
 ):
-    return create_automated_source(db, payload.pattern)
+    partner_id = (payload.partnerId or "").strip()
+    if not partner_id:
+        raise HTTPException(status_code=400, detail="partnerId is required")
+    return create_automated_source(db, payload.pattern, partner_id)
+
+
+@router.get("/api/partners", response_model=List[schemas.PartnerOut])
+def list_partners_api(db: Session = Depends(get_db), _admin=Depends(require_admin)):
+    return list_partners(db)
+
+
+@router.post("/api/partners", response_model=schemas.PartnerOut)
+def create_partner_api(
+    payload: schemas.PartnerCreateIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    partner = create_partner(db, payload.name)
+    for domain in dict.fromkeys(payload.allowedDomains):
+        create_manager_domain(db, domain, partner.id)
+    for source in dict.fromkeys(payload.automatedSources):
+        create_automated_source(db, source, partner.id)
+    db.commit()
+    db.refresh(partner)
+    return partner
+
+
+@router.get("/api/partners/{partner_id}", response_model=schemas.PartnerOut)
+def get_partner_api(
+    partner_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return get_partner_or_404(db, partner_id)
+
+
+@router.patch("/api/partners/{partner_id}", response_model=schemas.PartnerOut)
+def update_partner_api(
+    partner_id: str,
+    payload: schemas.PartnerUpdateIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    return update_partner_name(db, partner_id, payload.name)
 
 
 @router.delete("/api/admin/automated-sources/{source_id}")

@@ -13,6 +13,7 @@ import PageHeader from '../components/layout/PageHeader';
 import { AdminPageScroll, Toast, useToast, CardListSkeleton, Modal } from '../components/ui';
 import { getUserTimeZoneLabel } from '../utils/dateTime';
 import { clearManagerAllowedDomainsCache } from '../utils/managerAuth';
+import { usePartners } from '../context/PartnerContext';
 import {
   clearCache,
   connectInbox,
@@ -101,9 +102,19 @@ function FeatureGroup({ title, description, children }) {
 
 export default function PartnerSettings() {
   const { showToast } = useToast();
+  const {
+    partners,
+    selectedPartner,
+    selectedPartnerId,
+    setSelectedPartnerId,
+    createPartner,
+    updatePartner,
+  } = usePartners();
 
-  const [accounts, setAccounts] = useState(() => readPmCache('inboxes') || []);
-  const [inboxesLoading, setInboxesLoading] = useState(() => !readPmCache('inboxes'));
+  const partnerLabel = selectedPartner?.name || 'No partner selected';
+
+  const [accounts, setAccounts] = useState(() => readPmCache(`inboxes:${selectedPartnerId || 'all'}`) || []);
+  const [inboxesLoading, setInboxesLoading] = useState(() => !readPmCache(`inboxes:${selectedPartnerId || 'all'}`));
   const [busyId, setBusyId] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState('');
@@ -111,18 +122,25 @@ export default function PartnerSettings() {
   const [addOpen, setAddOpen] = useState(false);
   const [addTitle, setAddTitle] = useState('');
   const [addBusy, setAddBusy] = useState(false);
+  const [partnerCreateOpen, setPartnerCreateOpen] = useState(false);
+  const [partnerCreateName, setPartnerCreateName] = useState('');
+  const [partnerCreateDomains, setPartnerCreateDomains] = useState('');
+  const [partnerCreateSources, setPartnerCreateSources] = useState('');
+  const [partnerCreateBusy, setPartnerCreateBusy] = useState(false);
 
-  const [managerDomains, setManagerDomains] = useState(() => readPmCache('manager_domains') || []);
-  const [domainsLoading, setDomainsLoading] = useState(() => !readPmCache('manager_domains'));
+  const [managerDomains, setManagerDomains] = useState(() => readPmCache(`manager_domains:${selectedPartnerId || 'all'}`) || []);
+  const [domainsLoading, setDomainsLoading] = useState(() => !readPmCache(`manager_domains:${selectedPartnerId || 'all'}`));
   const [domainInput, setDomainInput] = useState('');
   const [domainAdding, setDomainAdding] = useState(false);
   const [pendingDomainRemove, setPendingDomainRemove] = useState(null);
 
-  const [autoSources, setAutoSources] = useState(() => readPmCache('automated_sources') || []);
-  const [sourcesLoading, setSourcesLoading] = useState(() => !readPmCache('automated_sources'));
+  const [autoSources, setAutoSources] = useState(() => readPmCache(`automated_sources:${selectedPartnerId || 'all'}`) || []);
+  const [sourcesLoading, setSourcesLoading] = useState(() => !readPmCache(`automated_sources:${selectedPartnerId || 'all'}`));
   const [sourceInput, setSourceInput] = useState('');
   const [sourceAdding, setSourceAdding] = useState(false);
   const [pendingSourceRemove, setPendingSourceRemove] = useState(null);
+  const [partnerNameDraft, setPartnerNameDraft] = useState('');
+  const [partnerRenameBusy, setPartnerRenameBusy] = useState(false);
 
   const connectedAccounts = useMemo(
     () => accounts.filter((account) => account.status === 'Connected'),
@@ -135,35 +153,39 @@ export default function PartnerSettings() {
   );
   const atAccountLimit = connectedAccounts.length >= MAX_CONNECTED_INBOXES;
 
+  const inboxCacheKey = `inboxes:${selectedPartnerId || 'all'}`;
+  const domainsCacheKey = `manager_domains:${selectedPartnerId || 'all'}`;
+  const sourcesCacheKey = `automated_sources:${selectedPartnerId || 'all'}`;
+
   const refreshInboxes = useCallback(() => {
-    loadWithCache('inboxes', getInboxes, (rows) => {
+    loadWithCache(inboxCacheKey, () => getInboxes(selectedPartnerId || ''), (rows) => {
       setAccounts(rows);
       setInboxesLoading(false);
     }).catch((err) => {
       setInboxesLoading(false);
       showToast(`Could not load inboxes: ${err.message}`, 'error');
     });
-  }, [showToast]);
+  }, [inboxCacheKey, selectedPartnerId, showToast]);
 
   const refreshDomains = useCallback(() => {
-    loadWithCache('manager_domains', getManagerDomains, (rows) => {
+    loadWithCache(domainsCacheKey, () => getManagerDomains(selectedPartnerId || ''), (rows) => {
       setManagerDomains(Array.isArray(rows) ? rows : []);
       setDomainsLoading(false);
     }).catch((err) => {
       setDomainsLoading(false);
       showToast(`Could not load manager domains: ${err.message}`, 'error');
     });
-  }, [showToast]);
+  }, [domainsCacheKey, selectedPartnerId, showToast]);
 
   const refreshSources = useCallback(() => {
-    loadWithCache('automated_sources', getAutomatedSources, (rows) => {
+    loadWithCache(sourcesCacheKey, () => getAutomatedSources(selectedPartnerId || ''), (rows) => {
       setAutoSources(Array.isArray(rows) ? rows : []);
       setSourcesLoading(false);
     }).catch((err) => {
       setSourcesLoading(false);
       showToast(`Could not load automated sources: ${err.message}`, 'error');
     });
-  }, [showToast]);
+  }, [selectedPartnerId, showToast, sourcesCacheKey]);
 
   useEffect(() => {
     refreshInboxes();
@@ -172,6 +194,62 @@ export default function PartnerSettings() {
     window.addEventListener('focus', refreshInboxes);
     return () => window.removeEventListener('focus', refreshInboxes);
   }, [refreshInboxes, refreshDomains, refreshSources]);
+
+  useEffect(() => {
+    setPartnerNameDraft(selectedPartner?.name || '');
+  }, [selectedPartner?.name, selectedPartnerId]);
+
+  const handleCreatePartner = async () => {
+    const name = partnerCreateName.trim();
+    if (!name) {
+      showToast('Enter a partner name.', 'error');
+      return;
+    }
+    const allowedDomains = partnerCreateDomains
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const automatedSources = partnerCreateSources
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    setPartnerCreateBusy(true);
+    try {
+      const created = await createPartner({ name, allowedDomains, automatedSources });
+      setSelectedPartnerId(created.id);
+      setPartnerCreateOpen(false);
+      setPartnerCreateName('');
+      setPartnerCreateDomains('');
+      setPartnerCreateSources('');
+      clearCache(`inboxes:${created.id}`);
+      clearCache(`manager_domains:${created.id}`);
+      clearCache(`automated_sources:${created.id}`);
+      showToast(`Partner ${created.name} created.`, 'success');
+    } catch (err) {
+      showToast(err.message || 'Could not create partner.', 'error');
+    } finally {
+      setPartnerCreateBusy(false);
+    }
+  };
+
+  const handleRenamePartner = async () => {
+    if (!selectedPartner) return;
+    const nextName = partnerNameDraft.trim();
+    if (!nextName) {
+      showToast('Partner name cannot be empty.', 'error');
+      return;
+    }
+    setPartnerRenameBusy(true);
+    try {
+      await updatePartner(selectedPartner.id, nextName);
+      showToast('Partner renamed.', 'success');
+    } catch (err) {
+      showToast(err.message || 'Could not rename partner.', 'error');
+    } finally {
+      setPartnerRenameBusy(false);
+    }
+  };
 
   const handleAddAccount = async () => {
     const title = addTitle.trim();
@@ -185,7 +263,7 @@ export default function PartnerSettings() {
     }
     setAddBusy(true);
     try {
-      const result = await connectInbox(title);
+      const result = await connectInbox(title, '', selectedPartnerId || '');
       clearCache('pilot2_workspace');
       if (result.authUrl) {
         window.location.assign(result.authUrl);
@@ -205,7 +283,7 @@ export default function PartnerSettings() {
   const handleConnect = async (account) => {
     setBusyId(account.id);
     try {
-      const result = await connectInbox(account.title, account.email);
+      const result = await connectInbox(account.title, account.email, selectedPartnerId || '');
       clearCache('pilot2_workspace');
       if (result.authUrl) {
         window.location.assign(result.authUrl);
@@ -246,7 +324,7 @@ export default function PartnerSettings() {
       const updated = await updateInbox(renameTarget.id, title);
       setAccounts((prev) => {
         const next = prev.map((a) => (a.id === updated.id ? updated : a));
-        writeCache('inboxes', next);
+        writeCache(inboxCacheKey, next);
         return next;
       });
       showToast('Inbox renamed.', 'success');
@@ -265,7 +343,7 @@ export default function PartnerSettings() {
       await deleteInbox(deleteTarget.id);
       const next = accounts.filter((a) => a.id !== deleteTarget.id);
       setAccounts(next);
-      writeCache('inboxes', next);
+      writeCache(inboxCacheKey, next);
       clearCache('pilot2_workspace');
       showToast(`${deleteTarget.email} removed.`, 'success');
       setDeleteTarget(null);
@@ -285,10 +363,10 @@ export default function PartnerSettings() {
     }
     setDomainAdding(true);
     try {
-      const created = await createManagerDomain(value);
+      const created = await createManagerDomain(value, selectedPartnerId || '');
       setManagerDomains((prev) => {
         const next = [created, ...prev.filter((row) => row.id !== created.id)];
-        writeCache('manager_domains', next);
+        writeCache(domainsCacheKey, next);
         return next;
       });
       setDomainInput('');
@@ -307,7 +385,7 @@ export default function PartnerSettings() {
       await deleteManagerDomain(row.id);
       setManagerDomains((prev) => {
         const next = prev.filter((item) => item.id !== row.id);
-        writeCache('manager_domains', next);
+        writeCache(domainsCacheKey, next);
         return next;
       });
       clearManagerAllowedDomainsCache();
@@ -329,10 +407,10 @@ export default function PartnerSettings() {
     }
     setSourceAdding(true);
     try {
-      const created = await createAutomatedSource(value);
+      const created = await createAutomatedSource(value, selectedPartnerId || '');
       setAutoSources((prev) => {
         const next = [created, ...prev.filter((row) => row.id !== created.id)];
-        writeCache('automated_sources', next);
+        writeCache(sourcesCacheKey, next);
         return next;
       });
       setSourceInput('');
@@ -350,7 +428,7 @@ export default function PartnerSettings() {
       await deleteAutomatedSource(row.id);
       setAutoSources((prev) => {
         const next = prev.filter((item) => item.id !== row.id);
-        writeCache('automated_sources', next);
+        writeCache(sourcesCacheKey, next);
         return next;
       });
       setPendingSourceRemove(null);
@@ -371,6 +449,58 @@ export default function PartnerSettings() {
         description="Manage who can access the manager portal, and set up automated add/remove email intake."
         compact
       />
+
+      <SectionCard
+        title="Partner"
+        description="Select a partner in the sidebar. Create and rename partners here."
+        actions={(
+          <button
+            type="button"
+            onClick={() => setPartnerCreateOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-brand-primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-surface-sidebar-hover)]"
+          >
+            <Plus className="h-4 w-4" />
+            Add New Partner
+          </button>
+        )}
+      >
+        <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+          <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Current partner</p>
+            <p className="mt-1 text-lg font-semibold text-[var(--color-text-primary)]">{partnerLabel}</p>
+            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              {partners.length > 0
+                ? `${partners.length} partner${partners.length === 1 ? '' : 's'} available.`
+                : 'No partners yet. Create the first one to get started.'}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-[var(--color-border-default)] bg-white p-4">
+            <label htmlFor="partner-name" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+              Rename partner
+            </label>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <input
+                id="partner-name"
+                type="text"
+                value={partnerNameDraft}
+                onChange={(event) => setPartnerNameDraft(event.target.value)}
+                placeholder="Partner name"
+                className="h-10 min-w-0 flex-1 rounded-lg border border-[var(--color-border-default)] px-3 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
+              />
+              <button
+                type="button"
+                onClick={handleRenamePartner}
+                disabled={partnerRenameBusy || !selectedPartner}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] px-4 text-sm font-semibold text-white hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50"
+              >
+                {partnerRenameBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      </SectionCard>
 
       <FeatureGroup
         title="Manager access"
@@ -618,6 +748,68 @@ export default function PartnerSettings() {
               )}
             </SectionCard>
           </FeatureGroup>
+
+      <Modal
+        isOpen={partnerCreateOpen}
+        onClose={() => !partnerCreateBusy && setPartnerCreateOpen(false)}
+        title="Add new partner"
+        footer={(
+          <>
+            <button
+              type="button"
+              onClick={() => setPartnerCreateOpen(false)}
+              disabled={partnerCreateBusy}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium hover:bg-gray-50 disabled:opacity-40"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleCreatePartner}
+              disabled={partnerCreateBusy || !partnerCreateName.trim()}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-40"
+            >
+              {partnerCreateBusy ? 'Creating…' : 'Create partner'}
+            </button>
+          </>
+        )}
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Partner name</label>
+            <input
+              type="text"
+              value={partnerCreateName}
+              onChange={(event) => setPartnerCreateName(event.target.value)}
+              placeholder="Power Music"
+              className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Allowed domains</label>
+            <textarea
+              value={partnerCreateDomains}
+              onChange={(event) => setPartnerCreateDomains(event.target.value)}
+              placeholder="powermusic.com\n"
+              rows={3}
+              className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Automated email sources</label>
+            <textarea
+              value={partnerCreateSources}
+              onChange={(event) => setPartnerCreateSources(event.target.value)}
+              placeholder="notifications@powermusic.com\n@powermusic.com"
+              rows={3}
+              className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
+            />
+          </div>
+          <p className="text-xs text-[var(--color-text-secondary)]">
+            Connected inboxes can be added after the partner is created.
+          </p>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={addOpen}

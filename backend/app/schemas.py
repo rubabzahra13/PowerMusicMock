@@ -78,6 +78,7 @@ class RequestIn(BaseModel):
     person: PersonInfo
     action: Literal["Add", "Remove"]
     notes: Optional[str] = Field(default=None, max_length=5000)
+    partnerId: Optional[str] = None
 
     @field_validator("notes", mode="before")
     @classmethod
@@ -101,6 +102,7 @@ class ManualRequestIn(BaseModel):
     people: List[PersonInfo] = Field(min_length=1, max_length=10)
     action: Literal["Add", "Remove"]
     notes: Optional[str] = Field(default=None, max_length=5000)
+    partnerId: Optional[str] = None
 
     @field_validator("notes", mode="before")
     @classmethod
@@ -118,6 +120,7 @@ class ManagerBatchRequestIn(BaseModel):
     people: List[PersonInfo] = Field(min_length=1, max_length=10)
     action: Literal["Add", "Remove"]
     notes: Optional[str] = Field(default=None, max_length=5000)
+    partnerId: Optional[str] = None
 
     @field_validator("notes", mode="before")
     @classmethod
@@ -175,6 +178,7 @@ class RequestOut(BaseModel):
     handledBy: Optional[str] = None
     managerId: Optional[str] = None
     handledByAdminId: Optional[str] = None
+    partnerId: Optional[str] = None
     intakeMatch: Optional[RequestMatchOut] = None
     directoryMatch: Optional[DirectoryMatchOut] = None
     automatedEmail: Optional[AutomatedEmailOut] = None
@@ -209,6 +213,7 @@ class RequestOut(BaseModel):
                 "tags": data.get("tags") or [],
                 "createdBy": data.get("created_by"),
                 "status": data.get("status"),
+                "partnerId": data.get("partnerId") or data.get("partner_id"),
             }
 
         return {
@@ -233,6 +238,7 @@ class RequestOut(BaseModel):
             "tags": getattr(data, "tags", None) or [],
             "createdBy": None,
             "status": getattr(data, "status", None),
+            "partnerId": getattr(data, "partner_id", None),
         }
 
 
@@ -274,6 +280,7 @@ class PersonOut(BaseModel):
     adminNotes: Optional[str] = None
     notes: Optional[str] = None  # alias for managerNotes (legacy)
     requestHistory: List[PersonHistoryEventOut] = []
+    partnerId: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -397,6 +404,7 @@ class ManagerRequestListItemOut(BaseModel):
     outcome: Optional[str] = None
     notes: Optional[str] = None
     isUnread: bool = False
+    partnerId: Optional[str] = None
 
 
 class ManagerRequestsPageOut(BaseModel):
@@ -426,6 +434,7 @@ class DuplicateCheckIn(BaseModel):
     firstName: Optional[str] = Field(default=None, max_length=100)
     lastName: Optional[str] = Field(default=None, max_length=100)
     location: Optional[str] = Field(default=None, max_length=100)
+    partnerId: Optional[str] = None
 
     @field_validator("email", mode="before")
     @classmethod
@@ -452,6 +461,7 @@ class DuplicateCheckOut(BaseModel):
     status: Optional[str] = None
     dateAdded: Optional[datetime] = None
     location: Optional[str] = None
+    partnerId: Optional[str] = None
 
 
 class PersonSearchOut(BaseModel):
@@ -462,6 +472,7 @@ class PersonSearchOut(BaseModel):
     location: Optional[str] = None
     status: str
     dateAdded: Optional[datetime] = None
+    partnerId: Optional[str] = None
 
 
 class PersonMatchCandidateOut(PersonSearchOut):
@@ -472,12 +483,14 @@ class ManagerAllowedDomainOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str
+    partnerId: Optional[str] = Field(default=None, validation_alias="partner_id")
     domain: str
     createdAt: datetime = Field(validation_alias="created_at")
 
 
 class ManagerAllowedDomainCreateIn(BaseModel):
     domain: str
+    partnerId: Optional[str] = None
 
 
 class ManagerAllowedDomainsPublicOut(BaseModel):
@@ -488,6 +501,7 @@ class AutomatedRosterSourceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str
+    partnerId: Optional[str] = Field(default=None, validation_alias="partner_id")
     kind: str
     pattern: str
     createdAt: datetime = Field(validation_alias="created_at")
@@ -495,3 +509,23 @@ class AutomatedRosterSourceOut(BaseModel):
 
 class AutomatedRosterSourceCreateIn(BaseModel):
     pattern: str
+    partnerId: Optional[str] = None
+
+
+class PartnerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: str
+    name: str
+    createdAt: datetime = Field(validation_alias="created_at")
+    updatedAt: datetime = Field(validation_alias="updated_at")
+
+
+class PartnerCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    allowedDomains: List[str] = Field(default_factory=list, max_length=20)
+    automatedSources: List[str] = Field(default_factory=list, max_length=50)
+
+
+class PartnerUpdateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)

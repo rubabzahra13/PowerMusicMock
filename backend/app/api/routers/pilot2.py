@@ -26,9 +26,19 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/inboxes", response_model=List[schemas.InboxOut])
-def list_inboxes(db: Session = Depends(get_db), _admin=Depends(require_admin)):
+def list_inboxes(
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
     _purge_never_connected_inboxes(db)
-    return db.query(models.EmailAccount).order_by(models.EmailAccount.id).all()
+    query = db.query(models.EmailAccount)
+    if partner_id:
+        partner = db.query(models.Partner).filter(models.Partner.id == partner_id).first()
+        if partner is None:
+            raise HTTPException(status_code=404, detail="Partner not found")
+        query = query.filter(models.EmailAccount.partner_id == partner_id)
+    return query.order_by(models.EmailAccount.id).all()
 
 
 def _purge_never_connected_inboxes(db: Session) -> None:
@@ -199,10 +209,15 @@ def get_workspace(db: Session = Depends(get_db), _admin=Depends(require_admin)):
 def connect_inbox(payload: schemas.InboxConnectIn, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     title = payload.title.strip()
     email = (payload.email or "").strip().lower()
+    partner_id = (payload.partnerId or "").strip() or None
     if not title:
         raise HTTPException(status_code=400, detail="Display name cannot be empty.")
     if email and "@" not in email:
         raise HTTPException(status_code=400, detail="Enter a valid Gmail address.")
+    if partner_id:
+        partner = db.query(models.Partner).filter(models.Partner.id == partner_id).first()
+        if partner is None:
+            raise HTTPException(status_code=404, detail="Partner not found")
 
     account = None
     if email:
@@ -218,9 +233,14 @@ def connect_inbox(payload: schemas.InboxConnectIn, db: Session = Depends(get_db)
             id=account_id,
             email=email or f"__pending__{account_id}@connect.local",
             title=title,
+            partner_id=partner_id,
         )
         db.add(account)
     else:
+        if partner_id and account.partner_id and account.partner_id != partner_id:
+            raise HTTPException(status_code=409, detail="Inbox already belongs to a different partner.")
+        if partner_id and not account.partner_id:
+            account.partner_id = partner_id
         account.title = title
 
     if gmail.is_live():

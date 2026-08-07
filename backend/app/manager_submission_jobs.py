@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.manager_request_intake import intake_manager_submission, manager_id_for_email
+from app.partner_allowlists import assert_manager_email_allowed
 from app.request_display import allocate_request_ids, hydrate_request_display
 from app.manager_request_serialize import requests_to_api_dicts
 from app.manager_request_summary_cache import invalidate_manager_request_summary
@@ -44,6 +45,7 @@ def _create_manager_request_row(
     person: schemas.PersonInfo,
     action: str,
     notes: Optional[str],
+    partner_id: Optional[str] = None,
     new_id: Optional[str] = None,
     manager_user_id: Optional[str] = None,
 ) -> models.ManagerRequest:
@@ -53,6 +55,7 @@ def _create_manager_request_row(
         action=action,
         manager_notes=notes,
         manager_id=_manager_id_for_submitter(db, submitted_by, manager_user_id=manager_user_id),
+        partner_id=partner_id,
         new_id=new_id,
         submitted_by=submitted_by,
     )
@@ -84,6 +87,9 @@ def process_manager_batch_payload(
     manager_user_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     req_in = schemas.ManagerBatchRequestIn.model_validate(payload)
+    partner_id = req_in.partnerId
+    if partner_id is None:
+        partner_id = assert_manager_email_allowed(db, req_in.submittedBy.email or "")
     request_ids = allocate_request_ids(db, len(req_in.people))
     new_requests = [
         _create_manager_request_row(
@@ -92,6 +98,7 @@ def process_manager_batch_payload(
             person=person,
             action=req_in.action,
             notes=person.notes or req_in.notes,
+            partner_id=partner_id,
             new_id=request_id,
             manager_user_id=manager_user_id,
         )

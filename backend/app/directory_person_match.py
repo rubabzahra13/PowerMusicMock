@@ -14,16 +14,18 @@ from app.manager_request_tags import TAG_ALREADY_EXISTS
 from app.person_match import person_from_model, same_person
 
 
-def handled_directory_rows(db: Session) -> List[models.ManagerRequest]:
-    return (
-        db.query(models.ManagerRequest)
-        .filter(
-            models.ManagerRequest.status == "handled",
-            models.ManagerRequest.outcome.isnot(None),
-        )
-        .order_by(models.ManagerRequest.handled_at.desc())
-        .all()
+def handled_directory_rows(
+    db: Session,
+    *,
+    partner_id: Optional[str] = None,
+) -> List[models.ManagerRequest]:
+    query = db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.outcome.isnot(None),
     )
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+    return query.order_by(models.ManagerRequest.handled_at.desc()).all()
 
 
 def directory_outcome_conflicts(action: str, outcome: Optional[str]) -> bool:
@@ -55,6 +57,7 @@ def _roster_sql_candidates(
     first: str = "",
     last: str = "",
     location: str = "",
+    partner_id: Optional[str] = None,
     limit: int = 80,
 ) -> List[models.ManagerRequest]:
     """Fetch a small set of handled rows that may match a person probe."""
@@ -101,20 +104,22 @@ def _roster_sql_candidates(
     if not clauses:
         return []
 
-    return (
-        db.query(models.ManagerRequest)
-        .filter(
-            models.ManagerRequest.status == "handled",
-            models.ManagerRequest.outcome.isnot(None),
-            or_(*clauses),
-        )
-        .order_by(models.ManagerRequest.handled_at.desc())
-        .limit(limit)
-        .all()
+    query = db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.outcome.isnot(None),
+        or_(*clauses),
     )
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+    return query.order_by(models.ManagerRequest.handled_at.desc()).limit(limit).all()
 
 
-def _probe_handled_rows(db: Session, person: schemas.PersonInfo) -> List[models.ManagerRequest]:
+def _probe_handled_rows(
+    db: Session,
+    person: schemas.PersonInfo,
+    *,
+    partner_id: Optional[str] = None,
+) -> List[models.ManagerRequest]:
     """Handled rows relevant to one person for conflict and roster checks."""
     email, first, last, location = _person_probe_fields(person)
     by_id: dict[str, models.ManagerRequest] = {}
@@ -125,21 +130,19 @@ def _probe_handled_rows(db: Session, person: schemas.PersonInfo) -> List[models.
         first=first,
         last=last,
         location=location,
+        partner_id=partner_id,
     ):
         by_id[row.id] = row
 
     if email:
-        for row in (
-            db.query(models.ManagerRequest)
-            .filter(
-                models.ManagerRequest.status == "handled",
-                models.ManagerRequest.outcome.isnot(None),
-                func.lower(models.ManagerRequest.person_email) == email,
-            )
-            .order_by(models.ManagerRequest.handled_at.desc())
-            .limit(25)
-            .all()
-        ):
+        query = db.query(models.ManagerRequest).filter(
+            models.ManagerRequest.status == "handled",
+            models.ManagerRequest.outcome.isnot(None),
+            func.lower(models.ManagerRequest.person_email) == email,
+        )
+        if partner_id:
+            query = query.filter(models.ManagerRequest.partner_id == partner_id)
+        for row in query.order_by(models.ManagerRequest.handled_at.desc()).limit(25).all():
             by_id[row.id] = row
 
     return list(by_id.values())
@@ -189,70 +192,85 @@ def find_directory_conflict(
     return None
 
 
-def search_roster_rows(db: Session, query: str, *, limit: int = 25) -> List[models.ManagerRequest]:
+def search_roster_rows(
+    db: Session,
+    query: str,
+    *,
+    limit: int = 25,
+    partner_id: Optional[str] = None,
+) -> List[models.ManagerRequest]:
     """Server-side roster search — no full-table scan in Python."""
     pattern = f"%{query}%"
+    query_obj = db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.outcome == "Added",
+        or_(
+            models.ManagerRequest.person_first_name.ilike(pattern),
+            models.ManagerRequest.person_last_name.ilike(pattern),
+            models.ManagerRequest.person_email.ilike(pattern),
+            models.ManagerRequest.person_location.ilike(pattern),
+        ),
+    )
+    if partner_id:
+        query_obj = query_obj.filter(models.ManagerRequest.partner_id == partner_id)
     rows = (
-        db.query(models.ManagerRequest)
-        .filter(
-            models.ManagerRequest.status == "handled",
-            models.ManagerRequest.outcome == "Added",
-            or_(
-                models.ManagerRequest.person_first_name.ilike(pattern),
-                models.ManagerRequest.person_last_name.ilike(pattern),
-                models.ManagerRequest.person_email.ilike(pattern),
-                models.ManagerRequest.person_location.ilike(pattern),
-            ),
-        )
-        .order_by(models.ManagerRequest.handled_at.desc())
+        query_obj.order_by(models.ManagerRequest.handled_at.desc())
         .limit(max(limit * 4, limit))
         .all()
     )
     return _dedupe_latest_roster(rows)[:limit]
 
 
-def roster_snapshot_rows(db: Session, *, limit: int = 1000) -> List[models.ManagerRequest]:
+def roster_snapshot_rows(
+    db: Session,
+    *,
+    limit: int = 1000,
+    partner_id: Optional[str] = None,
+) -> List[models.ManagerRequest]:
     """Current Added roster for a one-time client snapshot (background load)."""
-    rows = (
-        db.query(models.ManagerRequest)
-        .filter(
-            models.ManagerRequest.status == "handled",
-            models.ManagerRequest.outcome == "Added",
-        )
-        .order_by(models.ManagerRequest.handled_at.desc())
-        .limit(max(limit * 2, limit))
-        .all()
+    query = db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.outcome == "Added",
     )
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+    rows = query.order_by(models.ManagerRequest.handled_at.desc()).limit(max(limit * 2, limit)).all()
     return _dedupe_latest_roster(rows)[:limit]
 
 
-def removed_snapshot_rows(db: Session, *, limit: int = 1000) -> List[models.ManagerRequest]:
+def removed_snapshot_rows(
+    db: Session,
+    *,
+    limit: int = 1000,
+    partner_id: Optional[str] = None,
+) -> List[models.ManagerRequest]:
     """People currently off the roster (latest handled state is Removed)."""
-    rows = (
-        db.query(models.ManagerRequest)
-        .filter(
-            models.ManagerRequest.status == "handled",
-            models.ManagerRequest.outcome.isnot(None),
-        )
-        .order_by(models.ManagerRequest.handled_at.desc())
-        .limit(max(limit * 4, limit))
-        .all()
+    query = db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.outcome.isnot(None),
     )
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+    rows = query.order_by(models.ManagerRequest.handled_at.desc()).limit(max(limit * 4, limit)).all()
     return _dedupe_current_outcome(rows, "Removed")[:limit]
 
 
-def active_roster_rows(db: Session) -> List[models.ManagerRequest]:
+def active_roster_rows(db: Session, *, partner_id: Optional[str] = None) -> List[models.ManagerRequest]:
     """People currently on the roster (latest handled state is Added)."""
     handled = handled_directory_rows(db)
+    if partner_id:
+        handled = [row for row in handled if row.partner_id == partner_id]
     return _dedupe_latest_roster(handled)
 
 
 def find_roster_person(
     db: Session,
     person: schemas.PersonInfo,
+    *,
+    partner_id: Optional[str] = None,
 ) -> Optional[models.ManagerRequest]:
     """Latest directory row when the person is currently Added to the roster."""
-    match = find_latest_directory_match(person, _probe_handled_rows(db, person))
+    match = find_latest_directory_match(person, _probe_handled_rows(db, person, partner_id=partner_id))
     if match and match.outcome == "Added":
         return match
     return None
@@ -263,6 +281,7 @@ def roster_match_candidates(
     person: schemas.PersonInfo,
     *,
     limit: int = 10,
+    partner_id: Optional[str] = None,
 ) -> List[models.ManagerRequest]:
     """Roster rows that match the person probe (same_person rules)."""
     email, first, last, location = _person_probe_fields(person)
@@ -272,6 +291,7 @@ def roster_match_candidates(
         first=first,
         last=last,
         location=location,
+        partner_id=partner_id,
     )
     roster = _dedupe_latest_roster(candidates)
     matches = [row for row in roster if same_person(row, person)]
@@ -294,11 +314,12 @@ def duplicate_tags_for_person(
     person: schemas.PersonInfo,
     *,
     action: str,
+    partner_id: Optional[str] = None,
 ) -> List[str]:
     if find_directory_conflict(
         person=person,
         action=action,
-        directory_rows=_probe_handled_rows(db, person),
+        directory_rows=_probe_handled_rows(db, person, partner_id=partner_id),
     ):
         return [TAG_ALREADY_EXISTS]
     return []

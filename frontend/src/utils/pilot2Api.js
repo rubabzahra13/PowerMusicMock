@@ -172,15 +172,32 @@ export function patchCache(key, patch) {
 // Combined page payloads (one round trip per view)
 export const getDashboard = () => request('/api/dashboard');
 export const getPilot2Overview = () => request('/api/pilot2/overview');
-export const getNewRequestsPage = () => request('/api/admin/requests/page');
+export const getNewRequestsPage = (partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/admin/requests/page${query}`);
+};
 export const getPilot2Workspace = () => request('/api/pilot2/workspace');
 
+// Partners
+export const getPartners = () => request('/api/partners');
+export const getPartner = (id) => request(`/api/partners/${id}`);
+export const createPartner = ({ name, allowedDomains = [], automatedSources = [] }) =>
+  request('/api/partners', {
+    method: 'POST',
+    body: JSON.stringify({ name, allowedDomains, automatedSources }),
+  });
+export const updatePartner = (id, name) =>
+  request(`/api/partners/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+
 // Inboxes
-export const getInboxes = () => request('/api/pilot2/inboxes');
-export const connectInbox = (title, email = '') =>
+export const getInboxes = (partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/pilot2/inboxes${query}`);
+};
+export const connectInbox = (title, email = '', partnerId = '') =>
   request('/api/pilot2/inboxes/connect', {
     method: 'POST',
-    body: JSON.stringify({ title, email: email || '' }),
+    body: JSON.stringify({ title, email: email || '', partnerId: partnerId || null }),
   });
 export const disconnectInbox = (id) =>
   request(`/api/pilot2/inboxes/${id}/disconnect`, { method: 'POST' });
@@ -200,14 +217,26 @@ export const deleteIgnoreRule = (id) =>
   request(`/api/pilot2/ignore-list/${id}`, { method: 'DELETE' });
 
 // Partner allowlists
-export const getManagerDomains = () => request('/api/admin/manager-domains');
-export const createManagerDomain = (domain) =>
-  request('/api/admin/manager-domains', { method: 'POST', body: JSON.stringify({ domain }) });
+export const getManagerDomains = (partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/admin/manager-domains${query}`);
+};
+export const createManagerDomain = (domain, partnerId) =>
+  request('/api/admin/manager-domains', {
+    method: 'POST',
+    body: JSON.stringify({ domain, partnerId }),
+  });
 export const deleteManagerDomain = (id) =>
   request(`/api/admin/manager-domains/${id}`, { method: 'DELETE' });
-export const getAutomatedSources = () => request('/api/admin/automated-sources');
-export const createAutomatedSource = (pattern) =>
-  request('/api/admin/automated-sources', { method: 'POST', body: JSON.stringify({ pattern }) });
+export const getAutomatedSources = (partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/admin/automated-sources${query}`);
+};
+export const createAutomatedSource = (pattern, partnerId) =>
+  request('/api/admin/automated-sources', {
+    method: 'POST',
+    body: JSON.stringify({ pattern, partnerId }),
+  });
 export const deleteAutomatedSource = (id) =>
   request(`/api/admin/automated-sources/${id}`, { method: 'DELETE' });
 

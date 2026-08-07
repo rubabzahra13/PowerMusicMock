@@ -24,6 +24,7 @@ import {
   ADMIN_NEW_ROW_HIGHLIGHT_CLASS,
 } from '../utils/adminUiHighlights';
 import { useAuth } from '../context/AuthContext';
+import { usePartners } from '../context/PartnerContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 import { formatPersonFields, formatPersonName, formatPersonEmail, formatPersonLocation } from '../utils/personDisplay';
@@ -463,6 +464,7 @@ const emptyManagerForm = () => ({
 export default function Requests() {
   const { showToast } = useToast();
   const { profile } = useAuth();
+  const { selectedPartnerId } = usePartners();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -471,6 +473,8 @@ export default function Requests() {
   const consumedDeepLinkRef = useRef(null);
   const pendingCreatedIdsRef = useRef(new Set());
   const adminDisplayName = profile?.full_name?.trim() || 'Power Music Admin';
+  const requestsCacheKey = selectedPartnerId ? `${REQUESTS_PAGE_CACHE_KEY}:${selectedPartnerId}` : REQUESTS_PAGE_CACHE_KEY;
+  const directoryCacheKey = selectedPartnerId ? `directory_persons:${selectedPartnerId}` : 'directory_persons';
 
   // ── Action tab (Add / Remove) ──
   const [actionTab, setActionTab] = useState('All');
@@ -563,19 +567,19 @@ export default function Requests() {
 
   const refreshRequestsPage = useCallback((options = {}) => {
     const { networkOnly = false } = options;
-    const fetcher = getNewRequestsPage;
+    const fetcher = () => getNewRequestsPage(selectedPartnerId || '');
     if (networkOnly) {
-      return refreshCache(REQUESTS_PAGE_CACHE_KEY, fetcher, applyRequestsPage).catch((err) => {
+      return refreshCache(requestsCacheKey, fetcher, applyRequestsPage).catch((err) => {
         console.error(err);
         setTableLoading(false);
       });
     }
     // Cache key bumped to drop stale sessionStorage rows (deleted duplicates, etc.).
-    return loadWithCache(REQUESTS_PAGE_CACHE_KEY, fetcher, applyRequestsPage).catch((err) => {
+    return loadWithCache(requestsCacheKey, fetcher, applyRequestsPage).catch((err) => {
       console.error(err);
       setTableLoading(false);
     });
-  }, [applyRequestsPage]);
+  }, [applyRequestsPage, requestsCacheKey, selectedPartnerId]);
 
   useEffect(() => {
     refreshRequestsPage();
@@ -858,6 +862,7 @@ export default function Requests() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           submittedBy: managerForm,
+          partnerId: selectedPartnerId || undefined,
           people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
             firstName,
             lastName,
@@ -870,12 +875,12 @@ export default function Requests() {
       });
 
       if (action === 'Add') {
-        const directoryRows = await fetchJson('/api/persons');
+        const directoryRows = await fetchJson(`/api/persons${selectedPartnerId ? `?partner_id=${encodeURIComponent(selectedPartnerId)}` : ''}`);
         const nextDirectory = Array.isArray(directoryRows) ? directoryRows : [];
         setLiveDirectory(nextDirectory);
-        writeCache('directory_persons', nextDirectory);
+        writeCache(directoryCacheKey, nextDirectory);
         if (profile?.id) {
-          writeDirectoryCache(profile.id, nextDirectory, 'Added');
+          writeDirectoryCache(profile.id, nextDirectory, 'Added', selectedPartnerId || '');
         }
         sessionStorage.setItem('pm_directory_pending_tab', 'Added');
       }
@@ -916,6 +921,7 @@ export default function Requests() {
                 dateAdded: handledAt,
                 handledBy: adminDisplayName,
                 adminNotes: adminNote || '',
+                partnerId: req.partnerId || p.partnerId || null,
               }
             : p,
         )
@@ -939,15 +945,16 @@ export default function Requests() {
             managerNotes: req.notes || '',
             adminNotes: adminNote || '',
             notes: req.notes || '',
+            partnerId: req.partnerId || null,
           },
           ...liveDirectory,
         ];
 
-    bumpCacheEpoch(REQUESTS_PAGE_CACHE_KEY);
+    bumpCacheEpoch(requestsCacheKey);
     setNewRequests(nextRequests);
     setLiveDirectory(nextDirectory);
-    patchCache(REQUESTS_PAGE_CACHE_KEY, { requests: nextRequests, persons: nextDirectory });
-    writeCache('directory_persons', nextDirectory);
+    patchCache(requestsCacheKey, { requests: nextRequests, persons: nextDirectory });
+    writeCache(directoryCacheKey, nextDirectory);
     markDirectoryPersonHighlight(req.person.email);
     sessionStorage.setItem('pm_directory_pending_tab', outcome === 'Added' ? 'Added' : 'Removed');
 
@@ -962,13 +969,13 @@ export default function Requests() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adminNote: adminNote || null }),
       });
-      refreshCache('directory_persons', () => fetchJson('/api/persons'), (data) => {
+      refreshCache(directoryCacheKey, () => fetchJson(`/api/persons${selectedPartnerId ? `?partner_id=${encodeURIComponent(selectedPartnerId)}` : ''}`), (data) => {
         setLiveDirectory(Array.isArray(data) ? data : []);
       }).catch(() => {});
     } catch (err) {
       console.error(err);
       showToast(err.message || 'Failed to save — refreshing list.', 'error');
-      loadWithCache(REQUESTS_PAGE_CACHE_KEY, getNewRequestsPage, (data, isStale) => {
+      loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
           syncAdminNewRequestHighlights(data.requests, { isManualEntry });
         }

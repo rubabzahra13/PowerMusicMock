@@ -19,6 +19,7 @@ import { formatManagerNotes, readManagerNotes, MANAGER_NOTES_EMPTY_LABEL } from 
 import { csvCell } from '../utils/csvSafe';
 import { getDirectoryManagerColumnContent } from '../utils/manualEntry';
 import { formatPersonFields } from '../utils/personDisplay';
+import { usePartners } from '../context/PartnerContext';
 
 const directoryHighlightClass = (row) =>
   isDirectoryPersonHighlighted(row.email) ? ADMIN_NEW_ROW_HIGHLIGHT_CLASS : '';
@@ -416,6 +417,7 @@ export default function UserLedger() {
   const [searchParams] = useSearchParams();
   const requestIdFromUrl = searchParams.get('id');
   const consumedDirectoryDeepLinkRef = useRef(null);
+  const { selectedPartnerId } = usePartners();
   const [liveUserLedger, setLiveUserLedger] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
   const [highlightVersion, setHighlightVersion] = useState(0);
@@ -426,14 +428,16 @@ export default function UserLedger() {
   }, [location.key]);
 
   useEffect(() => {
+    const cacheKey = selectedPartnerId ? `directory_persons:${selectedPartnerId}` : 'directory_persons';
+    const query = selectedPartnerId ? `?partner_id=${encodeURIComponent(selectedPartnerId)}` : '';
     // Cached copy renders instantly; fresh data replaces it.
     const applyPersons = (data) => {
       setLiveUserLedger(Array.isArray(data) ? data : []);
       setTableLoading(false);
     };
     const load = () => {
-      loadWithCache('directory_persons', () =>
-        fetchJson('/api/persons'),
+      loadWithCache(cacheKey, () =>
+        fetchJson(`/api/persons${query}`),
         applyPersons,
       ).catch((err) => {
         console.error(err);
@@ -444,7 +448,7 @@ export default function UserLedger() {
     const refresh = () => { if (!document.hidden) load(); };
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
-  }, []);
+  }, [selectedPartnerId]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusTab, setStatusTab] = useState(() => {

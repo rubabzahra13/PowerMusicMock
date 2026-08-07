@@ -143,6 +143,7 @@ def process_incoming(
         body=body,
         received_at=received_at or datetime.now(timezone.utc),
         gmail_message_id=gmail_message_id,
+        inbox_email=account_email,
     ):
         email = models.Email(
             id=next_id(db, models.Email, "email"),

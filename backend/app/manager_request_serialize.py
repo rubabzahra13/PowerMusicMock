@@ -42,7 +42,7 @@ def _directory_conflict_for_request(
     return find_directory_conflict(
         person=person,
         action=req.action or "",
-        directory_rows=_probe_handled_rows(db, person),
+        directory_rows=_probe_handled_rows(db, person, partner_id=req.partner_id),
     )
 
 
@@ -393,6 +393,7 @@ def request_to_api_dict(
         "handledBy": resolve_handled_by_name(req, admin_user=admin_user),
         "managerId": str(req.manager_id) if req.manager_id else None,
         "handledByAdminId": str(req.handled_by_admin_id) if req.handled_by_admin_id else None,
+        "partnerId": getattr(req, "partner_id", None),
     }
     if intake_match:
         payload["intakeMatch"] = intake_match
@@ -438,7 +439,7 @@ def requests_to_api_dicts(db: Session, requests: List[models.ManagerRequest]) ->
         directory_row = find_directory_conflict(
             person=person,
             action=req.action or "",
-            directory_rows=directory_rows,
+            directory_rows=[row for row in directory_rows if not req.partner_id or row.partner_id == req.partner_id],
         )
         results.append(
             request_to_api_dict(
@@ -511,6 +512,7 @@ def directory_person_to_api_dict(
         "adminNotes": req.admin_notes,
         "notes": manager_notes,
         "requestHistory": request_history,
+        "partnerId": getattr(req, "partner_id", None),
     }
 
 
@@ -667,6 +669,7 @@ def manager_request_list_item_to_api_dict(
         "outcome": req.outcome,
         "notes": _split_manager_and_automated_notes(req.manager_notes)[0],
         "isUnread": is_request_unread(req, seen_at),
+        "partnerId": getattr(req, "partner_id", None),
     }
 
 

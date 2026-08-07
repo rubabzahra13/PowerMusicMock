@@ -3,14 +3,14 @@ import { normalizeDirectoryPerson } from './managerDirectory';
 const CACHE_KEY = 'pm_manager_directory_snapshot';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-function cacheStorageKey(outcome = 'Added') {
-  return `${CACHE_KEY}:${outcome}`;
+function cacheStorageKey(outcome = 'Added', partnerId = '') {
+  return `${CACHE_KEY}:${outcome}${partnerId ? `:${partnerId}` : ''}`;
 }
 
-export function readDirectoryCache(userId, outcome = 'Added') {
+export function readDirectoryCache(userId, outcome = 'Added', partnerId = '') {
   if (!userId || typeof sessionStorage === 'undefined') return null;
   try {
-    const raw = sessionStorage.getItem(cacheStorageKey(outcome));
+    const raw = sessionStorage.getItem(cacheStorageKey(outcome, partnerId));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.userId !== userId || !Array.isArray(parsed.people)) return null;
@@ -21,11 +21,11 @@ export function readDirectoryCache(userId, outcome = 'Added') {
   }
 }
 
-export function writeDirectoryCache(userId, people, outcome = 'Added') {
+export function writeDirectoryCache(userId, people, outcome = 'Added', partnerId = '') {
   if (!userId || typeof sessionStorage === 'undefined') return;
   try {
     sessionStorage.setItem(
-      cacheStorageKey(outcome),
+      cacheStorageKey(outcome, partnerId),
       JSON.stringify({
         userId,
         cachedAt: Date.now(),
