@@ -8,7 +8,7 @@ import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell
 import RequestComparison from '../components/RequestComparison';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerColumnContent, getManagerDisplayName, isManualEntry, isAdminEntry } from '../utils/manualEntry';
-import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
+import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, dismissRequest, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import { useRealtimeBroadcast } from '../hooks/useRealtimeBroadcast';
 import { useClientPagination } from '../hooks/useClientPagination';
@@ -234,6 +234,7 @@ function NewRequestsMobileList({
   emptyMessage,
   onOpenRequest,
   onMarkAs,
+  onDismiss,
   getRowClassName,
   directory,
 }) {
@@ -397,6 +398,14 @@ function NewRequestsMobileList({
               </div>
 
               <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => onDismiss(row)}
+                  aria-label="Dismiss request"
+                  className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-md border border-[var(--color-border-default)] text-[var(--color-text-muted)] transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                </button>
                 <button
                   type="button"
                   onClick={() => onMarkAs(row)}
@@ -630,6 +639,7 @@ export default function Requests() {
 
   // ── Drawer / Modal states ──
   const [confirmActionRequest, setConfirmActionRequest] = useState(null);
+  const [confirmDismissRequest, setConfirmDismissRequest] = useState(null);
   const [showAddManualModal, setShowAddManualModal] = useState(false);
 
   // ── Manual form states ──
@@ -991,6 +1001,35 @@ export default function Requests() {
     }
   };
 
+  const handleDismissRequest = async (req) => {
+    setConfirmDismissRequest(null);
+    removeRequestHighlight(req.id);
+    pendingCreatedIdsRef.current.delete(req.id);
+    bumpHighlights();
+
+    const nextRequests = newRequests.filter((r) => r.id !== req.id);
+    
+    bumpCacheEpoch(requestsCacheKey);
+    setNewRequests(nextRequests);
+    patchCache(requestsCacheKey, { requests: nextRequests });
+    
+    showToast('Request dismissed.', 'success');
+
+    try {
+      await dismissRequest(req.id);
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Failed to dismiss — refreshing list.', 'error');
+      loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
+        if (!isStale && Array.isArray(data.requests)) {
+          syncAdminNewRequestHighlights(data.requests, { isManualEntry });
+        }
+        setNewRequests(data.requests);
+        setLiveDirectory(data.persons);
+      }).catch(() => {});
+    }
+  };
+
   // ── Column order: #, Received, Person, Manager, Type, Sent via, Status, Notes, Needs review, Mark as, →
   const newColumns = [
     {
@@ -1187,13 +1226,21 @@ export default function Requests() {
     {
       key: 'markAs',
       label: 'Mark as',
-      width: '5rem',
-      minWidth: '5rem',
+      width: '7.5rem',
+      minWidth: '7.5rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'text-center align-middle whitespace-nowrap pl-1 pr-0 py-2',
       render: (_, row) => (
-        <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => setConfirmDismissRequest({ request: row })}
+            aria-label="Dismiss request"
+            className="inline-flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white text-[var(--color-text-muted)] shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -1345,7 +1392,14 @@ export default function Requests() {
         loading={tableLoading}
         emptyMessage={`No ${actionTab === 'All' ? '' : `${actionTab.toLowerCase()} `}requests matching your filters.`}
         onOpenRequest={handleOpenRequest}
-        onMarkAs={(row) => setConfirmActionRequest({ request: row, adminNote: '' })}
+        onMarkAs={(row) => {
+          if (row.duplicateGroupId) {
+            handleOpenRequest(row);
+          } else {
+            setConfirmActionRequest({ request: row, adminNote: '' });
+          }
+        }}
+        onDismiss={(row) => setConfirmDismissRequest({ request: row })}
         getRowClassName={getRequestRowClassName}
         directory={liveDirectory}
       />
@@ -1619,6 +1673,44 @@ export default function Requests() {
                 Admin note: {confirmActionRequest.adminNote}
               </span>
             ) : null}
+          </p>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={confirmDismissRequest !== null}
+        onClose={() => setConfirmDismissRequest(null)}
+        title="Dismiss Request"
+        footer={
+          <>
+            <button
+              type="button"
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+              onClick={() => setConfirmDismissRequest(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[#dc2626] hover:bg-[#b91c1c] shadow-sm cursor-pointer"
+              onClick={() => {
+                if (confirmDismissRequest) {
+                  handleDismissRequest(confirmDismissRequest.request);
+                }
+              }}
+            >
+              Dismiss
+            </button>
+          </>
+        }
+      >
+        {confirmDismissRequest && (
+          <p>
+            Are you sure you want to dismiss the request for{' '}
+            <strong>
+              {formatPersonName(confirmDismissRequest.request.person)}
+            </strong>
+            ? This action cannot be undone.
           </p>
         )}
       </Modal>

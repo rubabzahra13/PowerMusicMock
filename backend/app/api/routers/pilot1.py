@@ -623,6 +623,64 @@ def mark_request_handled(
         notify_admin_requests_changed("mark_handled")
     return request_to_api_dict(req)
 
+@router.post("/api/admin/requests/{request_id}/dismiss", response_model=schemas.RequestOut)
+def dismiss_request(
+    request_id: str,
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(require_admin),
+):
+    req = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+        
+    if req.status == "dismissed":
+        hydrate_request_users(db, [req])
+        return request_to_api_dict(req)
+        
+    was_new = req.status == "new"
+    
+    requests_to_dismiss = [req]
+    
+    if req.duplicate_group_id:
+        group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == req.duplicate_group_id).first()
+        if group and group.representative_request_id == req.id and group.status == "active":
+            group.status = "dismissed"
+            group.resolved_at = datetime.now(timezone.utc)
+            if admin.id != "dev-bypass":
+                try:
+                    import uuid
+                    group.resolved_by_admin_id = uuid.UUID(admin.id)
+                except ValueError:
+                    pass
+            
+            members = db.query(models.ManagerRequest).filter(
+                models.ManagerRequest.duplicate_group_id == group.id,
+                models.ManagerRequest.status == "new"
+            ).all()
+            requests_to_dismiss = members
+
+    for r in requests_to_dismiss:
+        if r.status == "new":
+            decrement_manager_pending_stat(db, r)
+            if r.manager_id:
+                invalidate_manager_request_summary(str(r.manager_id))
+        r.status = "dismissed"
+        r.handled_at = datetime.now(timezone.utc)
+        if admin.id != "dev-bypass":
+            try:
+                import uuid
+                r.handled_by_admin_id = uuid.UUID(admin.id)
+            except ValueError:
+                pass
+
+    db.commit()
+    db.refresh(req)
+    hydrate_request_display([req])
+    hydrate_request_users(db, [req])
+    if was_new:
+        notify_admin_requests_changed("dismiss_request")
+    return request_to_api_dict(req)
+
 @router.post("/api/admin/requests/manual", response_model=List[schemas.RequestOut])
 def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depends(get_db), admin=Depends(require_admin)):
     manual_submitter = schemas.SubmittedBy(

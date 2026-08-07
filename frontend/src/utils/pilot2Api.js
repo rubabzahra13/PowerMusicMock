@@ -177,6 +177,7 @@ export const getNewRequestsPage = (partnerId = '') => {
   return request(`/api/admin/requests/page${query}`);
 };
 export const getPilot2Workspace = () => request('/api/pilot2/workspace');
+export const dismissRequest = (id) => request(`/api/admin/requests/${id}/dismiss`, { method: 'POST' });
 
 // Directory persons
 export const updatePerson = (id, data, partnerId = '') => {
