@@ -38,6 +38,14 @@ def _new_group_id() -> str:
     return f"dup-grp-{uuid.uuid4().hex[:12]}"
 
 
+def _clear_duplicate_tags(req: models.ManagerRequest) -> None:
+    """Scrub all duplicate-related tags from a request."""
+    if not req.tags:
+        return
+    tags_to_remove = {TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE, TAG_ALREADY_EXISTS}
+    req.tags = [t for t in req.tags if t not in tags_to_remove]
+
+
 def _best_classification(
     classification_a: Optional[str],
     classification_b: Optional[str],
@@ -425,8 +433,9 @@ def unlink_duplicate_members(
     )
     db.add(dismissed)
 
-    # Remove req2 from the group.
+    # Remove req2 from the group and scrub its tags.
     req2.duplicate_group_id = None
+    _clear_duplicate_tags(req2)
 
     # Re-evaluate remaining members.
     remaining = (
@@ -435,14 +444,57 @@ def unlink_duplicate_members(
         .all()
     )
 
-    if len(remaining) <= 1:
-        # Only one (or zero) member left — group is effectively dissolved.
-        if len(remaining) == 1 and not group.directory_person_id:
-            remaining[0].duplicate_group_id = None
+    if len(remaining) == 0:
+        group.status = "dismissed"
+        group.resolved_at = now
+    elif len(remaining) == 1 and not group.directory_person_id:
+        remaining[0].duplicate_group_id = None
+        _clear_duplicate_tags(remaining[0])
         group.status = "dismissed"
         group.resolved_at = now
     else:
-        _sync_group_representative_and_tags(db, group, member_requests=remaining)
+        # Recalculate group classification
+        dir_match = False
+        peer_match_class = None
+
+        if group.directory_person_id:
+            dir_person = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == group.directory_person_id).first()
+            if dir_person:
+                for m in remaining:
+                    if not are_requests_dismissed(db, m.id, dir_person.id):
+                        c = match_classification(person_from_model(m), person_from_model(dir_person))
+                        if c:
+                            dir_match = True
+                            break
+        
+        for i in range(len(remaining)):
+            for j in range(i+1, len(remaining)):
+                if not are_requests_dismissed(db, remaining[i].id, remaining[j].id):
+                    c = match_classification(person_from_model(remaining[i]), person_from_model(remaining[j]))
+                    if c:
+                        peer_match_class = _best_classification(peer_match_class, c)
+
+        if dir_match and peer_match_class:
+            new_class = "already_exists_conflict"
+        elif dir_match:
+            new_class = "already_exists"
+        elif peer_match_class:
+            new_class = peer_match_class
+        else:
+            new_class = None
+
+        if not new_class:
+            # Dissolve group! No match remains.
+            for m in remaining:
+                m.duplicate_group_id = None
+                _clear_duplicate_tags(m)
+            group.status = "dismissed"
+            group.resolved_at = now
+        else:
+            group.classification = new_class
+            for m in remaining:
+                _clear_duplicate_tags(m)
+            _sync_group_representative_and_tags(db, group, member_requests=remaining)
 
     db.flush()
     return True
