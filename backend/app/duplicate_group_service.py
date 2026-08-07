@@ -240,8 +240,8 @@ def process_request_grouping(
             _absorb_ungrouped_matches(
                 db, group, req_person, exclude_id=req.id, ungrouped_candidates=pending_candidates
             )
-            members = [c for c in (pending_candidates or []) if c.duplicate_group_id == group.id or c.id == req.id]
-            _sync_group_representative_and_tags(db, group, member_requests=members if members else None)
+            members = [req] + [c for c in (pending_candidates or []) if c.duplicate_group_id == group.id]
+            _sync_group_representative_and_tags(db, group, member_requests=members)
             # db.flush()
             return group
 
@@ -268,10 +268,10 @@ def process_request_grouping(
         db, group, req_person, exclude_id=req.id, ungrouped_candidates=pending_candidates, dismissed_set=dismissed_set
     )
 
-    members = [c for c in (pending_candidates or []) if c.duplicate_group_id == group.id or c.id == req.id]
+    members = [req] + [c for c in (pending_candidates or []) if c.duplicate_group_id == group.id]
     if best_match_req and best_match_req not in members:
         members.append(best_match_req)
-    _sync_group_representative_and_tags(db, group, member_requests=members if members else None)
+    _sync_group_representative_and_tags(db, group, member_requests=members)
     # db.flush()
     return group
 
@@ -333,25 +333,27 @@ def _sync_group_representative_and_tags(
     Tags are only written to the REPRESENTATIVE request. Older non-representative
     group members keep their original tags for audit fidelity.
     """
+    # Always fetch flushed DB members to guarantee we don't miss any older ones
+    db_members = (
+        db.query(models.ManagerRequest)
+        .filter(models.ManagerRequest.duplicate_group_id == group.id)
+        .all()
+    )
+
+    # Merge DB members with explicitly passed ones (which might not be flushed yet)
+    all_members = {m.id: m for m in db_members}
     if member_requests:
-        members = sorted(
-            member_requests,
-            key=lambda r: (
-                r.received_at or datetime.min.replace(tzinfo=timezone.utc),
-                r.id or "",
-            ),
-            reverse=True,
-        )
-    else:
-        members = (
-            db.query(models.ManagerRequest)
-            .filter(models.ManagerRequest.duplicate_group_id == group.id)
-            .order_by(
-                models.ManagerRequest.received_at.desc(),
-                models.ManagerRequest.id.desc(),
-            )
-            .all()
-        )
+        for m in member_requests:
+            all_members[m.id] = m
+
+    members = sorted(
+        all_members.values(),
+        key=lambda r: (
+            r.received_at or datetime.min.replace(tzinfo=timezone.utc),
+            r.id or "",
+        ),
+        reverse=True,
+    )
 
     if not members:
         return
@@ -513,7 +515,7 @@ def get_group_members(
     return (
         db.query(models.ManagerRequest)
         .filter(models.ManagerRequest.duplicate_group_id == group_id)
-        .order_by(models.ManagerRequest.received_at.asc())
+        .order_by(models.ManagerRequest.received_at.asc(), models.ManagerRequest.id.asc())
         .all()
     )
 

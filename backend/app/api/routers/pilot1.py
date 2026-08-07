@@ -1170,7 +1170,9 @@ def get_duplicate_group_details(
 
     members = get_group_members(db, group_id)
     hydrate_request_display(members)
-    rep_id = group.representative_request_id
+    
+    # We dynamically select the latest request instead of relying on the DB column
+    latest_req_id = members[-1].id if members else None
 
     member_out = []
     for m in members:
@@ -1186,7 +1188,7 @@ def get_duplicate_group_details(
             },
             "action": m.action,
             "status": m.status,
-            "isRepresentative": m.id == rep_id,
+            "isRepresentative": m.id == latest_req_id,
         })
 
     return {
