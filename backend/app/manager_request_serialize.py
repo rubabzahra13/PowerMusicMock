@@ -17,7 +17,9 @@ from app.manager_request_views import is_request_unread
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
     TAG_AUTO_MAIL,
+    TAG_CONFIRMED_DUPLICATE,
     TAG_PARTNER_REQUEST,
+    TAG_POTENTIAL_DUPLICATE,
     TAG_VERIFIED,
     has_tag,
     merge_tags,
@@ -329,6 +331,30 @@ def _split_manager_and_automated_notes(raw: Optional[str]) -> Tuple[Optional[str
     return manager, auto
 
 
+_REVIEW_TAGS = frozenset(
+    {TAG_ALREADY_EXISTS, TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE}
+)
+
+
+def _needs_review(tags: List[str], duplicate_group_id: Optional[str] = None) -> bool:
+    """True when the request carries any duplicate, conflict, or group tag."""
+    return bool(set(tags or []) & _REVIEW_TAGS) or bool(duplicate_group_id)
+
+
+def _group_member_count(db: Optional[Session], req: models.ManagerRequest) -> int:
+    """Cheap COUNT of members in req's duplicate group (0 if not in a group)."""
+    group_id = getattr(req, "duplicate_group_id", None)
+    if not group_id or db is None:
+        return 0
+    from sqlalchemy import func as sa_func
+    result = (
+        db.query(sa_func.count(models.ManagerRequest.id))
+        .filter(models.ManagerRequest.duplicate_group_id == group_id)
+        .scalar()
+    )
+    return int(result or 0)
+
+
 def request_to_api_dict(
     req: models.ManagerRequest,
     *,
@@ -394,6 +420,10 @@ def request_to_api_dict(
         "managerId": str(req.manager_id) if req.manager_id else None,
         "handledByAdminId": str(req.handled_by_admin_id) if req.handled_by_admin_id else None,
         "partnerId": getattr(req, "partner_id", None),
+        # Duplicate group fields
+        "duplicateGroupId": getattr(req, "duplicate_group_id", None),
+        "needsReview": _needs_review(tags, getattr(req, "duplicate_group_id", None)),
+        "groupMemberCount": _group_member_count(db, req),
     }
     if intake_match:
         payload["intakeMatch"] = intake_match

@@ -207,6 +207,10 @@ class RequestOut(BaseModel):
     automatedEmail: Optional[AutomatedEmailOut] = None
     adminPerson: Optional[PersonInfo] = None
     adminSubmittedBy: Optional[SubmittedBy] = None
+    # Duplicate-group fields — populated for requests that belong to a group.
+    duplicateGroupId: Optional[str] = None
+    needsReview: bool = False
+    groupMemberCount: int = 0
 
     @model_validator(mode="before")
     @classmethod
@@ -553,3 +557,130 @@ class PartnerCreateIn(BaseModel):
 
 class PartnerUpdateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+
+
+# ── Duplicate group schemas ───────────────────────────────────────────────────
+
+
+class DuplicateGroupMemberOut(BaseModel):
+    """Lightweight member row inside a group detail response."""
+
+    id: str
+    displayId: int
+    receivedAt: Optional[datetime] = None
+    person: PersonInfo
+    action: str
+    status: str
+    isRepresentative: bool = False
+
+
+class DuplicateGroupDetailOut(BaseModel):
+    """Full group detail with member list (used by GET /api/duplicate-groups/{id})."""
+
+    id: str
+    partnerId: Optional[str] = None
+    classification: str
+    status: str
+    createdAt: Optional[datetime] = None
+    resolvedAt: Optional[datetime] = None
+    directoryPersonId: Optional[str] = None
+    representativeRequestId: Optional[str] = None
+    members: List[DuplicateGroupMemberOut] = []
+
+
+class DuplicateGroupSummaryOut(BaseModel):
+    """Lightweight group row for the group list endpoint."""
+
+    id: str
+    partnerId: Optional[str] = None
+    classification: str
+    status: str
+    createdAt: Optional[datetime] = None
+    memberCount: int = 0
+    representativeRequestId: Optional[str] = None
+    directoryPersonId: Optional[str] = None
+    representativePerson: Optional[PersonInfo] = None
+
+
+class UnlinkDuplicateIn(BaseModel):
+    """Payload for POST /api/duplicate-groups/{id}/unlink."""
+
+    requestId1: str
+    requestId2: str
+
+
+# ── Resolution action schemas (Task 2) ───────────────────────────────────────
+
+
+class ResolveAndAddIn(BaseModel):
+    """POST /api/duplicate-groups/{id}/resolve-add (Case A — no Directory match yet).
+
+    finalValues must contain all four identity fields; the backend validates them
+    before creating the Directory record. The frontend pre-fills from the latest
+    request but the admin may have edited any field — never assume "latest wins".
+    """
+
+    finalValues: PersonInfo
+    adminNote: Optional[str] = Field(default=None, max_length=5000)
+
+
+class ResolveAndUpdateIn(BaseModel):
+    """POST /api/duplicate-groups/{id}/resolve-update (Case B — Directory person exists).
+
+    directoryPersonId must match group.directory_person_id. The endpoint rejects the
+    request if the group has no linked Directory person rather than silently creating one.
+    """
+
+    directoryPersonId: str
+    finalValues: PersonInfo
+    adminNote: Optional[str] = Field(default=None, max_length=5000)
+
+
+class ResolveAndUpdatePreviewIn(BaseModel):
+    """POST /api/duplicate-groups/{id}/resolve-update/preview (dry run — no writes).
+
+    Returns current Directory values alongside the proposed final values so the frontend
+    can render a side-by-side confirmation dialog.
+    """
+
+    directoryPersonId: str
+    finalValues: PersonInfo
+
+
+class ResolveKeepExistingIn(BaseModel):
+    """POST /api/duplicate-groups/{id}/resolve-keep-existing (Case C — discard new data).
+
+    No finalValues required: the Directory record is intentionally left unchanged.
+    """
+
+    adminNote: Optional[str] = Field(default=None, max_length=5000)
+
+
+class FieldDiffOut(BaseModel):
+    """One field in a resolve-update preview, with before/after values."""
+
+    field: str
+    label: str
+    currentValue: str
+    proposedValue: str
+    changed: bool
+
+
+class ResolvePreviewOut(BaseModel):
+    """Response from resolve-update/preview — side-by-side before/after values."""
+
+    directoryPersonId: str
+    currentValues: PersonInfo
+    proposedValues: PersonInfo
+    fields: List[FieldDiffOut] = Field(default_factory=list)
+    anyChanged: bool = False
+
+
+class ResolveGroupResultOut(BaseModel):
+    """Generic response returned by all three resolve endpoints."""
+
+    status: str  # "resolved"
+    groupId: str
+    resolutionType: str  # "add" | "update" | "keep_existing"
+    directoryPersonId: Optional[str] = None  # new or existing dir row id
+    resolvedRequestCount: int = 0

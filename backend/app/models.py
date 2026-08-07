@@ -64,6 +64,46 @@ class ManagerRequest(Base):
     intake_persons = Column(JSONB, nullable=False, server_default="{}")
     partner_id = Column(String, ForeignKey("partners.id"), nullable=True, index=True)
     archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    duplicate_group_id = Column(String, ForeignKey("duplicate_groups.id"), nullable=True, index=True)
+
+
+class DuplicateGroup(Base):
+    """Group of related/duplicate manager requests for the same identity probe.
+
+    resolution_metadata stores an audit snapshot at resolve time:
+      {
+        "resolution_type": "add" | "update" | "keep_existing",
+        "final_values": {firstName, lastName, email, location},
+        "previous_values": {firstName, lastName, email, location},  # update only
+        "admin_note": "..."
+      }
+    """
+
+    __tablename__ = "duplicate_groups"
+
+    id = Column(String, primary_key=True)
+    partner_id = Column(String, ForeignKey("partners.id"), nullable=True, index=True)
+    classification = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="active")
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by_admin_id = Column(UUID(as_uuid=True), ForeignKey("powermusic_users.id"), nullable=True)
+    directory_person_id = Column(String, ForeignKey("manager_requests.id"), nullable=True)
+    representative_request_id = Column(String, ForeignKey("manager_requests.id"), nullable=True)
+    resolution_metadata = Column(JSONB, nullable=True)
+
+
+class DismissedDuplicateMatch(Base):
+    """Admin decision persistence to dismiss/unlink a false-positive duplicate pair."""
+
+    __tablename__ = "dismissed_duplicate_matches"
+
+    id = Column(String, primary_key=True)
+    request_id_1 = Column(String, ForeignKey("manager_requests.id"), nullable=False, index=True)
+    request_id_2 = Column(String, ForeignKey("manager_requests.id"), nullable=False, index=True)
+    dismissed_by_admin_id = Column(UUID(as_uuid=True), ForeignKey("powermusic_users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
 
 
 class ManagerRequestView(Base):

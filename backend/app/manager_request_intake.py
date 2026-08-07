@@ -64,7 +64,6 @@ def build_tags(
 ) -> List[str]:
     return merge_tags(
         extra_tags,
-        request_duplicate_tags_for_person(db, person, action=action, partner_id=partner_id),
         duplicate_tags_for_person(db, person, action=action, partner_id=partner_id),
     )
 
@@ -392,6 +391,9 @@ def create_manager_request(
         apply_person_to_row(row, person, source="autoMail")
     sync_display_person(row)
     db.add(row)
+    db.flush()
+    from app.duplicate_group_service import process_request_grouping
+    process_request_grouping(db, row)
     return row
 
 

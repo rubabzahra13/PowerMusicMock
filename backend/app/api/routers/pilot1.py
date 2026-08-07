@@ -78,6 +78,7 @@ from app.directory_person_match import (
     roster_snapshot_rows,
     search_roster_rows,
 )
+from app.duplicate_group_service import get_active_groups, get_group_members
 
 router = APIRouter()
 
@@ -355,10 +356,19 @@ def restore_person(
 
 
 def _visible_new_requests_query(db: Session):
+    from sqlalchemy import select
+    rep_subquery = select(models.DuplicateGroup.representative_request_id).where(
+        models.DuplicateGroup.status == "active",
+        models.DuplicateGroup.representative_request_id.isnot(None),
+    )
     return (
         db.query(models.ManagerRequest)
         .filter(
             models.ManagerRequest.status == "new",
+            or_(
+                models.ManagerRequest.duplicate_group_id.is_(None),
+                models.ManagerRequest.id.in_(rep_subquery),
+            ),
             or_(
                 models.ManagerRequest.tags.contains([TAG_VERIFIED]),
                 and_(
@@ -1010,3 +1020,385 @@ def admin_delete_automated_source(
     _admin=Depends(require_admin),
 ):
     return {"deleted": delete_automated_source(db, source_id)}
+
+
+@router.get("/api/admin/duplicate-groups", response_model=List[schemas.DuplicateGroupSummaryOut])
+def list_duplicate_groups(
+    partner_id: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    """List duplicate groups with representative request info and member count."""
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+
+    q = db.query(models.DuplicateGroup)
+    if partner_id:
+        q = q.filter(models.DuplicateGroup.partner_id == partner_id)
+    if status:
+        q = q.filter(models.DuplicateGroup.status == status)
+    else:
+        q = q.filter(models.DuplicateGroup.status == "active")
+
+    groups = q.order_by(models.DuplicateGroup.created_at.desc()).limit(200).all()
+
+    # Preload representative requests in one query.
+    rep_ids = [
+        g.representative_request_id
+        for g in groups
+        if g.representative_request_id
+    ]
+    rep_by_id: dict[str, models.ManagerRequest] = {}
+    if rep_ids:
+        for row in (
+            db.query(models.ManagerRequest)
+            .filter(models.ManagerRequest.id.in_(rep_ids))
+            .all()
+        ):
+            rep_by_id[row.id] = row
+
+    # Preload member counts in one query.
+    from sqlalchemy import func as sa_func
+    group_ids = [g.id for g in groups]
+    member_counts: dict[str, int] = {}
+    if group_ids:
+        rows = (
+            db.query(
+                models.ManagerRequest.duplicate_group_id,
+                sa_func.count(models.ManagerRequest.id),
+            )
+            .filter(models.ManagerRequest.duplicate_group_id.in_(group_ids))
+            .group_by(models.ManagerRequest.duplicate_group_id)
+            .all()
+        )
+        for group_id_val, cnt in rows:
+            member_counts[group_id_val] = int(cnt)
+
+    result = []
+    for group in groups:
+        rep = rep_by_id.get(group.representative_request_id or "")
+        rep_person = None
+        if rep:
+            rep_person = {
+                "firstName": rep.person_first_name,
+                "lastName": rep.person_last_name,
+                "email": rep.person_email,
+                "location": rep.person_location,
+            }
+        result.append({
+            "id": group.id,
+            "partnerId": group.partner_id,
+            "classification": group.classification,
+            "status": group.status,
+            "createdAt": group.created_at,
+            "memberCount": member_counts.get(group.id, 0),
+            "representativeRequestId": group.representative_request_id,
+            "directoryPersonId": group.directory_person_id,
+            "representativePerson": rep_person,
+        })
+    return result
+
+
+@router.get("/api/duplicate-groups/{group_id}", response_model=schemas.DuplicateGroupDetailOut)
+def get_duplicate_group_details(
+    group_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Duplicate group not found")
+
+    members = get_group_members(db, group_id)
+    hydrate_request_display(members)
+    rep_id = group.representative_request_id
+
+    member_out = []
+    for m in members:
+        member_out.append({
+            "id": m.id,
+            "displayId": getattr(m, "displayId", None) or 0,
+            "receivedAt": m.received_at,
+            "person": {
+                "firstName": m.person_first_name,
+                "lastName": m.person_last_name,
+                "email": m.person_email,
+                "location": m.person_location,
+            },
+            "action": m.action,
+            "status": m.status,
+            "isRepresentative": m.id == rep_id,
+        })
+
+    return {
+        "id": group.id,
+        "partnerId": group.partner_id,
+        "classification": group.classification,
+        "status": group.status,
+        "createdAt": group.created_at,
+        "resolvedAt": group.resolved_at,
+        "directoryPersonId": group.directory_person_id,
+        "representativeRequestId": group.representative_request_id,
+        "members": member_out,
+    }
+
+
+@router.post("/api/duplicate-groups/{group_id}/unlink")
+def unlink_duplicate_group_members_api(
+    group_id: str,
+    payload: schemas.UnlinkDuplicateIn,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    """Admin dismisses a false-positive duplicate pair within a group.
+
+    Persists the dismissed pair so the grouping engine will never re-pair them.
+    The router commits after the service flushes.
+    """
+    from app.duplicate_group_service import unlink_duplicate_members
+    admin_id = str(admin.id) if getattr(admin, "id", None) else None
+    success = unlink_duplicate_members(
+        db, group_id, payload.requestId1, payload.requestId2, admin_id=admin_id
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Could not unlink duplicate group members")
+
+    db.commit()
+    return {"status": "unlinked"}
+
+
+@router.post("/api/duplicate-groups/{group_id}/resolve")
+def resolve_duplicate_group_api(
+    group_id: str,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Duplicate group not found")
+
+    group.status = "resolved"
+    group.resolved_at = datetime.now(timezone.utc)
+    if getattr(admin, "id", None) and str(admin.id) != "dev-bypass":
+        group.resolved_by_admin_id = str(admin.id)
+    db.commit()
+    return {"status": "resolved"}
+
+# ── Task 2: Resolve & Add (Case A) ────────────────────────────────────────────
+
+@router.post(
+    "/api/duplicate-groups/{group_id}/resolve-add",
+    response_model=schemas.ResolveGroupResultOut,
+)
+def resolve_group_add_api(
+    group_id: str,
+    payload: schemas.ResolveAndAddIn,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    """Case A — no Directory person exists for this group.
+
+    Creates ONE new Directory record from the submitted finalValues, then marks all
+    group member requests as resolved. The original request rows are never mutated.
+
+    Rejects the call if the group already has a directory_person_id (use resolve-update
+    or resolve-keep-existing instead).
+    """
+    from app.duplicate_group_service import resolve_group_add
+
+    group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Duplicate group not found")
+    if group.status != "active":
+        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}' — cannot resolve again")
+    if group.directory_person_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This group is already linked to a Directory person. Use resolve-update or resolve-keep-existing.",
+        )
+
+    admin_id = str(admin.id) if getattr(admin, "id", None) else None
+
+    try:
+        dir_row = resolve_group_add(
+            db, group,
+            final_values=payload.finalValues,
+            admin_id=admin_id,
+            partner_id=group.partner_id,
+            admin_note=payload.adminNote,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    members = get_group_members(db, group.id)
+    db.commit()
+
+    # Notify realtime listeners that pending requests changed.
+    notify_admin_requests_changed("group_resolve_add")
+
+    return {
+        "status": "resolved",
+        "groupId": group_id,
+        "resolutionType": "add",
+        "directoryPersonId": dir_row.id,
+        "resolvedRequestCount": len(members),
+    }
+
+
+# ── Task 2: Resolve & Update — Preview (dry run) ──────────────────────────────
+
+@router.post(
+    "/api/duplicate-groups/{group_id}/resolve-update/preview",
+    response_model=schemas.ResolvePreviewOut,
+)
+def resolve_group_update_preview_api(
+    group_id: str,
+    payload: schemas.ResolveAndUpdatePreviewIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    """Case B dry run — returns current Directory values vs proposed finalValues.
+
+    No writes. Call this before resolve-update to power the confirmation dialog.
+    """
+    from app.duplicate_group_service import preview_resolve_update
+
+    group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Duplicate group not found")
+    if not group.directory_person_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This group has no linked Directory person. Use resolve-add for Case A groups.",
+        )
+    if group.directory_person_id != payload.directoryPersonId:
+        raise HTTPException(
+            status_code=409,
+            detail="directoryPersonId does not match the group's linked Directory person.",
+        )
+
+    dir_person = (
+        db.query(models.ManagerRequest)
+        .filter(models.ManagerRequest.id == payload.directoryPersonId)
+        .first()
+    )
+    if not dir_person:
+        raise HTTPException(status_code=404, detail="Directory person not found")
+
+    return preview_resolve_update(dir_person, payload.finalValues)
+
+
+# ── Task 2: Resolve & Update (Case B) ─────────────────────────────────────────
+
+@router.post(
+    "/api/duplicate-groups/{group_id}/resolve-update",
+    response_model=schemas.ResolveGroupResultOut,
+)
+def resolve_group_update_api(
+    group_id: str,
+    payload: schemas.ResolveAndUpdateIn,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    """Case B — Directory person exists, update it in-place with finalValues.
+
+    Rejects the call if the group has no directory_person_id, or if the submitted
+    directoryPersonId does not match the group's linked person — never silently creates
+    a second Directory record.
+    """
+    from app.duplicate_group_service import resolve_group_update
+
+    group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Duplicate group not found")
+    if group.status != "active":
+        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}' — cannot resolve again")
+    if not group.directory_person_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This group has no linked Directory person. Use resolve-add for Case A groups.",
+        )
+    if group.directory_person_id != payload.directoryPersonId:
+        raise HTTPException(
+            status_code=409,
+            detail="directoryPersonId does not match the group's linked Directory person.",
+        )
+
+    dir_person = (
+        db.query(models.ManagerRequest)
+        .filter(models.ManagerRequest.id == payload.directoryPersonId)
+        .first()
+    )
+    if not dir_person:
+        raise HTTPException(status_code=404, detail="Directory person not found")
+
+    admin_id = str(admin.id) if getattr(admin, "id", None) else None
+
+    try:
+        resolve_group_update(
+            db, group, dir_person,
+            final_values=payload.finalValues,
+            admin_id=admin_id,
+            admin_note=payload.adminNote,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    members = get_group_members(db, group.id)
+    db.commit()
+    notify_admin_requests_changed("group_resolve_update")
+
+    return {
+        "status": "resolved",
+        "groupId": group_id,
+        "resolutionType": "update",
+        "directoryPersonId": dir_person.id,
+        "resolvedRequestCount": len(members),
+    }
+
+
+# ── Task 2: Resolve — Keep Existing (Case C) ──────────────────────────────────
+
+@router.post(
+    "/api/duplicate-groups/{group_id}/resolve-keep-existing",
+    response_model=schemas.ResolveGroupResultOut,
+)
+def resolve_group_keep_existing_api(
+    group_id: str,
+    payload: schemas.ResolveKeepExistingIn = schemas.ResolveKeepExistingIn(),
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    """Case C — Directory record unchanged; incoming requests are discarded as incorrect.
+
+    Marks all group member requests as resolved (status='handled',
+    outcome='GroupResolved') without touching the linked Directory person. The group is
+    stamped with resolution_type='keep_existing' for audit purposes.
+    """
+    from app.duplicate_group_service import resolve_group_keep_existing
+
+    group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Duplicate group not found")
+    if group.status != "active":
+        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}' — cannot resolve again")
+
+    admin_id = str(admin.id) if getattr(admin, "id", None) else None
+
+    count = resolve_group_keep_existing(
+        db, group,
+        admin_id=admin_id,
+        admin_note=payload.adminNote,
+    )
+    dir_person_id = group.directory_person_id
+    db.commit()
+    notify_admin_requests_changed("group_resolve_keep")
+
+    return {
+        "status": "resolved",
+        "groupId": group_id,
+        "resolutionType": "keep_existing",
+        "directoryPersonId": dir_person_id,
+        "resolvedRequestCount": count,
+    }
