@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, XCircle } from 'lucide-react';
 import { formatAdminDateTime } from '../utils/requestDisplayId';
 import {
   autoMailFromDirectoryRecord,
@@ -20,13 +20,13 @@ import { ADMIN_FORM_LABEL, TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_SENT_BY_ADMIN
 const norm = (value) => {
   if (value == null) return '';
   if (typeof value === 'object') {
-    const role = (value.role || '').trim().toLowerCase();
-    const name = (value.name || '').trim().toLowerCase();
-    const email = (value.email || '').trim().toLowerCase();
-    const club = (value.club || '').trim().toLowerCase();
+    const role = (value.role || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const name = (value.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const email = (value.email || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const club = (value.club || '').trim().toLowerCase().replace(/\s+/g, ' ');
     return `${role}|${name}|${email}|${club}`;
   }
-  return String(value).trim().toLowerCase();
+  return String(value).trim().toLowerCase().replace(/\s+/g, ' ');
 };
 
 const hasValue = (value) => {
@@ -146,29 +146,36 @@ function ComparisonMatrix({ sources, embedded = false, includeManagerRow = false
                         differs ? 'bg-[var(--color-brand-accent)]/10' : 'bg-white'
                       }`}
                     >
-                      <span
-                        className={`block min-w-0 text-center ${
-                          mono
-                            ? 'truncate font-mono text-[12px] sm:text-[13px]'
-                            : 'break-words [overflow-wrap:anywhere]'
-                        } ${
-                          differs
-                            ? 'font-semibold text-[var(--color-brand-accent)]'
-                            : 'font-medium text-[var(--color-text-primary)]'
-                        }`}
-                        title={typeof value === 'string' ? value : undefined}
-                      >
-                        {key === 'manager' ? (
-                          renderManagerValue(value, differs)
-                        ) : (
-                          <>
-                            {value || <span className="text-[var(--color-text-muted)]">-</span>}
-                            {differs ? (
-                              <span className="sr-only"> (differs from {anchor.title})</span>
-                            ) : null}
-                          </>
-                        )}
-                      </span>
+                      <div className="flex flex-col items-center justify-center">
+                        <span
+                          className={`block min-w-0 text-center ${
+                            mono
+                              ? 'truncate font-mono text-[12px] sm:text-[13px]'
+                              : 'break-words [overflow-wrap:anywhere]'
+                          } ${
+                            differs
+                              ? 'font-semibold text-[var(--color-brand-accent)]'
+                              : 'font-medium text-[var(--color-text-primary)]'
+                          }`}
+                          title={typeof value === 'string' ? value : undefined}
+                        >
+                          {key === 'manager' ? (
+                            renderManagerValue(value, differs)
+                          ) : (
+                            <>
+                              {value || <span className="text-[var(--color-text-muted)]">-</span>}
+                              {differs ? (
+                                <span className="sr-only"> (differs from {anchor.title})</span>
+                              ) : null}
+                            </>
+                          )}
+                        </span>
+                        {differs && key !== 'manager' ? (
+                          <span className="mt-1 flex items-center justify-center text-[var(--color-brand-accent)]" aria-label="Field differs">
+                            <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                   );
                 })}

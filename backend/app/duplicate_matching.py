@@ -9,48 +9,62 @@ from sqlalchemy import or_, func
 from app import models, schemas
 
 
-# Bidirectional alias sets for name derivatives
-ALIAS_GROUPS: List[Set[str]] = [
-    {"steve", "steven", "stephen"},
-    {"mike", "michael"},
-    {"josh", "joshua"},
-    {"dan", "daniel", "danny"},
-    {"alex", "alexander", "alexandra"},
-    {"chris", "christopher", "christine"},
-    {"matt", "matthew"},
-    {"sam", "samantha", "samuel"},
-    {"rob", "robert", "bob", "bobby"},
-    {"dave", "david"},
-    {"tom", "thomas", "tommy"},
-    {"jim", "james", "jimmy"},
-    {"ben", "benjamin"},
-    {"nick", "nicholas"},
-    {"ed", "edward", "eddie"},
-    {"joe", "joseph"},
-    {"will", "william", "bill"},
-    {"greg", "gregory"},
-    {"andy", "andrew"},
-]
-
+import re
 
 def _norm(val: Optional[str]) -> str:
-    return (val or "").strip().lower()
+    if not val:
+        return ""
+    val = val.strip().lower()
+    return re.sub(r'\s+', ' ', val)
 
+def jaro_winkler(s1: str, s2: str) -> float:
+    if s1 == s2:
+        return 1.0
+    if not s1 or not s2:
+        return 0.0
 
-def is_name_alias(first1: Optional[str], first2: Optional[str]) -> bool:
-    f1 = _norm(first1)
-    f2 = _norm(first2)
-    if not f1 or not f2:
-        return False
-    if f1 == f2:
-        return True
-    if f1.startswith(f2) or f2.startswith(f1):
-        if min(len(f1), len(f2)) >= 3:
-            return True
-    for group in ALIAS_GROUPS:
-        if f1 in group and f2 in group:
-            return True
-    return False
+    len1, len2 = len(s1), len(s2)
+    match_distance = max(len1, len2) // 2 - 1
+
+    matches = 0
+    hash1 = [False] * len1
+    hash2 = [False] * len2
+
+    for i in range(len1):
+        start = max(0, i - match_distance)
+        end = min(len2, i + match_distance + 1)
+        for j in range(start, end):
+            if not hash2[j] and s1[i] == s2[j]:
+                hash1[i] = True
+                hash2[j] = True
+                matches += 1
+                break
+
+    if matches == 0:
+        return 0.0
+
+    t = 0
+    point = 0
+    for i in range(len1):
+        if hash1[i]:
+            while not hash2[point]:
+                point += 1
+            if s1[i] != s2[point]:
+                t += 1
+            point += 1
+    t /= 2
+
+    m = float(matches)
+    jaro = (m / len1 + m / len2 + (m - t) / m) / 3.0
+
+    prefix = 0
+    for i in range(min(4, min(len1, len2))):
+        if s1[i] == s2[i]:
+            prefix += 1
+        else:
+            break
+
+    return jaro + prefix * 0.1 * (1.0 - jaro)
 
 
 def get_all_dismissed_pairs(db: Session) -> Set[Tuple[str, str]]:
@@ -107,6 +121,8 @@ def get_dismissed_request_ids_for(db: Session, req_id: str) -> Set[str]:
     return dismissed
 
 
+POTENTIAL_DUPLICATE_THRESHOLD = 60.0
+
 def match_classification(
     left: schemas.PersonInfo,
     right: schemas.PersonInfo,
@@ -118,33 +134,29 @@ def match_classification(
     if not last_l or not last_r:
         return None
 
-    # Exact or alias name match check
     same_last = (last_l == last_r)
     same_first = (first_l == first_r)
-    alias_first = is_name_alias(first_l, first_r)
     same_email = bool(email_l and email_r and email_l == email_r)
     same_loc = bool(loc_l and loc_r and loc_l == loc_r)
 
-    # 1. Confirmed Duplicate:
+    # 1. Confirmed Duplicate (existing hard rules retained)
     # Identical name + email OR identical email + location OR identical name + email + location
     if same_first and same_last and same_email:
-        return "confirmed_duplicate"
-    if same_last and alias_first and same_email and same_loc:
         return "confirmed_duplicate"
     if same_email and same_loc and same_last:
         return "confirmed_duplicate"
     if same_email and same_first and same_last:
         return "confirmed_duplicate"
 
-    # 2. Potential Duplicate:
-    # Same last name + location + (same first or alias first)
-    if same_last and same_loc and (same_first or alias_first):
-        return "potential_duplicate"
-    # Same name + location, but different emails
-    if same_first and same_last and same_loc:
-        return "potential_duplicate"
-    # Same email only (different name/location)
-    if same_email:
+    # 2. Potential Duplicate (Deterministic Field Scoring)
+    first_name_score = jaro_winkler(first_l, first_r) * 25.0
+    last_name_score = jaro_winkler(last_l, last_r) * 30.0
+    email_score = 25.0 if same_email else 0.0
+    loc_score = 20.0 if same_loc else 0.0
+
+    total_score = first_name_score + last_name_score + email_score + loc_score
+
+    if total_score >= POTENTIAL_DUPLICATE_THRESHOLD:
         return "potential_duplicate"
 
     return None

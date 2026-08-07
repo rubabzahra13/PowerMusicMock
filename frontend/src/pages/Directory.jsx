@@ -538,11 +538,10 @@ function DirectoryMobileList({
                             e.stopPropagation();
                             onEditUser(row);
                           }}
-                          className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-0.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
+                          className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
                           aria-label={`Edit ${name}`}
                         >
-                          <Pencil className="h-3 w-3" />
-                          <span>Edit</span>
+                          <Pencil className="h-3.5 w-3.5" />
                         </button>
                       )}
                       {onArchiveUser && (
@@ -552,11 +551,10 @@ function DirectoryMobileList({
                             e.stopPropagation();
                             onArchiveUser(row);
                           }}
-                          className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-0.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
+                          className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
                           aria-label={`Archive ${name}`}
                         >
-                          <Archive className="h-3 w-3" />
-                          <span>Archive</span>
+                          <Archive className="h-3.5 w-3.5" />
                         </button>
                       )}
                       {onRestoreUser && (
@@ -566,11 +564,10 @@ function DirectoryMobileList({
                             e.stopPropagation();
                             onRestoreUser(row);
                           }}
-                          className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-0.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
+                          className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
                           aria-label={`Restore ${name}`}
                         >
-                          <RotateCcw className="h-3 w-3" />
-                          <span>Restore</span>
+                          <RotateCcw className="h-3.5 w-3.5" />
                         </button>
                       )}
                     </div>
@@ -1025,11 +1022,10 @@ export default function UserLedger() {
                   e.stopPropagation();
                   setEditingUser(row);
                 }}
-                className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
+                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
                 aria-label={`Edit ${row.firstName || 'record'}`}
               >
-                <Pencil className="h-3 w-3" />
-                <span>Edit</span>
+                <Pencil className="h-4 w-4" />
               </button>
               <button
                 type="button"
@@ -1037,11 +1033,10 @@ export default function UserLedger() {
                   e.stopPropagation();
                   setArchivingUser(row);
                 }}
-                className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
+                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
                 aria-label={`Archive ${row.firstName || 'record'}`}
               >
-                <Archive className="h-3 w-3" />
-                <span>Archive</span>
+                <Archive className="h-4 w-4" />
               </button>
             </>
           ) : (
@@ -1052,15 +1047,14 @@ export default function UserLedger() {
                 e.stopPropagation();
                 handleRestoreUser(row);
               }}
-              className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-default)] bg-white px-2 py-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors"
               aria-label={`Restore ${row.firstName || 'record'}`}
             >
               {restoringUserId === row.id ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <RotateCcw className="h-3 w-3" />
+                <RotateCcw className="h-4 w-4" />
               )}
-              <span>Restore</span>
             </button>
           )}
           <div className="flex items-center justify-center p-1" aria-hidden="true">
