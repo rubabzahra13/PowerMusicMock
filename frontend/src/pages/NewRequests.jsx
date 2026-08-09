@@ -1015,8 +1015,7 @@ export default function Requests() {
     bumpCacheEpoch(requestsCacheKey);
     setNewRequests(nextRequests);
     patchCache(requestsCacheKey, { requests: nextRequests });
-    
-    showToast('Request dismissed.', 'success');
+    showToast('Request deleted.', 'success');
 
     try {
       await dismissRequest(req.id);
@@ -1106,8 +1105,8 @@ export default function Requests() {
     {
       key: 'action',
       label: 'Type',
-      width: '3.5rem',
-      minWidth: '3.5rem',
+      width: '5.5rem',
+      minWidth: '5.5rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'align-middle whitespace-nowrap text-center',
@@ -1116,8 +1115,8 @@ export default function Requests() {
     {
       key: 'sentVia',
       label: 'Sent via',
-      width: '8.5rem',
-      minWidth: '8.5rem',
+      width: '11.5rem',
+      minWidth: '11.5rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'align-middle whitespace-nowrap text-center',
@@ -1185,27 +1184,7 @@ export default function Requests() {
         );
       },
     },
-    {
-      key: 'managerNotes',
-      label: 'Manager notes',
-      width: '8%',
-      minWidth: '5rem',
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
-      render: (_, row) => {
-        const notes = readManagerNotes(row);
-        return (
-          <TruncateCell
-            className={`text-xs leading-relaxed ${
-              notes ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-muted)]'
-            }`}
-            title={notes || undefined}
-          >
-            {formatManagerNotes(row)}
-          </TruncateCell>
-        );
-      },
-    },
+
     {
       key: 'remarks',
       label: 'Needs review',
@@ -1272,7 +1251,7 @@ export default function Requests() {
               e.stopPropagation();
               setConfirmDismissRequest({ request: row });
             }}
-            aria-label="Dismiss request"
+            aria-label="Delete request"
             className="absolute top-1 right-1 inline-flex items-center justify-center p-1 text-[var(--color-text-muted)] hover:text-[#dc2626] transition-colors rounded hover:bg-red-50"
           >
             <X className="h-4 w-4" />
@@ -1686,7 +1665,7 @@ export default function Requests() {
       <Modal
         isOpen={confirmDismissRequest !== null}
         onClose={() => setConfirmDismissRequest(null)}
-        title="Dismiss Request"
+        title="Delete request"
         footer={
           <>
             <button
@@ -1705,19 +1684,20 @@ export default function Requests() {
                 }
               }}
             >
-              Dismiss
+              Confirm
             </button>
           </>
         }
       >
         {confirmDismissRequest && (
-          <p>
-            Are you sure you want to dismiss the request for{' '}
-            <strong>
-              {formatPersonName(confirmDismissRequest.request.person)}
-            </strong>
-            ? This action cannot be undone.
-          </p>
+          <div className="space-y-4">
+            <p>
+              Are you sure you want to delete the request for {formatPersonName(confirmDismissRequest.request.person)}?
+            </p>
+            <p>
+              This action cannot be undone.
+            </p>
+          </div>
         )}
       </Modal>
 
