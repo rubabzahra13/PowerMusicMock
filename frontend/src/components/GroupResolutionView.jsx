@@ -43,18 +43,21 @@ function MetaItem({ label, value }) {
   );
 }
 
-function SectionCard({ icon: Icon, title, children, className = '' }) {
+function SectionCard({ icon: Icon, title, action, children, className = '' }) {
   return (
     <section className={`py-6 ${className}`}>
       <div className="relative overflow-hidden rounded-r-2xl border-l-[3px] border-l-[var(--color-brand-secondary)] bg-gradient-to-br from-white via-white to-[var(--color-surface-bg)] px-4 py-5 shadow-[0_1px_0_rgba(26,26,46,0.04)] sm:px-5">
         <div className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full bg-[var(--color-brand-secondary)]/[0.05]" aria-hidden="true" />
-        <div className="relative flex items-center gap-3 mb-4">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/80 text-[var(--color-brand-secondary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] ring-1 ring-[var(--color-brand-secondary-border)]/45">
-            <Icon className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <h2 className="text-sm font-semibold tracking-tight text-[var(--color-brand-secondary)]">
-            {title}
-          </h2>
+        <div className="relative flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/80 text-[var(--color-brand-secondary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] ring-1 ring-[var(--color-brand-secondary-border)]/45">
+              <Icon className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <h2 className="text-sm font-semibold tracking-tight text-[var(--color-brand-secondary)]">
+              {title}
+            </h2>
+          </div>
+          {action && <div>{action}</div>}
         </div>
         <div className="relative">{children}</div>
       </div>
@@ -94,11 +97,11 @@ export default function GroupResolutionView({
   const dirPerson =
     hasDirectory
       ? directory.find((d) => d.id === group.directoryPersonId) ||
-        directory.find(
-          (d) =>
-            (d.email || '').toLowerCase() ===
-            (repMember?.person?.email || '').toLowerCase(),
-        )
+      directory.find(
+        (d) =>
+          (d.email || '').toLowerCase() ===
+          (repMember?.person?.email || '').toLowerCase(),
+      )
       : null;
 
   // Final values form state — pre-filled from representative
@@ -108,6 +111,10 @@ export default function GroupResolutionView({
     email: repMember?.person?.email || '',
     location: repMember?.person?.location || '',
   });
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftForm, setDraftForm] = useState(form);
+  const [unlinkTargetId, setUnlinkTargetId] = useState(null);
+
   const [adminNote, setAdminNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -119,7 +126,18 @@ export default function GroupResolutionView({
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  const updateField = (field, value) => setForm((f) => ({ ...f, [field]: value }));
+  const updateDraftField = (field, value) => setDraftForm((f) => ({ ...f, [field]: value }));
+
+  const handleEditClick = () => {
+    setDraftForm(form);
+    setIsEditing(true);
+  };
+
+  const handleSaveClick = () => {
+    if (!draftForm.firstName.trim() || !draftForm.lastName.trim()) return;
+    setForm(draftForm);
+    setIsEditing(false);
+  };
 
   const isFormValid = form.firstName.trim() && form.lastName.trim();
 
@@ -216,7 +234,7 @@ export default function GroupResolutionView({
         requestId1: repId,
         requestId2: memberId,
       });
-      
+
       const nextMembers = members.filter((m) => m.id !== memberId);
       if (nextMembers.length <= 1 && !hasDirectory) {
         // Group has dissolved completely
@@ -304,10 +322,6 @@ export default function GroupResolutionView({
               </div>
               <div className="mt-4 border-t border-[var(--color-border-default)] pt-4">
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  <span className="font-medium text-[var(--color-text-secondary)]">
-                    Group ID {group.id.slice(-8)}
-                  </span>
-                  <span className="mx-1.5" aria-hidden="true">·</span>
                   {members.length} request{members.length !== 1 ? 's' : ''} grouped
                   {group.createdAt && (
                     <>
@@ -339,7 +353,7 @@ export default function GroupResolutionView({
             </p>
           )}
           <p className="mt-4 text-xs text-[var(--color-text-muted)]">
-            This is the existing Directory record. Use "Resolve &amp; Update Directory" to update it, or "Resolve — Keep Existing" to leave it unchanged.
+            This is the existing Directory record. Use "Resolve & Update Directory" to update it, or "Resolve & Keep Existing" to leave it unchanged.
           </p>
         </SectionCard>
       )}
@@ -352,11 +366,10 @@ export default function GroupResolutionView({
             .map((member) => (
               <div
                 key={member.id}
-                className={`rounded-xl border bg-white px-4 py-3.5 ${
-                  member.isRepresentative
-                    ? 'border-[var(--color-brand-secondary-border)] ring-1 ring-[var(--color-brand-secondary-border)]/40'
-                    : 'border-[var(--color-border-default)]'
-                }`}
+                className={`rounded-xl border bg-white px-4 py-3.5 ${member.isRepresentative
+                  ? 'border-[var(--color-brand-secondary-border)] ring-1 ring-[var(--color-brand-secondary-border)]/40'
+                  : 'border-[var(--color-border-default)]'
+                  }`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -368,7 +381,7 @@ export default function GroupResolutionView({
                       label={member.action}
                     />
                     {member.isRepresentative && (
-                      <Tag variant="new-person" label="Latest / Default" />
+                      <Tag variant="new-person" label="Latest" />
                     )}
                   </div>
 
@@ -376,7 +389,7 @@ export default function GroupResolutionView({
                   {!member.isRepresentative && members.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => handleUnlink(member.id)}
+                      onClick={() => setUnlinkTargetId(member.id)}
                       className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-[var(--color-text-secondary)] hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
                       title="Mark as not the same person"
                     >
@@ -403,54 +416,89 @@ export default function GroupResolutionView({
         </div>
       </SectionCard>
 
-      {/* ── Section C: Final Resolved Values (editable) ── */}
-      <SectionCard icon={FileEdit} title="Final Resolved Values">
+      {/* ── Section C: Final Resolved Values ── */}
+      <SectionCard
+        icon={FileEdit}
+        title="Final Resolved Values"
+        action={
+          !isEditing ? (
+            <button
+              type="button"
+              onClick={handleEditClick}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border-default)] text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
+            >
+              <FileEdit className="h-3.5 w-3.5" />
+              Edit
+            </button>
+          ) : null
+        }
+      >
         <p className="mb-4 text-xs text-[var(--color-text-secondary)]">
-          Pre-filled from the latest request. Edit any field before resolving.
+          Pre-filled from the latest request.
           <strong className="text-[var(--color-text-primary)]"> First Name and Last Name are required.</strong>
         </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label className={LABEL_CLASS}>First Name *</label>
-            <input
-              type="text"
-              value={form.firstName}
-              onChange={(e) => updateField('firstName', e.target.value)}
-              className={INPUT_CLASS}
-              placeholder="First name"
-            />
+
+        {!isEditing ? (
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+            <MetaItem label="First Name" value={form.firstName} />
+            <MetaItem label="Last Name" value={form.lastName} />
+            <MetaItem label="Email" value={form.email} />
+            <MetaItem label="Location" value={form.location} />
+          </dl>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className={LABEL_CLASS}>First Name *</label>
+              <input
+                type="text"
+                value={draftForm.firstName}
+                onChange={(e) => updateDraftField('firstName', e.target.value)}
+                className={INPUT_CLASS}
+                placeholder="First name"
+              />
+            </div>
+            <div>
+              <label className={LABEL_CLASS}>Last Name *</label>
+              <input
+                type="text"
+                value={draftForm.lastName}
+                onChange={(e) => updateDraftField('lastName', e.target.value)}
+                className={INPUT_CLASS}
+                placeholder="Last name"
+              />
+            </div>
+            <div>
+              <label className={LABEL_CLASS}>Email</label>
+              <input
+                type="email"
+                value={draftForm.email}
+                onChange={(e) => updateDraftField('email', e.target.value)}
+                className={INPUT_CLASS}
+                placeholder="Email address"
+              />
+            </div>
+            <div>
+              <label className={LABEL_CLASS}>Location</label>
+              <input
+                type="text"
+                value={draftForm.location}
+                onChange={(e) => updateDraftField('location', e.target.value)}
+                className={INPUT_CLASS}
+                placeholder="Location"
+              />
+            </div>
+            <div className="col-span-full mt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveClick}
+                disabled={!draftForm.firstName.trim() || !draftForm.lastName.trim()}
+                className={BTN_PRIMARY}
+              >
+                Save
+              </button>
+            </div>
           </div>
-          <div>
-            <label className={LABEL_CLASS}>Last Name *</label>
-            <input
-              type="text"
-              value={form.lastName}
-              onChange={(e) => updateField('lastName', e.target.value)}
-              className={INPUT_CLASS}
-              placeholder="Last name"
-            />
-          </div>
-          <div>
-            <label className={LABEL_CLASS}>Email</label>
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => updateField('email', e.target.value)}
-              className={INPUT_CLASS}
-              placeholder="Email address"
-            />
-          </div>
-          <div>
-            <label className={LABEL_CLASS}>Location</label>
-            <input
-              type="text"
-              value={form.location}
-              onChange={(e) => updateField('location', e.target.value)}
-              className={INPUT_CLASS}
-              placeholder="Location"
-            />
-          </div>
-        </div>
+        )}
       </SectionCard>
 
       {/* ── Action footer ── */}
@@ -508,7 +556,7 @@ export default function GroupResolutionView({
                   onClick={handleKeepExisting}
                   className={BTN_SECONDARY}
                 >
-                  {submitting ? 'Resolving…' : 'Resolve — Keep Existing'}
+                  {submitting ? 'Resolving…' : 'Resolve & Keep Existing'}
                 </button>
                 <button
                   type="button"
@@ -592,6 +640,40 @@ export default function GroupResolutionView({
             </table>
           </div>
         )}
+      </Modal>
+
+      {/* ── Unlink confirmation modal ── */}
+      <Modal
+        isOpen={!!unlinkTargetId}
+        onClose={() => setUnlinkTargetId(null)}
+        confirm
+        title="Are you sure this is not the same person?"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setUnlinkTargetId(null)}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const target = unlinkTargetId;
+                setUnlinkTargetId(null);
+                handleUnlink(target);
+              }}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
+            >
+              Confirm
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-[var(--color-text-secondary)]">
+          This will unlink this request from the current request history and create it as a separate new request.
+        </p>
       </Modal>
     </div>
   );
