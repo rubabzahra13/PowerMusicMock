@@ -107,7 +107,6 @@ export default function PartnerSettings() {
     selectedPartner,
     selectedPartnerId,
     setSelectedPartnerId,
-    createPartner,
     updatePartner,
   } = usePartners();
 
@@ -122,11 +121,6 @@ export default function PartnerSettings() {
   const [addOpen, setAddOpen] = useState(false);
   const [addTitle, setAddTitle] = useState('');
   const [addBusy, setAddBusy] = useState(false);
-  const [partnerCreateOpen, setPartnerCreateOpen] = useState(false);
-  const [partnerCreateName, setPartnerCreateName] = useState('');
-  const [partnerCreateDomains, setPartnerCreateDomains] = useState('');
-  const [partnerCreateSources, setPartnerCreateSources] = useState('');
-  const [partnerCreateBusy, setPartnerCreateBusy] = useState(false);
 
   const [managerDomains, setManagerDomains] = useState(() => readPmCache(`manager_domains:${selectedPartnerId || 'all'}`) || []);
   const [domainsLoading, setDomainsLoading] = useState(() => !readPmCache(`manager_domains:${selectedPartnerId || 'all'}`));
@@ -198,40 +192,6 @@ export default function PartnerSettings() {
   useEffect(() => {
     setPartnerNameDraft(selectedPartner?.name || '');
   }, [selectedPartner?.name, selectedPartnerId]);
-
-  const handleCreatePartner = async () => {
-    const name = partnerCreateName.trim();
-    if (!name) {
-      showToast('Enter a partner name.', 'error');
-      return;
-    }
-    const allowedDomains = partnerCreateDomains
-      .split(/[\n,]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const automatedSources = partnerCreateSources
-      .split(/[\n,]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    setPartnerCreateBusy(true);
-    try {
-      const created = await createPartner({ name, allowedDomains, automatedSources });
-      setSelectedPartnerId(created.id);
-      setPartnerCreateOpen(false);
-      setPartnerCreateName('');
-      setPartnerCreateDomains('');
-      setPartnerCreateSources('');
-      clearCache(`inboxes:${created.id}`);
-      clearCache(`manager_domains:${created.id}`);
-      clearCache(`automated_sources:${created.id}`);
-      showToast(`Partner ${created.name} created.`, 'success');
-    } catch (err) {
-      showToast(err.message || 'Could not create partner.', 'error');
-    } finally {
-      setPartnerCreateBusy(false);
-    }
-  };
 
   const handleRenamePartner = async () => {
     if (!selectedPartner) return;
@@ -452,17 +412,7 @@ export default function PartnerSettings() {
 
       <SectionCard
         title="Partner"
-        description="Select a partner in the sidebar. Create and rename partners here."
-        actions={(
-          <button
-            type="button"
-            onClick={() => setPartnerCreateOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-brand-primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-surface-sidebar-hover)]"
-          >
-            <Plus className="h-4 w-4" />
-            Add New Partner
-          </button>
-        )}
+        description="Select a partner in the sidebar. Rename the partner here."
       >
         <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
           <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 p-4">
@@ -748,68 +698,6 @@ export default function PartnerSettings() {
               )}
             </SectionCard>
           </FeatureGroup>
-
-      <Modal
-        isOpen={partnerCreateOpen}
-        onClose={() => !partnerCreateBusy && setPartnerCreateOpen(false)}
-        title="Add new partner"
-        footer={(
-          <>
-            <button
-              type="button"
-              onClick={() => setPartnerCreateOpen(false)}
-              disabled={partnerCreateBusy}
-              className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium hover:bg-gray-50 disabled:opacity-40"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleCreatePartner}
-              disabled={partnerCreateBusy || !partnerCreateName.trim()}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-40"
-            >
-              {partnerCreateBusy ? 'Creating…' : 'Create partner'}
-            </button>
-          </>
-        )}
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Partner name</label>
-            <input
-              type="text"
-              value={partnerCreateName}
-              onChange={(event) => setPartnerCreateName(event.target.value)}
-              placeholder="Power Music"
-              className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
-            />
-          </div>
-          <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Allowed domains</label>
-            <textarea
-              value={partnerCreateDomains}
-              onChange={(event) => setPartnerCreateDomains(event.target.value)}
-              placeholder="powermusic.com\n"
-              rows={3}
-              className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
-            />
-          </div>
-          <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Automated email sources</label>
-            <textarea
-              value={partnerCreateSources}
-              onChange={(event) => setPartnerCreateSources(event.target.value)}
-              placeholder="notifications@powermusic.com\n@powermusic.com"
-              rows={3}
-              className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
-            />
-          </div>
-          <p className="text-xs text-[var(--color-text-secondary)]">
-            Connected inboxes can be added after the partner is created.
-          </p>
-        </div>
-      </Modal>
 
       <Modal
         isOpen={addOpen}
