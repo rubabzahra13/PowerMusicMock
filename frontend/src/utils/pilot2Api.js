@@ -170,7 +170,8 @@ export function patchCache(key, patch) {
 }
 
 // Combined page payloads (one round trip per view)
-export const getDashboard = () => request('/api/dashboard');
+export const getDashboard = (partnerId) =>
+  request(`/api/dashboard${partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : ''}`);
 export const getPilot2Overview = () => request('/api/pilot2/overview');
 export const getNewRequestsPage = (partnerId = '') => {
   const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';

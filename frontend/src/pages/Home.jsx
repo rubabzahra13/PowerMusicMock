@@ -15,6 +15,7 @@ import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache, getDashboard } from '../utils/pilot2Api';
 import { AdminPageScroll, DottedScroll, PanelListSkeleton } from '../components/ui';
 import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
+import { usePartners } from '../context/PartnerContext';
 
 const CHART = {
   pink: '#e94560',
@@ -193,10 +194,10 @@ function WeeklyTrendChart({ days }) {
         aria-label="Weekly received versus handled requests"
         preserveAspectRatio="xMidYMid meet"
       >
-        {ticks.map((tick) => {
+        {ticks.map((tick, index) => {
           const y = topPad + chartH - (tick / top) * chartH;
           return (
-            <g key={tick}>
+            <g key={`tick-${index}`}>
               <line
                 x1={leftPad}
                 x2={width}
@@ -410,6 +411,7 @@ function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue }) {
 export default function Home() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { selectedPartnerId } = usePartners();
 
   const [pendingRequests, setPendingRequests] = useState([]);
   const [kpis, setKpis] = useState({ pendingRequests: 0, usersInLedger: 0 });
@@ -426,7 +428,11 @@ export default function Home() {
       setReady(true);
     };
     const load = () => {
-      loadWithCache('home_dashboard_v2', getDashboard, applyDashboard).catch((err) => {
+      loadWithCache(
+        `home_dashboard_v2:${selectedPartnerId || 'all'}`, 
+        () => getDashboard(selectedPartnerId), 
+        applyDashboard
+      ).catch((err) => {
         console.error(err);
         setReady(true);
       });
@@ -435,7 +441,7 @@ export default function Home() {
     const refresh = () => { if (!document.hidden) load(); };
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
-  }, [location.key]);
+  }, [location.key, selectedPartnerId]);
 
   const duplicateAlerts = useMemo(
     () => (Array.isArray(pendingRequests) ? pendingRequests : [])

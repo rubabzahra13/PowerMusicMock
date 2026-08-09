@@ -30,6 +30,7 @@ def build_dashboard_insights(
     *,
     pending: List[models.ManagerRequest],
     pending_payloads: Optional[List[dict]] = None,
+    partner_id: Optional[str] = None,
 ) -> dict:
     pending_add = sum(1 for row in pending if (row.action or "").lower() == "add")
     pending_remove = sum(1 for row in pending if (row.action or "").lower() == "remove")
@@ -51,41 +52,33 @@ def build_dashboard_insights(
         and TAG_VERIFIED not in (row.get("tags") or [])
     )
 
-    users_added = len(roster_snapshot_rows(db, limit=10_000))
-    users_removed = len(removed_snapshot_rows(db, limit=10_000))
+    users_added = len(roster_snapshot_rows(db, limit=10_000, partner_id=partner_id))
+    users_removed = len(removed_snapshot_rows(db, limit=10_000, partner_id=partner_id))
 
     now = datetime.now(timezone.utc)
     week_start = _day_start(now) - timedelta(days=6)
 
-    received_this_week = (
-        db.query(func.count(models.ManagerRequest.id))
-        .filter(models.ManagerRequest.received_at >= week_start)
-        .scalar()
-        or 0
+    received_query = db.query(func.count(models.ManagerRequest.id)).filter(models.ManagerRequest.received_at >= week_start)
+    handled_query = db.query(func.count(models.ManagerRequest.id)).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.handled_at >= week_start,
     )
-    handled_this_week = (
-        db.query(func.count(models.ManagerRequest.id))
-        .filter(
-            models.ManagerRequest.status == "handled",
-            models.ManagerRequest.handled_at >= week_start,
-        )
-        .scalar()
-        or 0
+    received_rows_query = db.query(models.ManagerRequest.received_at).filter(models.ManagerRequest.received_at >= week_start)
+    handled_rows_query = db.query(models.ManagerRequest.handled_at).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.handled_at >= week_start,
     )
 
-    received_rows = (
-        db.query(models.ManagerRequest.received_at)
-        .filter(models.ManagerRequest.received_at >= week_start)
-        .all()
-    )
-    handled_rows = (
-        db.query(models.ManagerRequest.handled_at)
-        .filter(
-            models.ManagerRequest.status == "handled",
-            models.ManagerRequest.handled_at >= week_start,
-        )
-        .all()
-    )
+    if partner_id:
+        received_query = received_query.filter(models.ManagerRequest.partner_id == partner_id)
+        handled_query = handled_query.filter(models.ManagerRequest.partner_id == partner_id)
+        received_rows_query = received_rows_query.filter(models.ManagerRequest.partner_id == partner_id)
+        handled_rows_query = handled_rows_query.filter(models.ManagerRequest.partner_id == partner_id)
+
+    received_this_week = received_query.scalar() or 0
+    handled_this_week = handled_query.scalar() or 0
+    received_rows = received_rows_query.all()
+    handled_rows = handled_rows_query.all()
 
     received_by_day: dict[str, int] = {}
     handled_by_day: dict[str, int] = {}

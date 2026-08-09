@@ -216,7 +216,14 @@ export default function GroupResolutionView({
         requestId1: repId,
         requestId2: memberId,
       });
-      setMembers((prev) => prev.filter((m) => m.id !== memberId));
+      
+      const nextMembers = members.filter((m) => m.id !== memberId);
+      if (nextMembers.length <= 1 && !hasDirectory) {
+        // Group has dissolved completely
+        onResolved('unlinked_dissolved', null);
+      } else {
+        setMembers(nextMembers);
+      }
     } catch (err) {
       onResolved('error', err.message || 'Failed to unlink member.');
     }

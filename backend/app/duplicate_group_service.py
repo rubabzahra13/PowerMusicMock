@@ -15,8 +15,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Set, Tuple
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy.orm.attributes import flag_modified
 
 from app import models, schemas
 from app.duplicate_matching import are_requests_dismissed, get_all_dismissed_pairs, match_classification
@@ -43,7 +44,10 @@ def _clear_duplicate_tags(req: models.ManagerRequest) -> None:
     if not req.tags:
         return
     tags_to_remove = {TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE, TAG_ALREADY_EXISTS}
+    original_len = len(req.tags)
     req.tags = [t for t in req.tags if t not in tags_to_remove]
+    if len(req.tags) != original_len:
+        flag_modified(req, "tags")
 
 
 def _best_classification(
@@ -378,6 +382,7 @@ def _sync_group_representative_and_tags(
 
     if tags_to_add:
         latest_req.tags = merge_tags(latest_req.tags, tags_to_add)
+        flag_modified(latest_req, "tags")
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +443,11 @@ def unlink_duplicate_members(
     # Remove req2 from the group and scrub its tags.
     req2.duplicate_group_id = None
     _clear_duplicate_tags(req2)
+    
+    # Critical fix: flush the unlinked state and the new dismissed rule
+    # so that subsequent database queries in the recalculation phase
+    # accurately recognize that the relationship is dissolved!
+    db.flush()
 
     # Re-evaluate remaining members.
     remaining = (

@@ -78,7 +78,9 @@ export default function GroupDetail() {
           ? `${name} added to Directory.`
           : type === 'update'
             ? `Directory record for ${name} updated.`
-            : 'Group resolved — existing Directory record kept.';
+            : type === 'unlinked_dissolved'
+              ? 'Group dissolved successfully.'
+              : 'Group resolved — existing Directory record kept.';
 
       showToast(toastMsg, 'success');
 

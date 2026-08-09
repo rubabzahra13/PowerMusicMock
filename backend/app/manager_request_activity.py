@@ -81,9 +81,9 @@ def events_for_request(req: models.ManagerRequest) -> List[dict]:
     return events
 
 
-def list_partner_activity(db: Session, *, limit: int = 10) -> List[dict]:
+def list_partner_activity(db: Session, *, limit: int = 10, partner_id: Optional[str] = None) -> List[dict]:
     scan_limit = max(limit * 4, 20)
-    rows = (
+    query = (
         db.query(models.ManagerRequest)
         .order_by(
             func.coalesce(
@@ -91,9 +91,11 @@ def list_partner_activity(db: Session, *, limit: int = 10) -> List[dict]:
                 models.ManagerRequest.received_at,
             ).desc()
         )
-        .limit(scan_limit)
-        .all()
     )
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+        
+    rows = query.limit(scan_limit).all()
     hydrate_request_users(db, rows)
 
     events: List[dict] = []

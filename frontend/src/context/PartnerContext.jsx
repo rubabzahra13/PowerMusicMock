@@ -1,29 +1,36 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useRef } from 'react';
 import { clearCache, createPartner as createPartnerApi, getPartners, loadWithCache, updatePartner as updatePartnerApi } from '../utils/pilot2Api';
+import { useAuth } from './AuthContext';
 
 const PartnerContext = createContext(null);
 const SELECTED_PARTNER_KEY = 'pm_selected_partner_id';
 
 function readSelectedPartnerId() {
   try {
-    return localStorage.getItem(SELECTED_PARTNER_KEY) || '';
+    return localStorage.getItem(SELECTED_PARTNER_KEY) ?? null;
   } catch {
-    return '';
+    return null;
   }
 }
 
 function writeSelectedPartnerId(value) {
   try {
-    if (value) localStorage.setItem(SELECTED_PARTNER_KEY, value);
-    else localStorage.removeItem(SELECTED_PARTNER_KEY);
+    if (value === null) localStorage.removeItem(SELECTED_PARTNER_KEY);
+    else localStorage.setItem(SELECTED_PARTNER_KEY, value);
   } catch {
     /* ignore */
   }
 }
 
 export function PartnerProvider({ children }) {
+  const { authReady, user } = useAuth();
   const [partners, setPartners] = useState([]);
   const [selectedPartnerId, setSelectedPartnerIdState] = useState(readSelectedPartnerId());
+
+  const currentSelectedRef = useRef(selectedPartnerId);
+  useEffect(() => {
+    currentSelectedRef.current = selectedPartnerId;
+  }, [selectedPartnerId]);
 
   const refreshPartners = async () => {
     const fresh = await loadWithCache('partners_list', getPartners, (rows) => {
@@ -31,21 +38,30 @@ export function PartnerProvider({ children }) {
     });
     const list = Array.isArray(fresh) ? fresh : [];
     setPartners(list);
+    
+    const latestSelected = currentSelectedRef.current;
+    
     if (list.length === 0) {
-      setSelectedPartnerId('');
+      if (latestSelected !== '') setSelectedPartnerId('');
       return list;
     }
-    const selectedExists = list.some((partner) => partner.id === selectedPartnerId);
-    if (!selectedExists) {
+    
+    if (latestSelected === null) {
       setSelectedPartnerId(list[0].id);
+    } else {
+      const selectedExists = latestSelected === '' || list.some((partner) => partner.id === latestSelected);
+      if (!selectedExists) {
+        setSelectedPartnerId(list[0].id);
+      }
     }
     return list;
   };
 
   useEffect(() => {
+    if (!authReady || !user) return;
     refreshPartners().catch(() => setPartners([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authReady, user]);
 
   const selectedPartner = useMemo(
     () => partners.find((partner) => partner.id === selectedPartnerId) || null,

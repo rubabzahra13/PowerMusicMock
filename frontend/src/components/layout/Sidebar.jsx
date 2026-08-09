@@ -175,13 +175,6 @@ export default function Sidebar({
         <div className={`h-px shrink-0 bg-white/10 ${showExpanded ? 'mx-4' : 'mx-3'}`} />
 
         <div className={`flex-1 overflow-y-auto space-y-6 py-4 ${showExpanded ? 'px-3' : 'px-2'}`}>
-          <div className="space-y-1">
-            <NavLink to="/" end className={navItemClass} onClick={handleNavClick} title="Overview">
-              <Home className="h-4 w-4 shrink-0" />
-              {showExpanded ? <span>Overview</span> : <Tooltip label="Overview" />}
-            </NavLink>
-          </div>
-
           <div className="space-y-2">
             {showExpanded && (
               <span className="mb-1 block px-3 text-[11px] font-semibold uppercase tracking-wider text-white/40">
@@ -197,11 +190,18 @@ export default function Sidebar({
                 options={
                   partners.length === 0
                     ? [{ value: '', label: 'No partners yet' }]
-                    : partners.map((p) => ({ value: p.id, label: p.name }))
+                    : [{ value: '', label: 'All Partners' }, ...partners.map((p) => ({ value: p.id, label: p.name }))]
                 }
                 className="w-full"
               />
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <NavLink to="/" end className={navItemClass} onClick={handleNavClick} title="Overview">
+              <Home className="h-4 w-4 shrink-0" />
+              {showExpanded ? <span>Overview</span> : <Tooltip label="Overview" />}
+            </NavLink>
           </div>
 
           <div className="space-y-1">

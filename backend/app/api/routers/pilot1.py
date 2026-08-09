@@ -355,13 +355,13 @@ def restore_person(
     return directory_rows_to_api_dicts(db, [req])[0]
 
 
-def _visible_new_requests_query(db: Session):
+def _visible_new_requests_query(db: Session, partner_id: Optional[str] = None):
     from sqlalchemy import select
     rep_subquery = select(models.DuplicateGroup.representative_request_id).where(
         models.DuplicateGroup.status == "active",
         models.DuplicateGroup.representative_request_id.isnot(None),
     )
-    return (
+    query = (
         db.query(models.ManagerRequest)
         .filter(
             models.ManagerRequest.status == "new",
@@ -378,32 +378,35 @@ def _visible_new_requests_query(db: Session):
             ),
         )
     )
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+    return query
 
 
 @router.get("/api/kpis", response_model=schemas.KpiOut)
-def get_kpis(db: Session = Depends(get_db), _admin=Depends(require_admin)):
-    pending = _visible_new_requests_query(db).count()
-    users = len(roster_snapshot_rows(db, limit=10_000))
+def get_kpis(partner_id: Optional[str] = None, db: Session = Depends(get_db), _admin=Depends(require_admin)):
+    pending = _visible_new_requests_query(db, partner_id=partner_id).count()
+    users = len(roster_snapshot_rows(db, limit=10_000, partner_id=partner_id))
     return {"pendingRequests": pending, "usersInLedger": users}
 
 
 @router.get("/api/dashboard", response_model=schemas.DashboardOut)
-def get_dashboard(db: Session = Depends(get_db), _admin=Depends(require_admin)):
+def get_dashboard(partner_id: Optional[str] = None, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     pending = (
-        _visible_new_requests_query(db)
+        _visible_new_requests_query(db, partner_id=partner_id)
         .order_by(request_id_numeric_desc())
         .all()
     )
     hydrate_request_display(pending)
     pending_payloads = requests_to_api_dicts(db, pending)
-    insights = build_dashboard_insights(db, pending=pending, pending_payloads=pending_payloads)
+    insights = build_dashboard_insights(db, pending=pending, pending_payloads=pending_payloads, partner_id=partner_id)
     return {
         "kpis": {
             "pendingRequests": len(pending),
             "usersInLedger": insights["usersAdded"],
         },
         "pendingRequests": pending_payloads,
-        "activity": list_partner_activity(db, limit=8),
+        "activity": list_partner_activity(db, limit=8, partner_id=partner_id),
         "insights": insights,
     }
 
