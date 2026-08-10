@@ -38,7 +38,6 @@ export default function Signup() {
     user,
     role,
     loading: authLoading,
-    logout,
     appConfig,
   } = useAuth();
   const navigate = useNavigate();
@@ -128,20 +127,13 @@ export default function Signup() {
     return true;
   };
 
-  useEffect(() => {
-    if (authLoading) return;
-
-    if (user && role && role !== 'manager') {
-      logout().then(() => {
-        setErrorMsg('This page is for manager accounts only.');
-      });
-    }
-  }, [authLoading, user, role, logout]);
-
   if (authLoading) return <ManagerAuthLoading />;
 
+  // Don't force-logout non-managers here — that raced with role hydration and
+  // bounced managers back to this page. Route guards handle redirects.
   if (user && role === 'manager') return <Navigate to="/submit" replace />;
   if (user && role === 'admin') return <Navigate to="/" replace />;
+  if (user && !role) return <ManagerAuthLoading />;
 
   const handleChange = (field, val) => {
     setFormData((prev) => ({ ...prev, [field]: val }));

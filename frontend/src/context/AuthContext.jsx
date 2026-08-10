@@ -224,15 +224,30 @@ export function AuthProvider({ children }) {
       setProfile(null);
     }
 
-    // The API layer fires this when a request comes back 401 — the token is
-    // dead, so sign out fully; route guards then send the user to login.
+    // The API layer fires this when a request comes back 401. Try a silent
+    // refresh first — a recoverable token blip should not dump managers to signup.
     let sessionExpiredHandled = false;
     const onSessionExpired = () => {
       if (sessionExpiredHandled) return;
       sessionExpiredHandled = true;
       window.setTimeout(() => { sessionExpiredHandled = false; }, 3000);
-      clearStoredSession();
-      clearAuthState();
+
+      (async () => {
+        try {
+          const { data, error } = await supabase.auth.refreshSession();
+          if (!error && data?.session?.access_token) {
+            if (!active) return;
+            setSession(data.session);
+            setUser(data.session.user ?? null);
+            await refreshProfile(data.session, { allowCachedFallback: true });
+            return;
+          }
+        } catch (err) {
+          console.error('Session refresh after 401 failed:', err);
+        }
+        clearStoredSession();
+        await clearAuthState();
+      })();
     };
     window.addEventListener('auth:session-expired', onSessionExpired);
 
@@ -249,9 +264,17 @@ export function AuthProvider({ children }) {
         applyProfile(setRole, setProfile, profileData);
       } catch (err) {
         console.error('Error fetching profile:', err);
-        if (!allowCachedFallback) {
-          await clearAuthState();
+        // Keep the signed-in session if we already know the role. A transient
+        // /api/auth/me failure must not bounce managers back to signup.
+        const cached = readAuthCache(currentUser.id);
+        if (allowCachedFallback || cached) {
+          if (cached && active) {
+            setRole(cached.role);
+            setProfile(cached.profile);
+          }
+          return;
         }
+        await clearAuthState();
       }
     }
 

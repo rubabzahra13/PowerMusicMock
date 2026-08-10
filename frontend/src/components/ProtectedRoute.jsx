@@ -30,9 +30,7 @@ export function AdminRoute() {
 export function ManagerRoute() {
   const { user, role, session, authReady } = useAuth();
 
-  // Already-known signed-in manager (remembered login, read from cache
-  // synchronously) → render instantly, no blank wait while the background
-  // session check runs. If that check later fails, the 401 handler signs out.
+  // Known signed-in manager with a usable token → render the form.
   if (user && session?.access_token && role === 'manager') {
     return <Outlet />;
   }
@@ -42,18 +40,20 @@ export function ManagerRoute() {
     return <Navigate to="/" replace />;
   }
 
-  // Nothing known yet — wait for the auth check rather than flashing content.
-  if (!authReady) {
+  // Boot / profile still resolving.
+  if (!authReady || (user && !role)) {
+    return <ManagerAuthLoading />;
+  }
+
+  // Manager identity is known but the access token is briefly missing (refresh /
+  // storage race). Wait — do NOT bounce to signup, or GuestRoute sends them
+  // straight back here and the UI flashes forever.
+  if (user && role === 'manager') {
     return <ManagerAuthLoading />;
   }
 
   if (!user || !session?.access_token) {
     return <Navigate to="/submit/signup" replace state={{ from: '/submit' }} />;
-  }
-
-  // Signed in but role not resolved yet.
-  if (!role) {
-    return <ManagerAuthLoading />;
   }
 
   return <Outlet />;
@@ -71,9 +71,8 @@ export function ManagerGuestRoute() {
     return <Navigate to="/submit" replace />;
   }
 
-  // A cached user with no known role yet — wait briefly so we don't flash the
-  // login form before redirecting them in.
-  if (user && !authReady) {
+  // Signed-in but role not resolved yet — wait so we don't flash the form.
+  if (user && (!authReady || !role)) {
     return <ManagerAuthLoading />;
   }
 
