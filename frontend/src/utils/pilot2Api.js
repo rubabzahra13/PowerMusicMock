@@ -169,6 +169,88 @@ export function patchCache(key, patch) {
   } catch { /* quota */ }
 }
 
+// Local tombstones so optimistic removals are not resurrected by a stale poll/SWR write.
+const NEW_REQUESTS_SUPPRESS_KEY = 'pm_new_requests_suppress_v1';
+const NEW_REQUESTS_SUPPRESS_TTL_MS = 10 * 60 * 1000;
+
+function readNewRequestsSuppressions() {
+  try {
+    const raw = sessionStorage.getItem(NEW_REQUESTS_SUPPRESS_KEY);
+    if (!raw) return { requestIds: {}, groupIds: {} };
+    const parsed = JSON.parse(raw);
+    return {
+      requestIds: parsed?.requestIds && typeof parsed.requestIds === 'object' ? parsed.requestIds : {},
+      groupIds: parsed?.groupIds && typeof parsed.groupIds === 'object' ? parsed.groupIds : {},
+    };
+  } catch {
+    return { requestIds: {}, groupIds: {} };
+  }
+}
+
+function writeNewRequestsSuppressions(state) {
+  try {
+    sessionStorage.setItem(NEW_REQUESTS_SUPPRESS_KEY, JSON.stringify(state));
+  } catch { /* quota */ }
+}
+
+/** Hide resolved/dismissed requests from New Requests until the server catches up. */
+export function suppressNewRequests({ requestIds = [], groupIds = [] } = {}) {
+  const state = readNewRequestsSuppressions();
+  const until = Date.now() + NEW_REQUESTS_SUPPRESS_TTL_MS;
+  for (const id of requestIds) {
+    if (id) state.requestIds[id] = until;
+  }
+  for (const id of groupIds) {
+    if (id) state.groupIds[id] = until;
+  }
+  writeNewRequestsSuppressions(state);
+}
+
+/** Filter suppressed rows; drop tombstones once the server no longer returns them. */
+export function applyNewRequestsSuppressions(requests) {
+  if (!Array.isArray(requests)) return requests;
+  const state = readNewRequestsSuppressions();
+  const now = Date.now();
+  const activeRequestIds = new Set();
+  const activeGroupIds = new Set();
+
+  for (const [id, until] of Object.entries(state.requestIds)) {
+    if (until > now) activeRequestIds.add(id);
+  }
+  for (const [id, until] of Object.entries(state.groupIds)) {
+    if (until > now) activeGroupIds.add(id);
+  }
+
+  if (activeRequestIds.size === 0 && activeGroupIds.size === 0) {
+    if (Object.keys(state.requestIds).length || Object.keys(state.groupIds).length) {
+      writeNewRequestsSuppressions({ requestIds: {}, groupIds: {} });
+    }
+    return requests;
+  }
+
+  const filtered = requests.filter(
+    (row) => !activeRequestIds.has(row.id) && !activeGroupIds.has(row.duplicateGroupId),
+  );
+
+  const stillPresentIds = new Set(requests.map((row) => row.id));
+  const stillPresentGroups = new Set(
+    requests.map((row) => row.duplicateGroupId).filter(Boolean),
+  );
+
+  const nextRequestIds = {};
+  const nextGroupIds = {};
+  for (const id of activeRequestIds) {
+    // Keep suppression while server still returns the row (lag); drop once gone.
+    if (stillPresentIds.has(id)) nextRequestIds[id] = state.requestIds[id];
+  }
+  for (const id of activeGroupIds) {
+    if (stillPresentGroups.has(id)) nextGroupIds[id] = state.groupIds[id];
+  }
+  writeNewRequestsSuppressions({ requestIds: nextRequestIds, groupIds: nextGroupIds });
+
+  return filtered;
+}
+
 // Combined page payloads (one round trip per view)
 export const getDashboard = (partnerId) =>
   request(`/api/dashboard${partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : ''}`);

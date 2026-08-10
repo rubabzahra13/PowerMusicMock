@@ -3,7 +3,7 @@ import { Search, Download, Info, SortAsc, SortDesc, ChevronDown, Filter } from '
 import { formatTimestampSplit, formatShortDateAndTime, formatTimeOnly } from '../utils/dateTime';
 import { handledRequests } from '../data/mockData';
 import { TAG_ALREADY_EXISTS, TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_UNVERIFIED, TAG_VERIFIED, requestTagVariant, sortRequestTags } from '../utils/requestTags';
-import { DataTable, Tag, Drawer, EMPTY_CELL } from '../components/ui';
+import { DataTable, Tag, Drawer, EMPTY_CELL, HoverTip } from '../components/ui';
 
 // ─── Shared Controls Bar (same pattern as NewRequests) ────────────────────────
 function ControlsBar({
@@ -29,8 +29,16 @@ function ControlsBar({
             className="flex-1 bg-transparent text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')}
-              className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs leading-none cursor-pointer">✕</button>
+            <HoverTip label="Clear search">
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs leading-none cursor-pointer"
+              >
+                ✕
+              </button>
+            </HoverTip>
           )}
         </div>
 

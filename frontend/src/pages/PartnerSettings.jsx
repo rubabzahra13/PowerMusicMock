@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Link2,
+  AtSign,
   Loader2,
   Mail,
-  Pencil,
   Plus,
+  Shield,
   Trash2,
-  Unlink,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import PageHeader from '../components/layout/PageHeader';
-import { AdminPageScroll, Toast, useToast, CardListSkeleton, Modal } from '../components/ui';
+import { AdminPageScroll, Toast, useToast, CardListSkeleton, Modal, HoverTip } from '../components/ui';
 import { getUserTimeZoneLabel } from '../utils/dateTime';
 import { clearManagerAllowedDomainsCache } from '../utils/managerAuth';
 import { usePartners } from '../context/PartnerContext';
@@ -32,6 +30,21 @@ import {
 } from '../utils/pilot2Api';
 
 const MAX_CONNECTED_INBOXES = 7;
+
+const SETTINGS_TABS = [
+  {
+    id: 'access',
+    label: 'Access settings',
+    descriptionFor: () => 'Partner name and who can sign in',
+    Icon: Shield,
+  },
+  {
+    id: 'automation',
+    label: 'Email automation settings',
+    descriptionFor: () => 'Inbox connection and auto sources',
+    Icon: Mail,
+  },
+];
 
 function readPmCache(key) {
   try {
@@ -59,58 +72,160 @@ function formatSourcePattern(source) {
   return source.pattern;
 }
 
-function SectionCard({ title, description, actions, children }) {
+/** One white surface per tab page; sections stack with soft dividers. */
+function SettingsPage({ children }) {
   return (
-    <section className="rounded-xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm sm:p-5">
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h2 className="text-sm font-bold uppercase tracking-wide text-[var(--color-text-primary)]">
-            {title}
-          </h2>
-          {description && (
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)] leading-relaxed">
-              {description}
-            </p>
-          )}
-        </div>
-        {actions}
-      </div>
+    <div className="overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white shadow-sm divide-y divide-[var(--color-border-default)]/70">
       {children}
-    </section>
-  );
-}
-
-function FeatureGroup({ title, description, children }) {
-  return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-          {title}
-        </h2>
-        {description && (
-          <p className="mt-1 text-sm text-[var(--color-text-secondary)] leading-relaxed">
-            {description}
-          </p>
-        )}
-      </div>
-      <div className="space-y-4">
-        {children}
-      </div>
     </div>
   );
 }
 
+function SettingsSection({ id, title, hint, action, children, footer }) {
+  return (
+    <section id={id} className="px-5 py-5 sm:px-6">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold tracking-tight text-[var(--color-text-primary)]">
+            {title}
+          </h2>
+          {hint ? (
+            <p className="mt-0.5 text-xs leading-4 text-[var(--color-text-muted)]">
+              {hint}
+            </p>
+          ) : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+      {children}
+      {footer ? <div className="mt-4">{footer}</div> : null}
+    </section>
+  );
+}
+
+function StatusPill({ tone = 'muted', children }) {
+  const tones = {
+    ok: 'bg-emerald-50 text-emerald-800 ring-emerald-100',
+    warn: 'bg-amber-50 text-amber-800 ring-amber-100',
+    muted: 'bg-[var(--color-surface-panel)] text-[var(--color-text-secondary)] ring-[var(--color-border-default)]',
+  };
+  return (
+    <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold leading-none ring-1 ring-inset ${tones[tone] || tones.muted}`}>
+      {children}
+    </span>
+  );
+}
+
+function ItemList({ children, empty }) {
+  if (empty) {
+    return (
+      <div className="rounded-lg border border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-3.5 py-4 text-sm text-[var(--color-text-secondary)]">
+        {empty}
+      </div>
+    );
+  }
+  return <ul className="space-y-2">{children}</ul>;
+}
+
+function ItemRow({ icon, title, meta, badge, action }) {
+  return (
+    <li className="flex flex-col gap-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3 transition-colors hover:bg-[var(--color-surface-highlight)] sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        {icon ? (
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-default)]" aria-hidden="true">
+            {icon}
+          </span>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-medium leading-5 text-[var(--color-text-primary)]">{title}</p>
+            {badge}
+          </div>
+          {meta ? (
+            <p className="mt-0.5 break-all text-xs leading-4 text-[var(--color-text-muted)]">{meta}</p>
+          ) : null}
+        </div>
+      </div>
+      {action ? <div className="flex shrink-0 items-center sm:justify-end">{action}</div> : null}
+    </li>
+  );
+}
+
+function AddBar({ onSubmit, children, submitLabel, busy, disabled }) {
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="flex flex-col gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 p-2 sm:flex-row sm:items-center"
+    >
+      <div className="min-w-0 flex-1">{children}</div>
+      <FilledButton type="submit" disabled={busy || disabled}>
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+        {submitLabel}
+      </FilledButton>
+    </form>
+  );
+}
+
+function IconButton({ label, onClick, disabled, danger = false, children }) {
+  return (
+    <HoverTip label={label}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors disabled:opacity-40 ${
+          danger
+            ? 'hover:bg-red-50 hover:text-red-600'
+            : 'hover:bg-white hover:text-[var(--color-text-primary)]'
+        }`}
+      >
+        {children}
+      </button>
+    </HoverTip>
+  );
+}
+
+function TextButton({ children, onClick, disabled, type = 'button' }) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold text-[var(--color-brand-secondary)] transition-colors hover:bg-[var(--color-brand-secondary-muted)] disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+function FilledButton({ children, onClick, disabled, type = 'button' }) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[var(--color-brand-primary)] px-3.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+const fieldClass =
+  'h-9 w-full rounded-md border-0 bg-transparent px-2.5 text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] focus:ring-0 disabled:opacity-50';
+
+const fieldStandaloneClass =
+  'h-9 w-full rounded-lg border border-[var(--color-border-default)] bg-white px-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-brand-primary)] focus:ring-2 focus:ring-[var(--color-brand-primary)]/15 disabled:opacity-50';
+
 export default function PartnerSettings() {
   const { showToast } = useToast();
   const {
-    partners,
     selectedPartner,
     selectedPartnerId,
-    setSelectedPartnerId,
+    partnerLabel,
     updatePartner,
   } = usePartners();
-
-  const partnerLabel = selectedPartner?.name || 'No partner selected';
 
   const [accounts, setAccounts] = useState(() => readPmCache(`inboxes:${selectedPartnerId || ''}`) || []);
   const [inboxesLoading, setInboxesLoading] = useState(() => !readPmCache(`inboxes:${selectedPartnerId || ''}`));
@@ -135,6 +250,8 @@ export default function PartnerSettings() {
   const [pendingSourceRemove, setPendingSourceRemove] = useState(null);
   const [partnerNameDraft, setPartnerNameDraft] = useState('');
   const [partnerRenameBusy, setPartnerRenameBusy] = useState(false);
+  const [partnerNameEditing, setPartnerNameEditing] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('access');
 
   const connectedAccounts = useMemo(
     () => accounts.filter((account) => account.status === 'Connected'),
@@ -191,21 +308,34 @@ export default function PartnerSettings() {
 
   useEffect(() => {
     setPartnerNameDraft(selectedPartner?.name || '');
+    setPartnerNameEditing(false);
   }, [selectedPartner?.name, selectedPartnerId]);
+
+  const startPartnerRename = () => {
+    if (!selectedPartner) return;
+    setPartnerNameDraft(selectedPartner.name || '');
+    setPartnerNameEditing(true);
+  };
+
+  const cancelPartnerRename = () => {
+    setPartnerNameDraft(selectedPartner?.name || '');
+    setPartnerNameEditing(false);
+  };
 
   const handleRenamePartner = async () => {
     if (!selectedPartner) return;
     const nextName = partnerNameDraft.trim();
     if (!nextName) {
-      showToast('Partner name cannot be empty.', 'error');
+      showToast(`${partnerLabel} name cannot be empty.`, 'error');
       return;
     }
     setPartnerRenameBusy(true);
     try {
       await updatePartner(selectedPartner.id, nextName);
-      showToast('Partner renamed.', 'success');
+      setPartnerNameEditing(false);
+      showToast(`${partnerLabel} renamed.`, 'success');
     } catch (err) {
-      showToast(err.message || 'Could not rename partner.', 'error');
+      showToast(err.message || `Could not rename ${partnerLabel.toLowerCase()}.`, 'error');
     } finally {
       setPartnerRenameBusy(false);
     }
@@ -400,304 +530,333 @@ export default function PartnerSettings() {
     }
   };
 
+  const partnerDirty = Boolean(selectedPartner)
+    && partnerNameDraft.trim() !== (selectedPartner?.name || '')
+    && partnerNameDraft.trim().length > 0;
+
   return (
-    <AdminPageScroll dataPage="partner-settings" contentClassName="flex flex-col gap-6 min-w-0 select-none pb-2">
+    <AdminPageScroll dataPage="partner-settings" contentClassName="min-w-0 select-none pb-16">
       <Toast />
-      <PageHeader
-        section="Partner support"
-        title="Partner settings"
-        description="Manage who can access the manager portal, and set up automated add/remove email intake."
-        compact
-      />
 
-      <SectionCard
-        title="Partner"
-        description="Select a partner in the sidebar. Rename the partner here."
-      >
-        <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
-          <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Current partner</p>
-            <p className="mt-1 text-lg font-semibold text-[var(--color-text-primary)]">{partnerLabel}</p>
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-              {partners.length > 0
-                ? `${partners.length} partner${partners.length === 1 ? '' : 's'} available.`
-                : 'No partners yet. Create the first one to get started.'}
-            </p>
-          </div>
+      <div className="mx-auto w-full max-w-[42rem]">
+        <header className="mb-5">
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+            {partnerLabel} support
+          </p>
+          <h1 className="text-xl font-bold text-[var(--color-text-primary)] sm:text-2xl">
+            {partnerLabel} settings
+          </h1>
+        </header>
 
-          <div className="rounded-xl border border-[var(--color-border-default)] bg-white p-4">
-            <label htmlFor="partner-name" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-              Rename partner
-            </label>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <input
-                id="partner-name"
-                type="text"
-                value={partnerNameDraft}
-                onChange={(event) => setPartnerNameDraft(event.target.value)}
-                placeholder="Partner name"
-                className="h-10 min-w-0 flex-1 rounded-lg border border-[var(--color-border-default)] px-3 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
-              />
+        <div
+          role="tablist"
+          aria-label={`${partnerLabel} settings sections`}
+          className="mb-5 grid grid-cols-1 gap-1 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] p-1 sm:grid-cols-2"
+        >
+          {SETTINGS_TABS.map((tab) => {
+            const selected = settingsTab === tab.id;
+            const Icon = tab.Icon;
+            return (
               <button
+                key={tab.id}
                 type="button"
-                onClick={handleRenamePartner}
-                disabled={partnerRenameBusy || !selectedPartner}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] px-4 text-sm font-semibold text-white hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50"
+                role="tab"
+                id={`partner-settings-tab-${tab.id}`}
+                aria-controls={`partner-settings-panel-${tab.id}`}
+                aria-selected={selected}
+                onClick={() => {
+                  setSettingsTab(tab.id);
+                  if (tab.id !== 'access') setPartnerNameEditing(false);
+                }}
+                className={`flex items-start gap-3 rounded-lg px-3.5 py-3 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 ${
+                  selected
+                    ? 'bg-white shadow-sm ring-1 ring-[var(--color-border-default)]'
+                    : 'text-[var(--color-text-secondary)] hover:bg-white/70 hover:text-[var(--color-text-primary)]'
+                }`}
               >
-                {partnerRenameBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
-                Save
+                <span
+                  className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                    selected
+                      ? 'bg-[var(--color-brand-primary)]/10 text-[var(--color-brand-primary)]'
+                      : 'bg-white/80 text-[var(--color-text-muted)]'
+                  }`}
+                  aria-hidden="true"
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span
+                    className={`block text-sm leading-5 ${
+                      selected
+                        ? 'font-semibold text-[var(--color-text-primary)]'
+                        : 'font-medium'
+                    }`}
+                  >
+                    {tab.label}
+                  </span>
+                  <span
+                    className={`mt-0.5 block text-xs leading-4 ${
+                      selected
+                        ? 'text-[var(--color-text-secondary)]'
+                        : 'text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    {tab.descriptionFor(partnerLabel)}
+                  </span>
+                </span>
               </button>
-            </div>
-          </div>
+            );
+          })}
         </div>
-      </SectionCard>
 
-      <FeatureGroup
-        title="Manager access"
-        description="Controls who can sign up, sign in, and submit requests on the manager portal."
-      >
-            <SectionCard
-              title="Allowed domains"
-              description="Only emails on these domains can use the manager portal."
-            >
-              <form onSubmit={handleAddDomain} className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-                <div className="min-w-0 flex-1">
-                  <label htmlFor="manager-domain" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                    Domain
-                  </label>
-                  <input
-                    id="manager-domain"
-                    type="text"
-                    value={domainInput}
-                    onChange={(event) => setDomainInput(event.target.value)}
-                    placeholder="activegym.com"
-                    className="w-full h-10 rounded-lg border border-[var(--color-border-default)] px-3 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={domainAdding || !domainInput.trim()}
-                  className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] px-4 text-sm font-semibold text-white hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50"
-                >
-                  {domainAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  Add
-                </button>
-              </form>
-
-              {domainsLoading ? (
-                <CardListSkeleton rows={2} />
-              ) : managerDomains.length === 0 ? (
-                <p className="text-sm text-[var(--color-text-secondary)]">
-                  No domains allowed yet. Managers cannot sign in until you add at least one.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {managerDomains.map((row) => (
-                    <li
-                      key={row.id}
-                      className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border-default)] bg-white px-4 py-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[var(--color-text-primary)]">@{row.domain}</p>
-                        {row.createdAt && (
-                          <p className="text-xs text-[var(--color-text-muted)]">Added {formatAdded(row.createdAt)}</p>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setPendingDomainRemove(row)}
-                        disabled={busyId === row.id}
-                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                        aria-label={`Remove ${row.domain}`}
-                      >
-                        {busyId === row.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </SectionCard>
-          </FeatureGroup>
-
-          <FeatureGroup
-            title="Admin automation"
-            description="Connect the inbox that receives add/remove emails, and choose which senders can create requests automatically."
+        <div
+          role="tabpanel"
+          id={`partner-settings-panel-${settingsTab}`}
+          aria-labelledby={`partner-settings-tab-${settingsTab}`}
+        >
+          {settingsTab === 'access' ? (
+            <SettingsPage>
+          <SettingsSection
+            id="partner"
+            title="Partner name"
+            hint={`Shown across the admin app for ${selectedPartner?.name || 'this partner'}.`}
           >
-            <SectionCard
-              title="Connected inbox"
-              description={`Used only to receive automated add/remove emails. Stays connected until you disconnect. Times in ${getUserTimeZoneLabel()}.`}
-              actions={(
-                <button
-                  type="button"
-                  onClick={() => { setAddTitle(''); setAddOpen(true); }}
-                  disabled={addBusy || atAccountLimit}
-                  className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer shrink-0 disabled:opacity-40"
-                >
-                  <Plus className="w-4 h-4" />
-                  Connect inbox
-                </button>
-              )}
-            >
-              {inboxesLoading ? (
-                <CardListSkeleton rows={2} />
-              ) : displayAccounts.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-4 py-10 text-center">
-                  <Mail className="mx-auto mb-3 h-8 w-8 text-[var(--color-text-muted)]" aria-hidden="true" />
-                  <p className="text-sm font-medium text-[var(--color-text-primary)]">No inbox connected</p>
-                  <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                    Connect 1–2 inboxes where partner systems send add/remove notifications.
+            {partnerNameEditing ? (
+              <div className="space-y-3">
+                <input
+                  id="partner-name"
+                  type="text"
+                  value={partnerNameDraft}
+                  onChange={(event) => setPartnerNameDraft(event.target.value)}
+                  placeholder="Partner name"
+                  disabled={!selectedPartner || partnerRenameBusy}
+                  autoFocus
+                  className={fieldStandaloneClass}
+                  aria-label="Partner name"
+                />
+                <div className="flex justify-end gap-2">
+                  <TextButton onClick={cancelPartnerRename} disabled={partnerRenameBusy}>
+                    Cancel
+                  </TextButton>
+                  <FilledButton
+                    onClick={handleRenamePartner}
+                    disabled={partnerRenameBusy || !partnerDirty}
+                  >
+                    {partnerRenameBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Save
+                  </FilledButton>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-[var(--color-text-primary)]">
+                    {selectedPartner?.name || 'No partner selected'}
                   </p>
                 </div>
-              ) : displayAccounts.map((account) => {
-                const isConnected = account.status === 'Connected';
-                const needsReconnect =
-                  (isConnected && account.backfillError === 'oauth_revoked')
-                  || (!isConnected && Boolean(account.connectedAt));
-                const isBusy = busyId === account.id;
-                return (
-                  <div
-                    key={account.id}
-                    className="mb-3 last:mb-0 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/30 p-4"
-                  >
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      <div className="min-w-0">
-                        <h3 className="text-sm font-bold text-[var(--color-text-primary)]">{account.title}</h3>
-                        <p className="text-sm text-[var(--color-text-secondary)] break-all mt-0.5">{account.email}</p>
-                        <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                          {needsReconnect
-                            ? 'Google access expired. Reconnect to resume mail sync. Connection is only removed if you disconnect.'
-                            : isConnected && account.connectedAt
-                              ? `Connected ${connectedDate(account.connectedAt)}`
-                              : 'Not connected yet'}
-                        </p>
-                      </div>
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                        needsReconnect
-                          ? 'bg-amber-50 text-amber-800'
-                          : isConnected
-                            ? 'bg-emerald-50 text-emerald-700'
-                            : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {needsReconnect ? 'Reconnect required' : account.status}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => { setRenameTarget(account); setRenameValue(account.title); }}
-                        disabled={isBusy}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-white disabled:opacity-50"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                        Rename
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleConnect(account)}
-                        disabled={isBusy}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border disabled:opacity-50 ${
-                          needsReconnect
-                            ? 'border-[var(--color-brand-primary)] bg-[var(--color-brand-primary)] text-white hover:bg-[var(--color-surface-sidebar-hover)]'
-                            : 'border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:bg-white'
-                        }`}
-                      >
-                        <Link2 className="w-3.5 h-3.5" />
-                        {isBusy ? 'Redirecting…' : needsReconnect || isConnected ? 'Reconnect' : 'Connect'}
-                      </button>
-                      {isConnected && (
-                        <button
-                          type="button"
-                          onClick={() => handleDisconnect(account)}
-                          disabled={isBusy}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] text-red-600 hover:bg-red-50 disabled:opacity-50"
-                        >
-                          <Unlink className="w-3.5 h-3.5" />
-                          Disconnect
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(account)}
-                        disabled={isBusy}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] text-red-600 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </SectionCard>
+                <TextButton onClick={startPartnerRename} disabled={!selectedPartner}>
+                  Edit
+                </TextButton>
+              </div>
+            )}
+          </SettingsSection>
 
-            <SectionCard
-              title="Automated email sources"
-              description="Emails or domains allowed to create add/remove requests automatically when they write to your connected inbox."
-            >
-              <form onSubmit={handleAddSource} className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-                <div className="min-w-0 flex-1">
-                  <label htmlFor="auto-source" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                    Email or domain
-                  </label>
-                  <input
-                    id="auto-source"
-                    type="text"
-                    value={sourceInput}
-                    onChange={(event) => setSourceInput(event.target.value)}
-                    placeholder="rubabzahra248@gmail.com or @activegym.com"
-                    className="w-full h-10 rounded-lg border border-[var(--color-border-default)] px-3 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={sourceAdding || !sourceInput.trim()}
-                  className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] px-4 text-sm font-semibold text-white hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50"
-                >
-                  {sourceAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  Add
-                </button>
-              </form>
-              <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-                Captures add/remove roster emails from allowlisted senders. AI reads the subject and body, so formatting can vary.
-              </p>
-
-              {sourcesLoading ? (
-                <CardListSkeleton rows={3} />
-              ) : autoSources.length === 0 ? (
-                <p className="text-sm text-[var(--color-text-secondary)]">
-                  No automated sources configured.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {autoSources.map((row) => (
-                    <li
-                      key={row.id}
-                      className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border-default)] bg-white px-4 py-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-[var(--color-text-primary)]">
-                          {formatSourcePattern(row)}
-                        </p>
-                        <p className="text-xs text-[var(--color-text-muted)]">
-                          {row.kind === 'domain' ? 'Whole domain' : 'Email address'}
-                          {row.createdAt ? ` · Added ${formatAdded(row.createdAt)}` : ''}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setPendingSourceRemove(row)}
+          <SettingsSection
+            id="manager-access"
+            title="Manager access"
+            hint="Only these email domains can sign in to the manager portal."
+            footer={(
+              <AddBar
+                onSubmit={handleAddDomain}
+                submitLabel="Add"
+                busy={domainAdding}
+                disabled={!domainInput.trim()}
+              >
+                <input
+                  id="manager-domain"
+                  type="text"
+                  value={domainInput}
+                  onChange={(event) => setDomainInput(event.target.value)}
+                  placeholder="Domain (e.g. activegym.com)"
+                  className={fieldClass}
+                  aria-label="Domain"
+                />
+              </AddBar>
+            )}
+          >
+            {domainsLoading ? (
+              <CardListSkeleton rows={2} />
+            ) : (
+              <ItemList empty={managerDomains.length === 0 ? 'No domains yet. Add one below.' : null}>
+                {managerDomains.map((row) => (
+                  <ItemRow
+                    key={row.id}
+                    icon={<AtSign className="h-4 w-4" />}
+                    title={`@${row.domain}`}
+                    meta={row.createdAt ? `Added ${formatAdded(row.createdAt)}` : null}
+                    action={(
+                      <IconButton
+                        label={`Remove ${row.domain}`}
+                        onClick={() => setPendingDomainRemove(row)}
                         disabled={busyId === row.id}
-                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                        aria-label={`Remove ${formatSourcePattern(row)}`}
+                        danger
                       >
                         {busyId === row.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                      </button>
+                      </IconButton>
+                    )}
+                  />
+                ))}
+              </ItemList>
+            )}
+          </SettingsSection>
+            </SettingsPage>
+          ) : (
+            <SettingsPage>
+          <SettingsSection
+            id="connected-inbox"
+            title="Connected inbox"
+            hint={`Used for automated add/remove email · ${getUserTimeZoneLabel()}`}
+            action={(
+              <TextButton
+                onClick={() => { setAddTitle(''); setAddOpen(true); }}
+                disabled={addBusy || atAccountLimit}
+              >
+                <Plus className="h-4 w-4" />
+                Connect
+              </TextButton>
+            )}
+          >
+            {inboxesLoading ? (
+              <CardListSkeleton rows={2} />
+            ) : displayAccounts.length === 0 ? (
+              <div className="flex items-start gap-3 rounded-lg border border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-3.5 py-4">
+                <Mail className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-medium text-[var(--color-text-primary)]">No inbox connected</p>
+                  <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                    Connect the inbox that receives {partnerLabel} add/remove mail.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {displayAccounts.map((account) => {
+                  const isConnected = account.status === 'Connected';
+                  const needsReconnect =
+                    (isConnected && account.backfillError === 'oauth_revoked')
+                    || (!isConnected && Boolean(account.connectedAt));
+                  const isBusy = busyId === account.id;
+                  const statusLine = isConnected && account.connectedAt && !needsReconnect
+                    ? `Connected ${connectedDate(account.connectedAt)}`
+                    : null;
+                  return (
+                    <li
+                      key={account.id}
+                      className="flex flex-col gap-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <p className="truncate text-sm font-medium text-[var(--color-text-primary)]">
+                            {account.title}
+                          </p>
+                          <StatusPill tone={needsReconnect ? 'warn' : isConnected ? 'ok' : 'muted'}>
+                            {needsReconnect ? 'Reconnect required' : account.status}
+                          </StatusPill>
+                        </div>
+                        <p className="mt-0.5 break-all text-xs text-[var(--color-text-secondary)]">
+                          {account.email || 'No email yet'}
+                        </p>
+                        {statusLine ? (
+                          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                            {statusLine}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
+                        <TextButton
+                          onClick={() => { setRenameTarget(account); setRenameValue(account.title); }}
+                          disabled={isBusy}
+                        >
+                          Rename
+                        </TextButton>
+                        <TextButton onClick={() => handleConnect(account)} disabled={isBusy}>
+                          {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          {needsReconnect || isConnected ? 'Reconnect' : 'Connect'}
+                        </TextButton>
+                        {isConnected ? (
+                          <TextButton onClick={() => handleDisconnect(account)} disabled={isBusy}>
+                            Disconnect
+                          </TextButton>
+                        ) : null}
+                        <IconButton
+                          label="Remove inbox"
+                          onClick={() => setDeleteTarget(account)}
+                          disabled={isBusy}
+                          danger
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </IconButton>
+                      </div>
                     </li>
-                  ))}
-                </ul>
-              )}
-            </SectionCard>
-          </FeatureGroup>
+                  );
+                })}
+              </ul>
+            )}
+          </SettingsSection>
+
+          <SettingsSection
+            id="auto-sources"
+            title="Automated email sources"
+            hint="Emails or domains that can create add/remove requests automatically."
+            footer={(
+              <AddBar
+                onSubmit={handleAddSource}
+                submitLabel="Add"
+                busy={sourceAdding}
+                disabled={!sourceInput.trim()}
+              >
+                <input
+                  id="auto-source"
+                  type="text"
+                  value={sourceInput}
+                  onChange={(event) => setSourceInput(event.target.value)}
+                  placeholder="Email or @domain"
+                  className={fieldClass}
+                  aria-label="Email or domain"
+                />
+              </AddBar>
+            )}
+          >
+            {sourcesLoading ? (
+              <CardListSkeleton rows={3} />
+            ) : (
+              <ItemList empty={autoSources.length === 0 ? 'No sources yet. Add an email or domain below.' : null}>
+                {autoSources.map((row) => (
+                  <ItemRow
+                    key={row.id}
+                    icon={row.kind === 'domain' ? <AtSign className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
+                    title={formatSourcePattern(row)}
+                    badge={<StatusPill>{row.kind === 'domain' ? 'Domain' : 'Email'}</StatusPill>}
+                    meta={row.createdAt ? `Added ${formatAdded(row.createdAt)}` : null}
+                    action={(
+                      <IconButton
+                        label={`Remove ${formatSourcePattern(row)}`}
+                        onClick={() => setPendingSourceRemove(row)}
+                        disabled={busyId === row.id}
+                        danger
+                      >
+                        {busyId === row.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </IconButton>
+                    )}
+                  />
+                ))}
+              </ItemList>
+            )}
+          </SettingsSection>
+            </SettingsPage>
+          )}
+        </div>
+      </div>
 
       <Modal
         isOpen={addOpen}
@@ -716,21 +875,21 @@ export default function PartnerSettings() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide mb-2">
+            <label className="mb-1.5 block text-xs text-[var(--color-text-secondary)]">
               Display name
             </label>
             <input
               type="text"
               value={addTitle}
               onChange={(e) => setAddTitle(e.target.value)}
-              placeholder="e.g. Partner notifications"
+              placeholder={`e.g. ${partnerLabel} notifications`}
               onKeyDown={(e) => { if (e.key === 'Enter') handleAddAccount(); }}
-              className="w-full px-3 py-2 text-sm border border-[var(--color-border-default)] rounded-lg focus:outline-none focus:border-[var(--color-brand-primary)]"
+              className={fieldStandaloneClass}
               autoFocus
             />
           </div>
-          <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
-            You will be redirected to Google to sign in with the inbox that should receive automated roster emails.
+          <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+            You’ll be redirected to Google to choose the inbox for automated roster emails.
           </p>
         </div>
       </Modal>
@@ -746,13 +905,13 @@ export default function PartnerSettings() {
           </>
         )}
       >
-        <label className="block text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide mb-2">Display name</label>
+        <label className="mb-1.5 block text-xs text-[var(--color-text-secondary)]">Display name</label>
         <input
           type="text"
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); }}
-          className="w-full px-3 py-2 text-sm border border-[var(--color-border-default)] rounded-lg focus:outline-none focus:border-[var(--color-brand-primary)]"
+          className={fieldStandaloneClass}
           autoFocus
         />
       </Modal>

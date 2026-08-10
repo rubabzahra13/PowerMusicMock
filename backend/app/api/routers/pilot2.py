@@ -743,7 +743,7 @@ def empty_bin(db: Session = Depends(get_db), _admin=Depends(require_admin)):
         pipeline.delete_forever_in_gmail(db, email)
         db.delete(email)
     if count:
-        pipeline.log(db, "bin_emptied", f"Bin emptied — {count} emails deleted forever.")
+        pipeline.log(db, "bin_emptied", f"Bin emptied. {count} emails deleted forever.")
     db.commit()
     return {"deleted": count}
 
@@ -1317,9 +1317,9 @@ def trigger_poll(request: Request, secret: Optional[str] = None, db: Session = D
             + ". Reconnect the inbox in Partner settings (status stays Connected until you disconnect)."
         )
     elif config.GMAIL_MODE != "live":
-        result["warning"] = "PILOT2_GMAIL_MODE is not 'live' — poll is a no-op until set on Vercel."
+        result["warning"] = "PILOT2_GMAIL_MODE is not 'live'. Poll is a no-op until set on Vercel."
     elif not syncable:
-        result["warning"] = "No connected inboxes — connect Gmail on Email accounts in the admin dashboard."
+        result["warning"] = "No connected inboxes. Connect Gmail on Email accounts in the admin dashboard."
     return result
 
 
@@ -1376,7 +1376,7 @@ def renew_watches(request: Request, secret: Optional[str] = None, db: Session = 
     result = {"renewed": renewed, "pushEnabled": config.gmail_push_enabled()}
     if not config.gmail_push_enabled():
         result["warning"] = (
-            "Gmail push not configured — set PILOT2_GMAIL_MODE=live and "
+            "Gmail push not configured. Set PILOT2_GMAIL_MODE=live and "
             "PILOT2_GMAIL_PUBSUB_TOPIC."
         )
     return result

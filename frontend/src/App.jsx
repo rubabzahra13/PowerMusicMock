@@ -53,6 +53,7 @@ export default function App() {
                 <Route path="/new-requests/group/:groupId" element={<GroupDetail />} />
                 <Route path="/new-requests/:requestId" element={<RequestDetail />} />
                 <Route path="/directory" element={<Directory />} />
+                <Route path="/directory/archived" element={<Directory />} />
                 <Route path="/partner-settings" element={<PartnerSettings />} />
                 <Route path="/templates" element={<Navigate to="/" replace />} />
                 <Route path="/email-responses" element={<Navigate to="/" replace />} />

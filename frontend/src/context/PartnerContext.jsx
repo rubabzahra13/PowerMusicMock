@@ -71,6 +71,8 @@ export function PartnerProvider({ children }) {
     [partners, selectedPartnerId],
   );
 
+  const partnerLabel = selectedPartner?.name || 'Partner';
+
   const setSelectedPartnerId = (partnerId) => {
     setSelectedPartnerIdState(partnerId);
     writeSelectedPartnerId(partnerId);
@@ -95,6 +97,7 @@ export function PartnerProvider({ children }) {
     partners,
     selectedPartnerId,
     selectedPartner,
+    partnerLabel,
     setSelectedPartnerId,
     refreshPartners,
     createPartner,

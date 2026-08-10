@@ -12,4 +12,6 @@ export { default as SelectDropdown } from './SelectDropdown';
 export { default as CountTabs } from './CountTabs';
 export { default as AdminPageScroll } from './AdminPageScroll';
 export { default as DottedScroll } from './DottedScroll';
+export { default as HoverTip } from './HoverTip';
+export { default as IconButton } from './IconButton';
 export { Skeleton, KpiSkeletonGrid, PanelListSkeleton, ActivitySkeleton, EmailListSkeleton, CardListSkeleton, DraftCreatingPanel } from './Skeleton';

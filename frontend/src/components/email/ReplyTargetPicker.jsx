@@ -21,7 +21,7 @@ export default function ReplyTargetPicker({ candidates, activeId, onSelect }) {
     <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 space-y-2">
       <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-900">
         <AlertCircle className="w-3.5 h-3.5" aria-hidden="true" />
-        {candidates.length} messages on this thread need a reply — pick which one first
+        {candidates.length} messages on this thread need a reply. Pick which one first
       </p>
       <div className="flex flex-wrap gap-1.5">
         {candidates.map((msg) => {

@@ -52,7 +52,10 @@ export default function RequestDetail() {
       // Guard: if this request belongs to a duplicate group, redirect to the
       // group resolution page so it cannot be mark-handled as a simple request.
       if (match.duplicateGroupId) {
-        navigate(`/new-requests/group/${encodeURIComponent(match.duplicateGroupId)}`, { replace: true });
+        navigate(
+          `/new-requests/group/${encodeURIComponent(match.duplicateGroupId)}`,
+          { replace: true },
+        );
         return;
       }
       setRequest(match);

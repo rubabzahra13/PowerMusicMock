@@ -4,7 +4,7 @@ import { formatShortDate, getUserTimeZoneLabel } from '../utils/dateTime';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClassNarrow } from '../utils/responsiveLayout';
 import DottedScroll from '../components/ui/DottedScroll';
-import { Toast, useToast, CardListSkeleton, Modal } from '../components/ui';
+import { Toast, useToast, CardListSkeleton, Modal, HoverTip } from '../components/ui';
 import {
   getInboxes,
   connectInbox,
@@ -244,7 +244,6 @@ export default function GmailAccounts() {
                       disabled={isBusy}
                       className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md text-[11px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-brand-primary)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer disabled:opacity-50"
                       aria-label={`Rename ${account.title}`}
-                      title="Rename"
                     >
                       <Pencil className="w-3.5 h-3.5" />
                       Rename
@@ -259,16 +258,17 @@ export default function GmailAccounts() {
                   }`}>
                     {account.status}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteTarget(account)}
-                    disabled={isBusy}
-                    className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-100 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-200 disabled:opacity-50"
-                    aria-label={`Delete ${account.title}`}
-                    title="Delete inbox"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <HoverTip label="Delete inbox">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(account)}
+                      disabled={isBusy}
+                      className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-100 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-200 disabled:opacity-50"
+                      aria-label={`Delete ${account.title}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </HoverTip>
                 </div>
               </div>
 

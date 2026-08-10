@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { Modal } from '../ui';
+import { Modal, HoverTip } from '../ui';
 import ManagerRequestHistoryRow, {
   MANAGER_REQUEST_HISTORY_GRID,
 } from './ManagerRequestHistoryRow';
@@ -259,26 +259,30 @@ export default function ManagerRequestHistoryModal({
               : ''}
           </p>
           <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              disabled={page <= 1}
-              aria-label="Previous page"
-              tabIndex={hasList ? 0 : -1}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
-              disabled={page >= pageCount}
-              aria-label="Next page"
-              tabIndex={hasList ? 0 : -1}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
+            <HoverTip label="Previous page">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page <= 1}
+                aria-label="Previous page"
+                tabIndex={hasList ? 0 : -1}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+            </HoverTip>
+            <HoverTip label="Next page">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+                disabled={page >= pageCount}
+                aria-label="Next page"
+                tabIndex={hasList ? 0 : -1}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </HoverTip>
           </div>
         </div>
       </div>

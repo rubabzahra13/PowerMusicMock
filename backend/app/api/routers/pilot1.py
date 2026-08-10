@@ -72,6 +72,7 @@ from app.manager_request_tags import (
 )
 from app.directory_person_match import (
     archived_snapshot_rows,
+    directory_ledger_rows,
     find_roster_person,
     roster_match_candidates,
     removed_snapshot_rows,
@@ -255,7 +256,7 @@ def get_people(
 ):
     if partner_id:
         get_partner_or_404(db, partner_id)
-    rows = roster_snapshot_rows(db, limit=2000, partner_id=partner_id)
+    rows = directory_ledger_rows(db, limit=2000, partner_id=partner_id)
     return directory_rows_to_api_dicts(db, rows)
 
 
@@ -697,7 +698,7 @@ def get_new_requests_page(
         query = query.filter(models.ManagerRequest.partner_id == partner_id)
     db_requests = query.order_by(request_id_numeric_desc()).all()
     hydrate_request_display(db_requests)
-    directory = roster_snapshot_rows(db, limit=2000, partner_id=partner_id)
+    directory = directory_ledger_rows(db, limit=2000, partner_id=partner_id)
     return {
         "requests": requests_to_api_dicts(db, db_requests),
         "persons": directory_rows_to_api_dicts(db, directory),
@@ -1360,12 +1361,14 @@ def get_duplicate_group_details(
 
     members = get_group_members(db, group_id)
     hydrate_request_display(members)
-    
+    hydrate_request_users(db, members)
+
     # We dynamically select the latest request instead of relying on the DB column
     latest_req_id = members[-1].id if members else None
 
     member_out = []
     for m in members:
+        api = request_to_api_dict(m, db=db, persist_auto_mail_side_effects=False)
         member_out.append({
             "id": m.id,
             "displayId": getattr(m, "displayId", None) or 0,
@@ -1379,6 +1382,10 @@ def get_duplicate_group_details(
             "action": m.action,
             "status": m.status,
             "isRepresentative": m.id == latest_req_id,
+            "submittedBy": api.get("submittedBy"),
+            "notes": api.get("notes"),
+            "tags": api.get("tags") or [],
+            "createdBy": api.get("createdBy"),
         })
 
     return {
@@ -1461,7 +1468,7 @@ def resolve_group_add_api(
     if not group:
         raise HTTPException(status_code=404, detail="Duplicate group not found")
     if group.status != "active":
-        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}' — cannot resolve again")
+        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}'. Cannot resolve again")
     if group.directory_person_id:
         raise HTTPException(
             status_code=409,
@@ -1563,7 +1570,7 @@ def resolve_group_update_api(
     if not group:
         raise HTTPException(status_code=404, detail="Duplicate group not found")
     if group.status != "active":
-        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}' — cannot resolve again")
+        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}'. Cannot resolve again")
     if not group.directory_person_id:
         raise HTTPException(
             status_code=409,
@@ -1632,7 +1639,7 @@ def resolve_group_keep_existing_api(
     if not group:
         raise HTTPException(status_code=404, detail="Duplicate group not found")
     if group.status != "active":
-        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}' — cannot resolve again")
+        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}'. Cannot resolve again")
 
     admin_id = str(admin.id) if getattr(admin, "id", None) else None
 

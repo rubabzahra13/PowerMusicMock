@@ -4,11 +4,10 @@ import {
   Search, Plus, SortAsc, ChevronDown, Filter, ArrowRight, X, Trash2
 } from 'lucide-react';
 import { formatTimestampSplit, isTodayInTimeZone, isYesterdayInTimeZone } from '../utils/dateTime';
-import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination } from '../components/ui';
-import RequestComparison from '../components/RequestComparison';
+import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, HoverTip } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerColumnContent, getManagerDisplayName, isManualEntry, isAdminEntry } from '../utils/manualEntry';
-import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, dismissRequest, bulkDismissRequests, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
+import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, dismissRequest, bulkDismissRequests, applyNewRequestsSuppressions, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import { useRealtimeBroadcast } from '../hooks/useRealtimeBroadcast';
 import { useClientPagination } from '../hooks/useClientPagination';
@@ -52,8 +51,6 @@ const SORT_PRESETS = [
   { value: 'managerName-desc', label: 'Manager name (Z–A)' },
   { value: 'location-asc', label: 'Location (A–Z)' },
   { value: 'location-desc', label: 'Location (Z–A)' },
-  { value: 'club-asc', label: 'Manager club (A–Z)' },
-  { value: 'club-desc', label: 'Manager club (Z–A)' }
 ];
 
 const DEFAULT_SORT = 'displayId-desc';
@@ -109,14 +106,22 @@ function ControlsBar({
           <Search className="h-4 w-4 text-[var(--color-brand-secondary)]/70 shrink-0" />
           <input
             type="text"
-            placeholder="Search name, email or club..."
+            placeholder="Search person name, email, or location..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="flex-1 bg-transparent text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')}
-              className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs leading-none cursor-pointer">✕</button>
+            <HoverTip label="Clear search">
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs leading-none cursor-pointer"
+              >
+                ✕
+              </button>
+            </HoverTip>
           )}
         </div>
 
@@ -184,7 +189,14 @@ function ControlsBar({
         <div className="bg-[var(--color-brand-secondary-muted)]/35 px-4 py-4 rounded-b-2xl">
           <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
             {filterSlots.map((slot) => (
-              <div key={slot.label} className="flex flex-col gap-1 min-w-[140px]">
+              <div
+                key={slot.label}
+                className={`flex flex-col gap-1 ${
+                  slot.searchable
+                    ? 'min-w-[140px] max-w-[min(18rem,100%)]'
+                    : 'min-w-[140px] max-w-full'
+                }`}
+              >
                 <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-brand-secondary)]/80">
                   {slot.label}
                 </label>
@@ -193,7 +205,9 @@ function ControlsBar({
                   onChange={slot.onChange}
                   options={slot.options}
                   size="sm"
-                  className="w-full"
+                  className={slot.searchable ? undefined : 'w-full'}
+                  searchable={Boolean(slot.searchable)}
+                  searchPlaceholder={`Search ${slot.label.toLowerCase()}…`}
                 />
               </div>
             ))}
@@ -218,12 +232,12 @@ function formatTimestamp(iso) {
 }
 
 // ─── Shared 11-column table cell renderers ────────────────────────────────────
-const TimestampCell = ({ val }) => {
+const TimestampCell = ({ val, className = '' }) => {
   const { date, time } = formatTimestamp(val);
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">{date}</span>
-      <span className="text-xs text-[var(--color-text-muted)]">{time}</span>
+    <div className={`flex flex-col gap-0.5 ${className}`.trim()}>
+      <span className="text-sm font-semibold leading-5 whitespace-nowrap text-[var(--color-text-primary)]">{date}</span>
+      <span className="text-xs leading-4 whitespace-nowrap text-[var(--color-text-muted)]">{time}</span>
     </div>
   );
 };
@@ -236,7 +250,6 @@ function NewRequestsMobileList({
   onMarkAs,
   onDismiss,
   getRowClassName,
-  directory,
 }) {
   if (loading) {
     return (
@@ -278,17 +291,19 @@ function NewRequestsMobileList({
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
             <div className={`px-4 py-3 relative ${extraClass}`}>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDismiss(row);
-                }}
-                aria-label="Dismiss request"
-                className="absolute top-2 right-2 inline-flex items-center justify-center p-1.5 text-[var(--color-text-muted)] hover:text-[#dc2626] hover:bg-red-50 rounded-md transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <HoverTip label="Delete" className="absolute top-2 right-2" placement="left">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDismiss(row);
+                  }}
+                  aria-label="Delete"
+                  className="inline-flex items-center justify-center p-1.5 text-[var(--color-text-muted)] hover:text-[#dc2626] hover:bg-red-50 rounded-md transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </HoverTip>
               <button
                 type="button"
                 onClick={() => onOpenRequest(row)}
@@ -394,20 +409,6 @@ function NewRequestsMobileList({
                 </div>
               </button>
 
-              <div className="mt-2 border-t border-[var(--color-border-default)]/70 pt-2">
-                <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
-                  Needs review
-                </p>
-                <RequestComparison
-                  intakeMatch={row.intakeMatch}
-                  directoryMatch={row.directoryMatch}
-                  directory={directory}
-                  requestPerson={row.person}
-                  variant="table"
-                  onViewDetails={() => onOpenRequest(row)}
-                />
-              </div>
-
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -420,14 +421,16 @@ function NewRequestsMobileList({
                 >
                   {isAdd ? 'Added' : 'Removed'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onOpenRequest(row)}
-                  aria-label="Open request details"
-                  className="inline-flex items-center justify-center rounded-lg p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
-                >
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </button>
+                <HoverTip label="Open details">
+                  <button
+                    type="button"
+                    onClick={() => onOpenRequest(row)}
+                    aria-label="Open details"
+                    className="inline-flex items-center justify-center rounded-lg p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
+                  >
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </HoverTip>
               </div>
             </div>
           </li>
@@ -476,7 +479,7 @@ const emptyManagerForm = () => ({
 export default function Requests() {
   const { showToast } = useToast();
   const { profile } = useAuth();
-  const { selectedPartnerId } = usePartners();
+  const { selectedPartnerId, partnerLabel } = usePartners();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -508,7 +511,9 @@ export default function Requests() {
     markRequestViewed(row.id);
     bumpHighlights();
     if (row.duplicateGroupId) {
-      navigate(`/new-requests/group/${encodeURIComponent(row.duplicateGroupId)}`);
+      navigate(
+        `/new-requests/group/${encodeURIComponent(row.duplicateGroupId)}`,
+      );
     } else {
       navigate(`/new-requests/${encodeURIComponent(row.id)}`);
     }
@@ -553,7 +558,7 @@ export default function Requests() {
   const applyRequestsPage = useCallback((data, isStale) => {
     if (Array.isArray(data.requests)) {
       setNewRequests((prev) => {
-        const server = data.requests;
+        const server = applyNewRequestsSuppressions(data.requests);
         const serverIds = new Set(server.map((row) => row.id));
         for (const id of [...pendingCreatedIdsRef.current]) {
           if (serverIds.has(id)) pendingCreatedIdsRef.current.delete(id);
@@ -575,7 +580,10 @@ export default function Requests() {
       setLiveDirectory(data.persons);
       setTableLoading(false);
       if (!isStale) {
-        const changed = syncAdminNewRequestHighlights(data.requests, { isManualEntry });
+        const changed = syncAdminNewRequestHighlights(
+          applyNewRequestsSuppressions(data.requests),
+          { isManualEntry },
+        );
         if (changed) bumpHighlights();
       }
     }
@@ -633,7 +641,6 @@ export default function Requests() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDate, setFilterDate] = useState('All');
   const [filterLocation, setFilterLocation] = useState('All');
-  const [filterClub, setFilterClub] = useState('All');
   const [filterSentVia, setFilterSentVia] = useState('All');
   const [filterNeedsReview, setFilterNeedsReview] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
@@ -723,7 +730,6 @@ export default function Requests() {
     setSearchQuery('');
     setFilterDate('All');
     setFilterLocation('All');
-    setFilterClub('All');
     setFilterSentVia('All');
     setFilterNeedsReview('All');
     setFilterStatus('All');
@@ -736,30 +742,18 @@ export default function Requests() {
     const query = searchQuery.trim().toLowerCase();
     const filtered = rows.filter((req) => {
       const personName = formatPersonName(req.person, { empty: '' }).toLowerCase();
-      const isManual = isManualEntry(req.submittedBy);
-      const awaitingManager = isAwaitingManagerSubmission(req.tags);
-      const managerName = awaitingManager
-        ? 'awaiting partner request'
-        : isManual
-          ? 'admin'
-          : formatPersonName(req.submittedBy, { empty: '' }).toLowerCase();
 
       const matchesSearch =
         query === '' ||
         personName.includes(query) ||
         formatPersonEmail(req.person, { empty: '' }).toLowerCase().includes(query) ||
-        formatPersonLocation(req.person, { empty: '' }).toLowerCase().includes(query) ||
-        managerName.includes(query) ||
-        (req.submittedBy?.email && req.submittedBy.email.toLowerCase().includes(query)) ||
-        (req.submittedBy?.club && req.submittedBy.club.toLowerCase().includes(query));
+        formatPersonLocation(req.person, { empty: '' }).toLowerCase().includes(query);
 
       const matchesAction =
         actionTab === 'All' ? true : req.action === actionTab;
       const matchesDate = matchesDateFilter(req[timestampKey], filterDate);
       const matchesLocation =
         filterLocation === 'All' || req.person.location === filterLocation;
-      const matchesClub =
-        filterClub === 'All' || req.submittedBy?.club === filterClub;
       const tags = req.tags || [];
       const matchesSentVia = matchesSentViaFilter(tags, filterSentVia);
       const needsReview =
@@ -782,7 +776,6 @@ export default function Requests() {
         matchesAction &&
         matchesDate &&
         matchesLocation &&
-        matchesClub &&
         matchesSentVia &&
         matchesNeedsReview &&
         matchesStatus
@@ -805,9 +798,6 @@ export default function Requests() {
       if (sortField === 'location') {
         return (a.person.location || '').localeCompare(b.person.location || '') * dir;
       }
-      if (sortField === 'club') {
-        return (a.submittedBy?.club || '').localeCompare(b.submittedBy?.club || '') * dir;
-      }
       if (sortField === 'receivedAt' || sortField === timestampKey) {
         return (new Date(a[timestampKey]) - new Date(b[timestampKey])) * dir;
       }
@@ -827,16 +817,9 @@ export default function Requests() {
     [actionTabRows]
   );
 
-  const clubOptions = useMemo(
-    () => buildFilterOptions(
-      [...new Set(actionTabRows.map((r) => r.submittedBy?.club).filter(Boolean))].sort()
-    ),
-    [actionTabRows]
-  );
-
   const filteredRequests = useMemo(
     () => applyFilterSort(actionTabRows, 'receivedAt'),
-    [actionTabRows, searchQuery, actionTab, filterDate, filterLocation, filterClub, filterSentVia, filterNeedsReview, filterStatus, sortPreset]
+    [actionTabRows, searchQuery, actionTab, filterDate, filterLocation, filterSentVia, filterNeedsReview, filterStatus, sortPreset]
   );
 
   const allCount = newRequests.length;
@@ -846,7 +829,6 @@ export default function Requests() {
   const activeFilterCount = [
     filterDate !== 'All',
     filterLocation !== 'All',
-    filterClub !== 'All',
     filterSentVia !== 'All',
     filterNeedsReview !== 'All',
     filterStatus !== 'All',
@@ -993,7 +975,7 @@ export default function Requests() {
       }).catch(() => {});
     } catch (err) {
       console.error(err);
-      showToast(err.message || 'Failed to save — refreshing list.', 'error');
+      showToast(err.message || 'Failed to save. Refreshing list.', 'error');
       loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
           syncAdminNewRequestHighlights(data.requests, { isManualEntry });
@@ -1021,7 +1003,7 @@ export default function Requests() {
       await dismissRequest(req.id);
     } catch (err) {
       console.error(err);
-      showToast(err.message || 'Failed to delete — refreshing list.', 'error');
+      showToast(err.message || 'Failed to delete. Refreshing list.', 'error');
       loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
           syncAdminNewRequestHighlights(data.requests, { isManualEntry });
@@ -1080,7 +1062,7 @@ export default function Requests() {
       await bulkDismissRequests(ids);
     } catch (err) {
       console.error(err);
-      showToast(err.message || 'Failed to bulk delete — refreshing list.', 'error');
+      showToast(err.message || 'Failed to bulk delete. Refreshing list.', 'error');
       loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
           syncAdminNewRequestHighlights(data.requests, { isManualEntry });
@@ -1091,18 +1073,17 @@ export default function Requests() {
     }
   };
 
-  // ── Column order: #, Received, Person, Manager, Type, Sent via, Status, Notes, Needs review, Mark as, →
+  // ── Column order: #, Received, Person, Manager, Type, Sent via, Status, Notes, Mark as, Actions
   const newColumns = [
     {
       key: 'displayId',
       label: '#',
-      width: '3rem',
-      minWidth: '3rem',
+      width: '3.25rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
+      cellClassName: 'text-center align-top whitespace-nowrap px-1',
       render: (val) => (
-        <span className="text-xs font-bold text-[var(--color-text-muted)] whitespace-nowrap tabular-nums">
+        <span className="inline-flex h-5 items-center justify-center text-sm font-semibold leading-5 text-[var(--color-text-primary)] whitespace-nowrap tabular-nums">
           {formatRequestDisplayId(val)}
         </span>
       )
@@ -1111,19 +1092,17 @@ export default function Requests() {
       key: 'timestamp',
       label: 'Received',
       width: '6.5rem',
-      minWidth: '6.5rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'align-middle whitespace-nowrap',
-      render: (_, row) => <TimestampCell val={row.receivedAt} />
+      cellClassName: 'align-top text-center',
+      render: (_, row) => <TimestampCell val={row.receivedAt} className="items-center" />
     },
     {
       key: 'person',
       label: 'Person',
-      width: '21%',
-      minWidth: '11rem',
+      width: '16%',
       headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
+      cellClassName: 'align-top max-w-0 overflow-hidden text-left',
       render: (_, row) => {
         const { name, email, location } = formatPersonFields(row.person);
         return (
@@ -1138,10 +1117,9 @@ export default function Requests() {
     {
       key: 'manager',
       label: 'Manager',
-      width: '18%',
-      minWidth: '10rem',
+      width: '15%',
       headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-left',
+      cellClassName: 'align-top max-w-0 overflow-hidden text-left',
       render: (_, row) => {
         const manager = getManagerColumnContent(row);
         return (
@@ -1152,7 +1130,7 @@ export default function Requests() {
             lines={manager.lines || undefined}
             primaryClassName={
               manager.placeholder
-                ? '!font-normal !text-xs text-[var(--color-text-muted)]'
+                ? '!font-normal text-sm text-[var(--color-text-muted)]'
                 : manager.muted
                   ? 'font-medium text-[var(--color-text-muted)] italic'
                   : ''
@@ -1164,21 +1142,23 @@ export default function Requests() {
     {
       key: 'action',
       label: 'Type',
-      width: '5.5rem',
-      minWidth: '5.5rem',
+      width: '4rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'align-middle whitespace-nowrap text-center',
-      render: (val) => <Tag variant={val === 'Add' ? 'add-action' : 'remove-action'} label={val} />
+      render: (val) => (
+        <div className="flex justify-center">
+          <Tag variant={val === 'Add' ? 'add-action' : 'remove-action'} label={val} />
+        </div>
+      )
     },
     {
       key: 'sentVia',
       label: 'Sent via',
-      width: '11.5rem',
-      minWidth: '11.5rem',
+      width: '7.5rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'align-middle whitespace-nowrap text-center',
+      cellClassName: 'align-middle overflow-hidden text-center',
       render: (_, row) => {
         const viaTags = sentViaTableRequestTags(row.tags || [], {
           isAdminEntry: isAdminEntry(row),
@@ -1186,11 +1166,11 @@ export default function Requests() {
         });
         if (!viaTags.length) {
           return (
-            <span className="text-xs font-medium text-[var(--color-text-muted)]">—</span>
+            <span className="text-sm font-medium text-[var(--color-text-muted)]">-</span>
           );
         }
         return (
-          <span className="inline-flex flex-col items-center gap-1">
+          <span className="inline-flex max-w-full flex-col items-center justify-center gap-1">
             {viaTags.map((tag) => (
               <Tag key={tag} variant={requestTagVariant(tag)} label={requestTagLabel(tag)} />
             ))}
@@ -1201,9 +1181,7 @@ export default function Requests() {
     {
       key: 'status',
       label: 'Status',
-      width: '13rem',
-      minWidth: '13rem',
-      noShrink: true,
+      width: '14%',
       headerClassName: 'text-center',
       cellClassName: 'align-middle overflow-hidden text-center px-1',
       render: (_, row) => {
@@ -1211,7 +1189,7 @@ export default function Requests() {
         const status = statusTags.length > 0 ? null : requestStatusTag(row);
         if (statusTags.length > 0) {
           return (
-            <span className="flex flex-wrap items-center justify-center gap-1.5">
+            <span className="flex max-w-full flex-col items-center justify-center gap-1">
               {statusTags.map((tag) => (
                 <Tag
                   key={tag.label}
@@ -1219,7 +1197,7 @@ export default function Requests() {
                   label={tag.label}
                   prefix={tag.prefix}
                   compact
-                  wide
+                  fit
                 />
               ))}
             </span>
@@ -1227,51 +1205,32 @@ export default function Requests() {
         }
         if (status.plain) {
           return (
-            <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+            <span className="text-sm font-medium text-[var(--color-text-secondary)]">
               {status.label}
             </span>
           );
         }
         return (
-          <Tag
-            variant={status.variant}
-            label={status.label}
-            prefix={status.prefix}
-            compact
-            wide
-          />
+          <div className="flex max-w-full justify-center">
+            <Tag
+              variant={status.variant}
+              label={status.label}
+              prefix={status.prefix}
+              compact
+              fit
+            />
+          </div>
         );
       },
     },
 
     {
-      key: 'remarks',
-      label: 'Needs review',
-      width: '7rem',
-      minWidth: '7rem',
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle max-w-0 overflow-hidden text-center px-2',
-      render: (_, row) => (
-        <RequestComparison
-          intakeMatch={row.intakeMatch}
-          directoryMatch={row.directoryMatch}
-          directory={liveDirectory}
-          requestPerson={row.person}
-          needsReview={row.needsReview}
-          duplicateGroupId={row.duplicateGroupId}
-          variant="table"
-          onViewDetails={() => handleOpenRequest(row)}
-        />
-      ),
-    },
-    {
       key: 'markAs',
       label: 'Mark as',
-      width: '5rem',
-      minWidth: '5rem',
+      width: '4.75rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap pl-1 pr-0 py-2',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-1',
       render: (_, row) => (
         <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
           <button
@@ -1283,7 +1242,7 @@ export default function Requests() {
                 setConfirmActionRequest({ request: row, adminNote: '' });
               }
             }}
-            className={`min-w-[4.75rem] w-[4.75rem] text-center px-1.5 py-1.5 text-xs font-semibold rounded-md border transition-all cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.12)] active:translate-y-px active:shadow-none shrink-0 ${
+            className={`min-w-[4.25rem] w-[4.25rem] text-center px-1.5 py-1.5 text-xs font-semibold rounded-md border transition-all cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.12)] active:translate-y-px active:shadow-none shrink-0 ${
               row.action === 'Add'
                 ? 'bg-[#16a34a] text-white border-[#15803d] hover:bg-[#15803d]'
                 : 'bg-[#dc2626] text-white border-[#b91c1c] hover:bg-[#b91c1c]'
@@ -1296,26 +1255,31 @@ export default function Requests() {
     },
     {
       key: 'open',
-      label: '',
-      width: '1.5rem',
-      minWidth: '1.5rem',
+      label: 'Actions',
+      width: '4.5rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap pl-0 pr-1 py-2 relative',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-1.5',
       render: (_, row) => (
-        <div className="flex h-full flex-col items-center justify-center pt-5 pb-1">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setConfirmDismissRequest({ request: row });
-            }}
-            aria-label="Delete request"
-            className="absolute top-1 right-1 inline-flex items-center justify-center p-1 text-[var(--color-text-muted)] hover:text-[#dc2626] transition-colors rounded hover:bg-red-50"
-          >
-            <X className="h-4 w-4" />
-          </button>
-          <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" aria-hidden="true" />
+        <div className="flex items-center justify-center gap-1.5">
+          <HoverTip label="Delete">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDismissRequest({ request: row });
+              }}
+              aria-label="Delete"
+              className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </HoverTip>
+          <HoverTip label="Open details">
+            <div className="flex items-center justify-center p-1" aria-hidden="true">
+              <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" />
+            </div>
+          </HoverTip>
         </div>
       )
     },
@@ -1327,7 +1291,6 @@ export default function Requests() {
     searchQuery,
     filterDate,
     filterLocation,
-    filterClub,
     filterSentVia,
     filterNeedsReview,
     filterStatus,
@@ -1348,7 +1311,7 @@ export default function Requests() {
       <Toast />
 
       <PageHeader
-        section="Partner Support"
+        section={`${partnerLabel} Support`}
         title="New Requests"
         description="Review and action incoming add and remove requests."
         workspace
@@ -1419,11 +1382,8 @@ export default function Requests() {
           },
           {
             label: 'User Location', value: filterLocation, onChange: setFilterLocation,
-            options: locationOptions
-          },
-          {
-            label: 'Manager Club', value: filterClub, onChange: setFilterClub,
-            options: clubOptions
+            options: locationOptions,
+            searchable: true,
           },
           {
             label: 'Sent via', value: filterSentVia, onChange: setFilterSentVia,
@@ -1431,7 +1391,7 @@ export default function Requests() {
               { value: 'All', label: 'All' },
               { value: TAG_PARTNER_REQUEST, label: 'Manager Form' },
               { value: TAG_AUTO_MAIL, label: 'Automated email' },
-              { value: SENT_VIA_BOTH, label: 'Both' },
+              { value: SENT_VIA_BOTH, label: 'Manager +Auto Mail' },
             ]
           },
           {
@@ -1472,7 +1432,6 @@ export default function Requests() {
         }}
         onDismiss={(row) => setConfirmDismissRequest({ request: row })}
         getRowClassName={getRequestRowClassName}
-        directory={liveDirectory}
       />
 
       <div className="hidden w-full sm:block">
@@ -1766,7 +1725,7 @@ export default function Requests() {
             </button>
             <button
               type="button"
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[#dc2626] hover:bg-[#b91c1c] shadow-sm cursor-pointer"
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
               onClick={() => {
                 if (confirmDismissRequest) {
                   handleDismissRequest(confirmDismissRequest.request);
@@ -1806,7 +1765,7 @@ export default function Requests() {
             </button>
             <button
               onClick={handleBulkDismissRequest}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 shadow-sm cursor-pointer"
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
             >
               Confirm
             </button>

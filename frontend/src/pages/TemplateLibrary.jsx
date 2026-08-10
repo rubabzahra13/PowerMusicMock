@@ -15,7 +15,7 @@ import {
 import { resolveSelectedInbox, writeSelectedInbox } from '../utils/selectedInbox';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClass } from '../utils/responsiveLayout';
-import { Toast, useToast, SelectDropdown, CardListSkeleton, Modal, EMPTY_CELL } from '../components/ui';
+import { Toast, useToast, SelectDropdown, CardListSkeleton, Modal, EMPTY_CELL, HoverTip } from '../components/ui';
 
 // ─── Language content swapper ──────────────────────────────────────────────────
 const LANG_VARIANTS = {
@@ -24,19 +24,19 @@ const LANG_VARIANTS = {
     subjectPrefix: 'AW: ',
     salutation: 'Guten Tag {{first_name}},',
     closing: 'Mit freundlichen Grüßen,\nPower Music Team',
-    bodyMiddle: '[Automatisch übersetzt — Inhalte werden in Kürze bereitgestellt.]'
+    bodyMiddle: '[Automatisch übersetzt. Inhalte werden in Kürze bereitgestellt.]'
   },
   Spanish: {
     subjectPrefix: 'RE: ',
     salutation: 'Estimado/a {{first_name}},',
     closing: 'Atentamente,\nEquipo de Power Music',
-    bodyMiddle: '[Traducido automáticamente — el contenido se proporcionará en breve.]'
+    bodyMiddle: '[Traducido automáticamente. El contenido se proporcionará en breve.]'
   },
   Japanese: {
     subjectPrefix: 'RE: ',
     salutation: '{{first_name}} 様、',
     closing: 'よろしくお願いいたします。\nPower Music チーム',
-    bodyMiddle: '[自動翻訳 — コンテンツは近日中に提供されます。]'
+    bodyMiddle: '[自動翻訳. コンテンツは近日中に提供されます。]'
   }
 };
 
@@ -163,7 +163,7 @@ function TemplateSuggestionPanel({
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</p>
                 <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-                  Based on how you edited drafts before sending — suggested fix for next time.
+                  Based on how you edited drafts before sending. Suggested fix for next time.
                 </p>
                 {item.rationale && (
                   <p className="mt-1.5 text-xs text-[var(--color-text-muted)] line-clamp-2">{item.rationale}</p>
@@ -559,17 +559,20 @@ function TemplateToolbarButton({
     publish: 'h-9 px-3 gap-1.5 text-xs font-semibold text-[var(--color-text-secondary)] border border-[var(--color-border-default)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)] focus-visible:ring-[var(--color-brand-primary)]/20',
   };
   const iconOnly = variant.endsWith('Icon') || variant === 'binIcon';
-  return (
+  const tip = ariaLabel || label;
+  const button = (
     <button
       type="button"
       onClick={onClick}
-      aria-label={ariaLabel || label}
+      aria-label={tip}
       className={`inline-flex items-center justify-center rounded-lg transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 ${styles[variant]} ${className}`}
     >
       <Icon className={iconClassName} aria-hidden="true" />
       {!iconOnly && label && <span>{label}</span>}
     </button>
   );
+  if (!iconOnly) return button;
+  return <HoverTip label={tip}>{button}</HoverTip>;
 }
 
 function CategorySection({
@@ -2152,43 +2155,49 @@ export default function TemplateManagement() {
                 </p>
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => { setSearchOpen((o) => !o); setFilterOpen(false); setSortOpen(false); }}
-                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                    searchOpen || search.trim()
-                      ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
-                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
-                  }`}
-                  aria-label="Search templates"
-                >
-                  <Search className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setFilterOpen((o) => !o); setSearchOpen(false); setSortOpen(false); }}
-                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                    filterOpen || hasActiveFilters
-                      ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
-                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
-                  }`}
-                  aria-label="Filter templates"
-                >
-                  <SlidersHorizontal className="w-4 h-4" />
-                </button>
-                <div className="relative" ref={sortRef}>
+                <HoverTip label="Search templates">
                   <button
                     type="button"
-                    onClick={() => { setSortOpen((o) => !o); setFilterOpen(false); setSearchOpen(false); }}
+                    onClick={() => { setSearchOpen((o) => !o); setFilterOpen(false); setSortOpen(false); }}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                      sortOpen || sortMode !== 'created-desc'
+                      searchOpen || search.trim()
                         ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
                         : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
                     }`}
-                    aria-label="Sort templates"
+                    aria-label="Search templates"
                   >
-                    <SortAsc className="w-4 h-4" />
+                    <Search className="w-4 h-4" />
                   </button>
+                </HoverTip>
+                <HoverTip label="Filter templates">
+                  <button
+                    type="button"
+                    onClick={() => { setFilterOpen((o) => !o); setSearchOpen(false); setSortOpen(false); }}
+                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                      filterOpen || hasActiveFilters
+                        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                        : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                    }`}
+                    aria-label="Filter templates"
+                  >
+                    <SlidersHorizontal className="w-4 h-4" />
+                  </button>
+                </HoverTip>
+                <div className="relative" ref={sortRef}>
+                  <HoverTip label="Sort templates">
+                    <button
+                      type="button"
+                      onClick={() => { setSortOpen((o) => !o); setFilterOpen(false); setSearchOpen(false); }}
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                        sortOpen || sortMode !== 'created-desc'
+                          ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                      }`}
+                      aria-label="Sort templates"
+                    >
+                      <SortAsc className="w-4 h-4" />
+                    </button>
+                  </HoverTip>
                   {sortOpen && (
                     <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-48 py-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-[var(--shadow-modal)]">
                       {sortOptions.map((option) => (
@@ -2231,9 +2240,11 @@ export default function TemplateManagement() {
                   className="w-full pl-9 pr-8 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)]"
                 />
                 {search && (
-                  <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+                  <HoverTip label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2">
+                    <button type="button" onClick={() => setSearch('')} aria-label="Clear search" className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </HoverTip>
                 )}
               </div>
             </div>
@@ -2307,24 +2318,28 @@ export default function TemplateManagement() {
                 <span className="text-[11px] font-medium text-[var(--color-text-secondary)] tabular-nums whitespace-nowrap">
                   {pageStart}–{pageEnd} of {displayedTemplates.length}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage <= 1}
-                  className="p-1 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                  aria-label="Previous page"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage >= totalPages}
-                  className="p-1 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                  aria-label="Next page"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+                <HoverTip label="Previous page">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                    className="p-1 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </HoverTip>
+                <HoverTip label="Next page">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    className="p-1 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </HoverTip>
               </div>
             ) : (
               <span className="text-[11px] font-medium text-[var(--color-text-secondary)] tabular-nums">

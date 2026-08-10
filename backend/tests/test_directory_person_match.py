@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.directory_person_match import (
     active_roster_rows,
+    directory_ledger_rows,
     directory_outcome_conflicts,
     duplicate_tags_for_person,
     find_directory_conflict,
@@ -240,3 +241,18 @@ class TestActiveRoster:
         assert removed.id not in snapshot_ids
         assert added.id not in snapshot_ids
         assert readded.id not in snapshot_ids
+
+    def test_directory_ledger_rows_includes_added_and_removed(self, db: Session):
+        added_email = f"ledger-added-{uuid.uuid4().hex[:8]}@example.com"
+        removed_email = f"ledger-removed-{uuid.uuid4().hex[:8]}@example.com"
+        added = _handled_row(db, _person(email=added_email), outcome="Added", action="Add")
+        prior_added = _handled_row(db, _person(email=removed_email), outcome="Added", action="Add")
+        removed = _handled_row(db, _person(email=removed_email), outcome="Removed", action="Remove")
+        db.flush()
+
+        ledger_by_id = {row.id: row for row in directory_ledger_rows(db, limit=200)}
+        assert added.id in ledger_by_id
+        assert ledger_by_id[added.id].outcome == "Added"
+        assert removed.id in ledger_by_id
+        assert ledger_by_id[removed.id].outcome == "Removed"
+        assert prior_added.id not in ledger_by_id

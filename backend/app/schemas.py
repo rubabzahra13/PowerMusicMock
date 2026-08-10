@@ -298,6 +298,7 @@ class PersonOut(BaseModel):
     email: Optional[str] = None
     location: Optional[str] = None
     status: str
+    action: Optional[str] = None
     dateAdded: Optional[datetime] = None
     addedBy: Optional[str] = None
     managerName: Optional[str] = None
@@ -576,6 +577,10 @@ class DuplicateGroupMemberOut(BaseModel):
     action: str
     status: str
     isRepresentative: bool = False
+    submittedBy: Optional[SubmittedBy] = None
+    notes: Optional[str] = None
+    tags: List[str] = []
+    createdBy: Optional[str] = None
 
 
 class DuplicateGroupDetailOut(BaseModel):

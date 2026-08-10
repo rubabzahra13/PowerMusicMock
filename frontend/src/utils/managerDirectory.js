@@ -153,8 +153,9 @@ function personMatchesNonEmailFields(person, query) {
   const first = String(person.firstName ?? person.first_name ?? '').toLowerCase();
   const last = String(person.lastName ?? person.last_name ?? '').toLowerCase();
   const fullName = `${first} ${last}`.trim();
+  const location = String(person.location ?? '').toLowerCase();
 
-  return fullName.includes(q) || first.includes(q) || last.includes(q);
+  return fullName.includes(q) || first.includes(q) || last.includes(q) || location.includes(q);
 }
 
 function emailMatchesSearch(email, query) {
@@ -186,7 +187,7 @@ export function getSearchQueryHint(query) {
   const q = query.trim().toLowerCase();
   if (q.length < 2) return null;
   if (!isUsableSearchQuery(query)) {
-    return 'Use at least 2 letters or numbers. Search by name or email.';
+    return 'Use at least 2 letters or numbers. Search by name, email, or location.';
   }
   return null;
 }

@@ -160,7 +160,7 @@ export default function TemplateEditor({ mode = 'new' }) {
           <ArrowLeft className="w-4 h-4" />
         </Link>
         <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
-          {mode === 'edit' ? `Edit Template — ${name}` : 'New Template'}
+          {mode === 'edit' ? `Edit Template: ${name}` : 'New Template'}
         </h2>
       </div>
 

@@ -56,7 +56,7 @@ export default function FlaggedEmails() {
   // Helper: resolve template body placeholders
   const getDraftText = (email) => {
     if (!email.templateUsed) {
-      return 'No draft available — email has been flagged for manual review.';
+      return 'No draft available. Email has been flagged for manual review.';
     }
     const foundTemplate = templates.find((t) => t.name === email.templateUsed);
     if (foundTemplate) {
@@ -96,7 +96,7 @@ export default function FlaggedEmails() {
     setResolutionType('Replied Manually');
     setResolutionNote('');
 
-    showToast(`Flag resolved — ${resolvedSubject}.`, 'success');
+    showToast(`Flag resolved: ${resolvedSubject}.`, 'success');
   };
 
   // Columns definition
@@ -341,16 +341,16 @@ export default function FlaggedEmails() {
               </span>
               <div className="space-y-1.5">
                 <div className="text-xs text-[var(--color-text-secondary)] font-medium">
-                  {formatReceivedTime(selectedEmail.receivedAt)} — Email received, AI
+                  {formatReceivedTime(selectedEmail.receivedAt)}: Email received, AI
                   classification complete
                 </div>
                 <div className="text-xs text-[var(--color-text-secondary)] font-medium">
-                  {formatReceivedTime(selectedEmail.receivedAt)} —{' '}
+                  {formatReceivedTime(selectedEmail.receivedAt)}:{' '}
                   {selectedEmail.templateUsed ? (
                     <span>Draft created using {selectedEmail.templateUsed}</span>
                   ) : (
                     <span className="text-amber-600 font-semibold">
-                      Draft creation skipped — flagged for manual review
+                      Draft creation skipped. Flagged for manual review
                     </span>
                   )}
                 </div>
@@ -380,7 +380,7 @@ export default function FlaggedEmails() {
       <Modal
         isOpen={showResolveModal !== null}
         onClose={() => setShowResolveModal(null)}
-        title={showResolveModal ? `Resolve Flag — ${truncate(showResolveModal.subject, 20)}` : ''}
+        title={showResolveModal ? `Resolve Flag: ${truncate(showResolveModal.subject, 20)}` : ''}
         footer={
           <>
             <button

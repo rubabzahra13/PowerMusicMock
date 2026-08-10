@@ -8,6 +8,8 @@ import {
   LogOut,
   Loader2,
   ChevronUp,
+  ChevronDown,
+  Check,
   PanelLeftClose,
   X,
   Plus,
@@ -15,8 +17,126 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { usePartners } from '../../context/PartnerContext';
 import { useToast } from '../ui/useToast';
-import { Modal, SelectDropdown } from '../ui';
+import { Modal, HoverTip } from '../ui';
 import { clearCache } from '../../utils/pilot2Api';
+
+function partnerInitials(name) {
+  const parts = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return 'P';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+}
+
+function PartnerSelect({
+  showExpanded,
+  partners,
+  selectedPartnerId,
+  setSelectedPartnerId,
+  partnerLabel,
+}) {
+  const [open, setOpen] = useState(false);
+  const disabled = partners.length === 0;
+  const options =
+    partners.length === 0
+      ? [{ value: '', label: 'No partners yet' }]
+      : [{ value: '', label: 'All Partners' }, ...partners.map((p) => ({ value: p.id, label: p.name }))];
+  const selected = options.find((opt) => opt.value === (selectedPartnerId || '')) ?? options[0];
+  const tipLabel = selected?.label || 'Partner';
+  const collapsedLabel = selectedPartnerId
+    ? partnerInitials(selected?.label || partnerLabel)
+    : 'All';
+
+  const triggerClass = showExpanded
+    ? 'flex w-full items-center justify-between gap-2 rounded-lg border border-[var(--color-brand-secondary-border)]/50 bg-[var(--color-brand-secondary)]/30 px-3 h-9 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--color-brand-secondary)]/45 hover:border-[var(--color-brand-secondary-border)]/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-secondary)]/25 disabled:cursor-not-allowed disabled:opacity-50'
+    : 'relative flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-brand-secondary-border)]/45 bg-[var(--color-brand-secondary)]/30 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-brand-secondary)]/45 hover:border-[var(--color-brand-secondary-border)]/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-secondary)]/35 disabled:cursor-not-allowed disabled:opacity-50';
+
+  return (
+    <>
+      <div className={showExpanded ? 'px-3' : 'relative flex justify-center px-1'}>
+        <HoverTip
+          label={showExpanded || open ? '' : tipLabel}
+          placement="right"
+          className={showExpanded ? 'w-full' : ''}
+        >
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setOpen(true)}
+            aria-label={`Partner: ${tipLabel}. Open partner selection`}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            className={triggerClass}
+          >
+            {showExpanded ? (
+              <>
+                <span className="min-w-0 truncate text-left">{tipLabel}</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--color-brand-secondary-border)]" />
+              </>
+            ) : (
+              <span className="truncate px-0.5">{collapsedLabel}</span>
+            )}
+          </button>
+        </HoverTip>
+      </div>
+
+      <Modal
+        isOpen={open}
+        onClose={() => setOpen(false)}
+        title="Select partner"
+        confirm
+        footer={
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="inline-flex min-w-[7.5rem] items-center justify-center rounded-lg border border-[var(--color-border-default)] bg-white px-4 py-2 text-sm font-semibold text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-panel)]"
+          >
+            Cancel
+          </button>
+        }
+      >
+        <p className="mb-4 text-sm text-[var(--color-text-secondary)]">
+          Choose which partner workspace to view.
+        </p>
+        <div
+          className="max-h-[min(50vh,22rem)] overflow-y-auto overscroll-contain pr-0.5"
+          role="listbox"
+          aria-label="Partners"
+        >
+          <div className="flex flex-col gap-1.5 text-left">
+            {options.map((opt) => {
+              const isActive = (selectedPartnerId || '') === opt.value;
+              return (
+                <button
+                  key={opt.value || 'all'}
+                  type="button"
+                  role="option"
+                  aria-selected={isActive}
+                  disabled={disabled && !opt.value}
+                  onClick={() => {
+                    if (disabled && partners.length === 0) return;
+                    setSelectedPartnerId(opt.value);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors ${
+                    isActive
+                      ? 'border-[var(--color-brand-secondary)] bg-[var(--color-brand-secondary-muted)] text-[var(--color-brand-secondary)]'
+                      : 'border-[var(--color-border-default)] bg-white text-[var(--color-text-primary)] hover:border-[var(--color-brand-secondary-border)] hover:bg-[var(--color-brand-secondary-muted)]/50'
+                  }`}
+                >
+                  <span className="min-w-0 truncate text-sm font-semibold">{opt.label}</span>
+                  {isActive && <Check className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </Modal>
+    </>
+  );
+}
 
 export default function Sidebar({
   mobileOpen = false,
@@ -25,8 +145,8 @@ export default function Sidebar({
   onExpandedChange,
 }) {
   const { logout, user } = useAuth();
-  const { partners, selectedPartnerId, setSelectedPartnerId, selectedPartner, createPartner } = usePartners();
-  const { clearToasts } = useToast();
+  const { partners, selectedPartnerId, setSelectedPartnerId, partnerLabel, createPartner } = usePartners();
+  const { clearToasts, showToast } = useToast();
   const navigate = useNavigate();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -123,7 +243,7 @@ export default function Sidebar({
 
   const navItemClass = ({ isActive }) =>
     `group relative flex items-center gap-3 h-9 rounded-md transition-all duration-200 text-sm font-medium ${
-      showExpanded ? 'px-3' : 'justify-center px-0'
+      showExpanded ? 'w-full px-3' : 'w-9 justify-center px-0'
     } ${
       isActive
         ? 'bg-[var(--color-brand-accent)] text-white opacity-100 shadow-sm'
@@ -137,12 +257,6 @@ export default function Sidebar({
   const toggleExpanded = () => {
     onExpandedChange?.(!expanded);
   };
-
-  const Tooltip = ({ label }) => (
-    <span className="pointer-events-none absolute left-full z-50 ml-2 hidden whitespace-nowrap rounded-md bg-[var(--color-surface-sidebar)] px-2 py-1 text-xs font-medium text-white shadow-lg ring-1 ring-white/10 group-hover:block">
-      {label}
-    </span>
-  );
 
   return (
     <>
@@ -176,159 +290,198 @@ export default function Sidebar({
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={onMobileClose}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 md:hidden"
-                aria-label="Close navigation menu"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
+              <HoverTip label="Close menu" placement="bottom">
+                <button
+                  type="button"
+                  onClick={onMobileClose}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 md:hidden"
+                  aria-label="Close menu"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </HoverTip>
+              <HoverTip label="Hide sidebar" placement="bottom">
+                <button
+                  type="button"
+                  onClick={toggleExpanded}
+                  className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/50 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 md:inline-flex"
+                  aria-label="Hide sidebar"
+                  aria-expanded="true"
+                >
+                  <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </HoverTip>
+            </>
+          ) : (
+            <HoverTip label="Show sidebar" placement="right">
               <button
                 type="button"
                 onClick={toggleExpanded}
-                className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/50 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 md:inline-flex"
-                aria-label="Hide sidebar"
-                aria-expanded="true"
-                title="Hide sidebar"
+                className="flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+                aria-label="Show sidebar"
+                aria-expanded="false"
               >
-                <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+                <img
+                  src="/image.png"
+                  alt="Power Music Ops"
+                  className="h-8 w-8 rounded-full object-cover ring-1 ring-white/15"
+                />
               </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={toggleExpanded}
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-              aria-label="Show sidebar"
-              aria-expanded="false"
-              title="Show sidebar"
-            >
-              <img
-                src="/image.png"
-                alt="Power Music Ops"
-                className="h-8 w-8 rounded-full object-cover ring-1 ring-white/15"
-              />
-            </button>
+            </HoverTip>
           )}
         </div>
 
         <div className={`h-px shrink-0 bg-white/10 ${showExpanded ? 'mx-4' : 'mx-3'}`} />
 
         <div className={`flex-1 overflow-y-auto space-y-6 py-4 ${showExpanded ? 'px-3' : 'px-2'}`}>
-          <div className="space-y-2">
+          <div className={`space-y-2 ${showExpanded ? '' : 'flex flex-col items-center'}`}>
             {showExpanded && (
               <span className="mb-1 block px-3 text-[11px] font-semibold uppercase tracking-wider text-white/40">
                 Partner Selection
               </span>
             )}
-            <div className={showExpanded ? 'px-3' : 'px-2'}>
-              <SelectDropdown
-                variant="inverse"
-                value={selectedPartnerId || ''}
-                onChange={(val) => setSelectedPartnerId(val)}
-                disabled={partners.length === 0}
-                options={
-                  partners.length === 0
-                    ? [{ value: '', label: 'No partners yet' }]
-                    : partners.map((p) => ({ value: p.id, label: p.name }))
-                }
-                className="w-full"
-              />
-            </div>
+            <PartnerSelect
+              showExpanded={showExpanded}
+              partners={partners}
+              selectedPartnerId={selectedPartnerId}
+              setSelectedPartnerId={setSelectedPartnerId}
+              partnerLabel={partnerLabel}
+            />
           </div>
 
-          <div className="space-y-1">
-            <NavLink to="/" end className={navItemClass} onClick={handleNavClick} title="Overview">
-              <Home className="h-4 w-4 shrink-0" />
-              {showExpanded ? <span>Overview</span> : <Tooltip label="Overview" />}
-            </NavLink>
-          </div>
-
-          <div className="space-y-1">
+          <div className={`space-y-1 ${showExpanded ? '' : 'flex flex-col items-center'}`}>
             {showExpanded && (
               <span className="mb-2 block px-3 text-[11px] font-semibold uppercase tracking-wider text-white/40">
-                {selectedPartner?.name ? `${selectedPartner.name} Support` : 'Partner Support'}
+                Partner Addition
               </span>
             )}
-            <NavLink to="/new-requests" className={navItemClass} onClick={handleNavClick} title="New requests">
-              <Inbox className="h-4 w-4 shrink-0" />
-              {showExpanded ? <span>New requests</span> : <Tooltip label="New requests" />}
-            </NavLink>
-            <NavLink to="/directory" end className={navItemClass} onClick={handleNavClick} title="Directory">
-              <Users className="h-4 w-4 shrink-0" />
-              {showExpanded ? <span>Directory</span> : <Tooltip label="Directory" />}
-            </NavLink>
-            <NavLink to="/partner-settings" className={navItemClass} onClick={handleNavClick} title={selectedPartner?.name ? `${selectedPartner.name} Settings` : 'Partner settings'}>
-              <Settings className="h-4 w-4 shrink-0" />
-              {showExpanded ? <span>{selectedPartner?.name ? `${selectedPartner.name} Settings` : 'Partner settings'}</span> : <Tooltip label={selectedPartner?.name ? `${selectedPartner.name} Settings` : 'Partner settings'} />}
-            </NavLink>
+            <HoverTip label={showExpanded ? '' : 'Add New Partner'} placement="right">
+              <button
+                type="button"
+                onClick={() => setPartnerCreateOpen(true)}
+                aria-label="Add New Partner"
+                className={`flex items-center rounded-lg text-left transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
+                  showExpanded
+                    ? 'w-full gap-3 px-3 h-9 text-sm font-semibold text-white'
+                    : 'h-9 w-9 justify-center text-white'
+                }`}
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-white">
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                </span>
+                {showExpanded ? <span>Add New Partner</span> : null}
+              </button>
+            </HoverTip>
+          </div>
+
+          <div className={`space-y-1 ${showExpanded ? '' : 'flex flex-col items-center'}`}>
+            {showExpanded && (
+              <span className="mb-2 block px-3 text-[11px] font-semibold uppercase tracking-wider text-white/40">
+                {partnerLabel} Overview
+              </span>
+            )}
+            <HoverTip
+              label={showExpanded ? '' : 'Overview'}
+              placement="right"
+              className={showExpanded ? 'w-full' : ''}
+            >
+              <NavLink to="/" end className={navItemClass} onClick={handleNavClick} aria-label="Overview">
+                <Home className="h-4 w-4 shrink-0" />
+                {showExpanded ? <span>Overview</span> : null}
+              </NavLink>
+            </HoverTip>
+          </div>
+
+          <div className={`space-y-1 ${showExpanded ? '' : 'flex flex-col items-center'}`}>
+            {showExpanded && (
+              <span className="mb-2 block px-3 text-[11px] font-semibold uppercase tracking-wider text-white/40">
+                {partnerLabel} Support
+              </span>
+            )}
+            <HoverTip
+              label={showExpanded ? '' : 'New requests'}
+              placement="right"
+              className={showExpanded ? 'w-full' : ''}
+            >
+              <NavLink to="/new-requests" className={navItemClass} onClick={handleNavClick} aria-label="New requests">
+                <Inbox className="h-4 w-4 shrink-0" />
+                {showExpanded ? <span>New requests</span> : null}
+              </NavLink>
+            </HoverTip>
+            <HoverTip
+              label={showExpanded ? '' : 'Directory'}
+              placement="right"
+              className={showExpanded ? 'w-full' : ''}
+            >
+              <NavLink to="/directory" className={navItemClass} onClick={handleNavClick} aria-label="Directory">
+                <Users className="h-4 w-4 shrink-0" />
+                {showExpanded ? <span>Directory</span> : null}
+              </NavLink>
+            </HoverTip>
+            <HoverTip
+              label={showExpanded ? '' : `${partnerLabel} Settings`}
+              placement="right"
+              className={showExpanded ? 'w-full' : ''}
+            >
+              <NavLink to="/partner-settings" className={navItemClass} onClick={handleNavClick} aria-label={`${partnerLabel} Settings`}>
+                <Settings className="h-4 w-4 shrink-0" />
+                {showExpanded ? <span>{partnerLabel} Settings</span> : null}
+              </NavLink>
+            </HoverTip>
           </div>
         </div>
 
         <div className={`shrink-0 border-t border-white/[0.06] ${showExpanded ? 'p-3' : 'p-2'}`} ref={accountRef}>
-          <button
-            type="button"
-            onClick={() => setPartnerCreateOpen(true)}
-            title={showExpanded ? 'Add New Partner' : 'Add New Partner'}
-            className={`mb-3 flex w-full items-center rounded-lg text-left transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
-              showExpanded ? 'gap-3 px-2.5 py-2' : 'justify-center px-0 py-2'
-            }`}
-          >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20">
-              <Plus className="h-4 w-4" aria-hidden="true" />
-            </div>
-            {showExpanded && (
-              <span className="min-w-0 flex-1 text-sm font-medium leading-snug text-white">
-                Add New Partner
-              </span>
-            )}
-          </button>
-
           <div className="relative">
-            <button
-              type="button"
-              onClick={() => {
-                if (!showExpanded) {
-                  onExpandedChange?.(true);
-                  return;
-                }
-                setMenuOpen((open) => !open);
-              }}
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              title={showExpanded ? 'Account menu' : 'Expand sidebar for account'}
-              className={`flex w-full items-center rounded-lg text-left transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
-                showExpanded ? 'gap-3 px-2.5 py-2' : 'justify-center px-0 py-2'
-              }`}
+            <HoverTip
+              label={showExpanded ? '' : 'Expand sidebar for account'}
+              placement="right"
+              className={showExpanded ? 'w-full' : ''}
             >
-              <div
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--color-brand-accent)] to-[#c73652] text-sm font-semibold text-white"
-                aria-hidden="true"
+              <button
+                type="button"
+                onClick={() => {
+                  if (!showExpanded) {
+                    onExpandedChange?.(true);
+                    return;
+                  }
+                  setMenuOpen((open) => !open);
+                }}
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+                aria-label={showExpanded ? 'Account menu' : 'Expand sidebar for account'}
+                className={`flex items-center rounded-lg text-left transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
+                  showExpanded ? 'h-11 w-full gap-3 px-3' : 'mx-auto h-11 w-11 justify-center px-0'
+                }`}
               >
-                {displayName.substring(0, 1).toUpperCase()}
-              </div>
+                <div
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--color-brand-accent)] to-[#c73652] text-sm font-semibold text-white"
+                  aria-hidden="true"
+                >
+                  {displayName.substring(0, 1).toUpperCase()}
+                </div>
 
-              {showExpanded && (
-                <>
-                  <div className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium leading-snug text-white">
-                      {displayName}
-                    </span>
-                    <span className="block text-xs leading-snug text-white/45">
-                      Administrator
-                    </span>
-                  </div>
+                {showExpanded && (
+                  <>
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold leading-snug text-white">
+                        {displayName}
+                      </span>
+                      <span className="block truncate text-xs leading-snug text-white/45">
+                        Administrator
+                      </span>
+                    </div>
 
-                  <ChevronUp
-                    className={`h-4 w-4 shrink-0 text-white/40 transition-transform duration-200 ${
-                      menuOpen ? '' : 'rotate-180'
-                    }`}
-                    aria-hidden="true"
-                  />
-                </>
-              )}
-            </button>
+                    <ChevronUp
+                      className={`h-4 w-4 shrink-0 text-white/40 transition-transform duration-200 ${
+                        menuOpen ? '' : 'rotate-180'
+                      }`}
+                      aria-hidden="true"
+                    />
+                  </>
+                )}
+              </button>
+            </HoverTip>
 
             {menuOpen && showExpanded && (
               <div
@@ -439,26 +592,32 @@ export default function Sidebar({
               type="text"
               value={partnerCreateName}
               onChange={(event) => setPartnerCreateName(event.target.value)}
-              placeholder="Power Music"
+              placeholder="e.g. Pure Gym"
               className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
             />
           </div>
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Allowed domains</label>
+            <p className="mb-1.5 text-xs text-[var(--color-text-secondary)]">
+              Manager sign-in domains, one per line. Do not include @.
+            </p>
             <textarea
               value={partnerCreateDomains}
               onChange={(event) => setPartnerCreateDomains(event.target.value)}
-              placeholder="powermusic.com\n"
+              placeholder={'activegym.com\npartnerclub.com'}
               rows={3}
               className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
             />
           </div>
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Automated email sources</label>
+            <p className="mb-1.5 text-xs text-[var(--color-text-secondary)]">
+              Emails or domains that can create add/remove requests, one per line.
+            </p>
             <textarea
               value={partnerCreateSources}
               onChange={(event) => setPartnerCreateSources(event.target.value)}
-              placeholder="notifications@powermusic.com\n@powermusic.com"
+              placeholder={'roster@activegym.com\n@partnerclub.com'}
               rows={3}
               className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
             />

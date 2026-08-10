@@ -88,6 +88,7 @@ export async function fetchJson(path, options = {}) {
   try {
     const headers = await buildAuthHeaders(rest.headers || {});
     const res = await fetch(getApiUrl(path), {
+      cache: 'no-store',
       ...rest,
       headers,
       signal: controller.signal,

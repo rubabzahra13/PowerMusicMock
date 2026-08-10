@@ -972,11 +972,11 @@ export default function ManagerForm() {
             <input
               id={ids.search}
               type="search"
-              placeholder="Search by name or email..."
+              placeholder="Search by name, email, or location..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               disabled={submitted}
-              aria-label="Search by name or email"
+              aria-label="Search by name, email, or location"
               className={`${inputClass} pl-9`}
             />
           </div>
@@ -1175,13 +1175,13 @@ export default function ManagerForm() {
                             </span>
                           </td>
                           <td className="whitespace-nowrap px-2 py-2 font-normal text-[var(--color-text-secondary)]">
-                            {row.email || '—'}
+                            {row.email || '-'}
                           </td>
                           <td className="whitespace-nowrap px-2 py-2 font-normal text-[var(--color-text-secondary)]">
-                            {row.location || '—'}
+                            {row.location || '-'}
                           </td>
                           <td className="whitespace-nowrap px-2 py-2 font-normal text-[var(--color-text-secondary)]">
-                            {dateLabel || '—'}
+                            {dateLabel || '-'}
                           </td>
                           <td className="whitespace-nowrap px-2 py-2">
                             <span
