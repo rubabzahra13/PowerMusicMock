@@ -42,12 +42,10 @@ function PartnerSelect({
   const options =
     partners.length === 0
       ? [{ value: '', label: 'No partners yet' }]
-      : [{ value: '', label: 'All Partners' }, ...partners.map((p) => ({ value: p.id, label: p.name }))];
+      : partners.map((p) => ({ value: p.id, label: p.name }));
   const selected = options.find((opt) => opt.value === (selectedPartnerId || '')) ?? options[0];
   const tipLabel = selected?.label || 'Partner';
-  const collapsedLabel = selectedPartnerId
-    ? partnerInitials(selected?.label || partnerLabel)
-    : 'All';
+  const collapsedLabel = partnerInitials(selected?.label || partnerLabel);
 
   const triggerClass = showExpanded
     ? 'flex w-full items-center justify-between gap-2 rounded-lg border border-[var(--color-brand-secondary-border)]/50 bg-[var(--color-brand-secondary)]/30 px-3 h-9 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--color-brand-secondary)]/45 hover:border-[var(--color-brand-secondary-border)]/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-secondary)]/25 disabled:cursor-not-allowed disabled:opacity-50'
