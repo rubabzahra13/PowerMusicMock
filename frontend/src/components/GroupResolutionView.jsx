@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, ChevronRight, ChevronDown, Check, Database, Clock, Pencil,
-  X, AlertTriangle, Users, Inbox,
+  X, Users, Inbox, Trash2,
 } from 'lucide-react';
 import { Tag, Modal, HoverTip } from './ui';
 import { formatAdminDateTime, formatRequestDisplayId } from '../utils/requestDisplayId';
@@ -11,7 +11,6 @@ import { readManagerNotes } from '../utils/managerNotes';
 import {
   resolveGroupAdd,
   resolveGroupUpdate,
-  resolveGroupUpdatePreview,
   resolveGroupKeepExisting,
   unlinkGroupMember,
 } from '../utils/duplicateGroupApi';
@@ -49,7 +48,7 @@ function MetaItem({ label, value }) {
   if (!value) return null;
   return (
     <div className="min-w-0">
-      <dt className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
+      <dt className="text-[11px] font-bold uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
         {label}
       </dt>
       <dd className="mt-1 break-words text-sm font-medium text-[var(--color-text-primary)]">
@@ -166,17 +165,14 @@ export default function GroupResolutionView({
   // Members list (local — remove unlinked members instantly)
   const [members, setMembers] = useState(group.members);
   const [valuesOpen, setValuesOpen] = useState(true);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [mergePageOpen, setMergePageOpen] = useState(false);
 
-  // Update / resolve confirmation modal state
-  const [confirmAction, setConfirmAction] = useState(null); // 'keep' | 'merge' | null
-  const [previewData, setPreviewData] = useState(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  // Keep confirmation + merge-page values
+  const [confirmAction, setConfirmAction] = useState(null); // 'keep' | null
   const [modalValues, setModalValues] = useState(null);
 
   const updateDraftField = (field, value) => setDraftForm((f) => ({ ...f, [field]: value }));
-  const updateModalField = (field, value) => setModalValues((f) => ({ ...f, [field]: value }));
 
   const handleEditClick = () => {
     setDraftForm(form);
@@ -194,7 +190,10 @@ export default function GroupResolutionView({
 
   const closeConfirmModal = () => {
     setConfirmAction(null);
-    setPreviewData(null);
+  };
+
+  const closeMergePage = () => {
+    setMergePageOpen(false);
     setModalValues(null);
   };
 
@@ -204,40 +203,37 @@ export default function GroupResolutionView({
     setConfirmAction('keep');
   };
 
-  /* ── merge — open confirm; load overwrite preview only when Directory exists ── */
-  const openMergeConfirm = async () => {
-    if (!isFormValid || submitting || previewLoading) return;
+  /* ── merge — open clear on-page merge view (no modal) ── */
+  const openMergePage = () => {
+    if (submitting) return;
+    setHistoryExpanded(true);
+    setValuesOpen(true);
+    setModalValues({ ...form });
+    setMergePageOpen(true);
+  };
 
-    if (!hasDirectory) {
-      setPreviewData(null);
-      setModalValues({ ...form });
-      setConfirmAction('merge');
+  const openMergeConfirm = async () => {
+    if (!isFormValid || submitting) return;
+    openMergePage();
+  };
+
+  const handleSaveResolved = () => {
+    if (isEditing) {
+      if (!draftForm.firstName.trim() || !draftForm.lastName.trim()) return;
+      setForm(draftForm);
+      setIsEditing(false);
+      setModalValues({ ...draftForm });
       return;
     }
+    setModalValues({ ...form });
+  };
 
-    setPreviewLoading(true);
-    try {
-      const preview = await resolveGroupUpdatePreview(group.id, {
-        directoryPersonId: group.directoryPersonId,
-        finalValues: {
-          firstName: form.firstName.trim(),
-          lastName: form.lastName.trim(),
-          email: form.email.trim(),
-          location: form.location.trim(),
-        },
-      });
-      setPreviewData(preview);
-      setModalValues({
-        firstName: preview.proposedValues?.firstName ?? form.firstName,
-        lastName: preview.proposedValues?.lastName ?? form.lastName,
-        email: preview.proposedValues?.email ?? form.email,
-        location: preview.proposedValues?.location ?? form.location,
-      });
-      setConfirmAction('merge');
-    } catch (err) {
-      onResolved('error', err.message || 'Failed to load preview.');
-    } finally {
-      setPreviewLoading(false);
+  const handleConfirmMerge = async () => {
+    const values = isEditing ? draftForm : (modalValues || form);
+    if (hasDirectory) {
+      await handleConfirmUpdate(values);
+    } else {
+      await handleResolveAdd(values);
     }
   };
 
@@ -256,6 +252,7 @@ export default function GroupResolutionView({
         adminNote: adminNote.trim() || null,
       });
       closeConfirmModal();
+      closeMergePage();
       onResolved('add', personFullName(values));
     } catch (err) {
       onResolved('error', err.message || 'Failed to resolve group.');
@@ -281,20 +278,12 @@ export default function GroupResolutionView({
         adminNote: adminNote.trim() || null,
       });
       closeConfirmModal();
+      closeMergePage();
       onResolved('update', personFullName(values));
     } catch (err) {
       onResolved('error', err.message || 'Failed to update Directory.');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleConfirmMerge = async () => {
-    const values = modalValues || form;
-    if (hasDirectory) {
-      await handleConfirmUpdate(values);
-    } else {
-      await handleResolveAdd(values);
     }
   };
 
@@ -427,91 +416,26 @@ export default function GroupResolutionView({
         </div>
       </header>
 
-      {/* ── Section A: Current Directory Record (only if already_exists) ── */}
-      {hasDirectory && (
-        <SectionCard icon={Database} title="Current Directory Record">
-          {dirPerson ? (
-            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-8">
-              <MetaItem label="First Name" value={dirPerson.firstName} />
-              <MetaItem label="Last Name" value={dirPerson.lastName} />
-              <MetaItem label="Email" value={dirPerson.email} />
-              <MetaItem label="Location" value={dirPerson.location} />
-              {dirPerson.status && <MetaItem label="Status" value={dirPerson.status} />}
-            </dl>
-          ) : (
-            <p className="text-sm text-[var(--color-text-muted)] italic">
-              Directory record details not available locally. Values shown in the confirmation step.
-            </p>
-          )}
-          <p className="mt-4 text-xs text-[var(--color-text-muted)]">
-            This is the existing Directory record. Use "Add this Record" on the current request, or "Merge Record" with the final values, or "Keep Existing and Delete New Request" to leave it unchanged.
-          </p>
-        </SectionCard>
-      )}
 
-      {/* ── New Request (latest only) ── */}
-      {currentRequest && (
+      {mergePageOpen ? (
         <SectionCard
-          icon={Inbox}
-          title="New Request"
+          icon={Clock}
+          title={`Request History (${members.length})`}
           action={
             <button
               type="button"
-              disabled={!isFormValid || submitting || previewLoading || isEditing}
-              onClick={openMergeConfirm}
-              className={BTN_PRIMARY}
+              onClick={closeMergePage}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--color-brand-primary)] transition-colors hover:text-[var(--color-surface-sidebar-hover)] cursor-pointer"
             >
-              <Check className="h-4 w-4" aria-hidden="true" />
-              {previewLoading ? 'Loading preview…' : submitting ? 'Updating…' : 'Add this Record'}
+              ← Back to Current Request
             </button>
           }
         >
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
-              {formatRequestDisplayId(currentRequest.displayId)}
-            </span>
-            <Tag
-              variant={currentRequest.action === 'Add' ? 'add-action' : 'remove-action'}
-              label={currentRequest.action}
+          <div className="relative space-y-4 pl-6 sm:pl-8">
+            <div
+              className="pointer-events-none absolute bottom-4 left-[0.7rem] top-4 w-px bg-[var(--color-brand-secondary)]/35 sm:left-[0.95rem]"
+              aria-hidden="true"
             />
-            <Tag variant="new-person" label="Current request" />
-          </div>
-
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
-            <MetaItem label="First Name" value={currentRequest.person?.firstName} />
-            <MetaItem label="Last Name" value={currentRequest.person?.lastName} />
-            <MetaItem label="Email" value={currentRequest.person?.email} />
-            <MetaItem label="Location" value={currentRequest.person?.location} />
-            <MetaItem label="Manager name" value={currentManager.managerName} />
-            <MetaItem label="Manager email" value={currentManager.managerEmail} />
-            <MetaItem label="Manager location" value={currentManager.managerClub} />
-            <MetaItem label="Manager notes" value={currentManager.notesText} />
-          </dl>
-
-          {currentRequest.receivedAt && (
-            <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-              Received {formatAdminDateTime(currentRequest.receivedAt)}
-            </p>
-          )}
-        </SectionCard>
-      )}
-
-      {/* ── Request History ── */}
-      <SectionCard
-        icon={Clock}
-        title={`View Request History (${members.length})`}
-        collapsible
-        open={historyOpen}
-        onToggle={() => setHistoryOpen((open) => !open)}
-      >
-        <div className="space-y-3">
-          <p className="mb-2 text-sm text-[var(--color-text-secondary)]">
-            {hasDirectory
-              ? 'Review matching requests below, set final values, then choose Keep or Merge. Field changes only appear in the modal when overwriting Directory.'
-              : 'Review matching requests below, set final values, then choose Keep or Merge. You’ll confirm before anything is written.'}
-          </p>
-
-          <div className="space-y-3 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-bg)]/70 p-3 sm:p-4">
             {(() => {
               const sortedByNewest = [...members].sort(
                 (a, b) => new Date(b.receivedAt) - new Date(a.receivedAt),
@@ -525,69 +449,81 @@ export default function GroupResolutionView({
                   : sortedByNewest;
 
               return (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {visibleMembers.map((member) => {
                     const isLatest = member.id === latestId;
                     const role = isLatest
                       ? { variant: 'new-person', label: 'Current request' }
                       : { variant: 'neutral', label: 'Older' };
+                    const {
+                      managerName,
+                      managerEmail,
+                      managerClub,
+                      notesText,
+                    } = managerFieldsFromMember(member);
                     return (
-                      <div
-                        key={member.id}
-                        className={`relative rounded-xl border px-4 py-3.5 ${isLatest
-                          ? 'border-[var(--color-surface-sidebar)] bg-white ring-2 ring-[var(--color-surface-sidebar)]/20'
-                          : 'border-[var(--color-border-default)] bg-white'
-                          } ${!isLatest && members.length > 1 ? 'pr-44' : ''}`}
-                      >
-                        {!isLatest && members.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setUnlinkTargetId(member.id)}
-                            className="absolute right-4 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border-default)] bg-white text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors cursor-pointer"
-                            title="Mark as not the same person"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                            Not the same person
-                          </button>
-                        )}
+                      <div key={member.id} className="relative">
+                        <span
+                          className="absolute -left-6 top-5 z-[1] h-3 w-3 rounded-sm border-2 border-[var(--color-brand-secondary)] bg-white sm:-left-7"
+                          aria-hidden="true"
+                        />
+                        <div
+                          className={`rounded-xl border bg-white px-4 py-3.5 ${isLatest
+                            ? 'border-[var(--color-surface-sidebar)] ring-2 ring-[var(--color-surface-sidebar)]/20'
+                            : 'border-[var(--color-border-default)]'
+                            }`}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
+                                {formatRequestDisplayId(member.displayId)}
+                              </span>
+                              <Tag
+                                variant={member.action === 'Add' ? 'add-action' : 'remove-action'}
+                                label={member.action}
+                              />
+                              <Tag variant={role.variant} label={role.label} />
+                            </div>
+                            {!isLatest && members.length > 1 && (
+                              <div className="flex w-[11.5rem] shrink-0 flex-col overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-bg)]/80 shadow-[0_1px_0_rgba(26,26,46,0.04)]">
+                                <button
+                                  type="button"
+                                  onClick={() => setUnlinkTargetId(member.id)}
+                                  className="inline-flex w-full items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-white hover:text-[var(--color-text-primary)] cursor-pointer"
+                                >
+                                  <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                                  Not the same person
+                                </button>
+                                <div className="h-px bg-[var(--color-border-default)]" aria-hidden="true" />
+                                <button
+                                  type="button"
+                                  onClick={() => setUnlinkTargetId(member.id)}
+                                  className="inline-flex w-full items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
 
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
-                            {formatRequestDisplayId(member.displayId)}
-                          </span>
-                          <Tag
-                            variant={member.action === 'Add' ? 'add-action' : 'remove-action'}
-                            label={member.action}
-                          />
-                          <Tag variant={role.variant} label={role.label} />
+                          <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+                            <MetaItem label="First Name" value={member.person.firstName || '—'} />
+                            <MetaItem label="Last Name" value={member.person.lastName || '—'} />
+                            <MetaItem label="Email" value={member.person.email || '—'} />
+                            <MetaItem label="Location" value={member.person.location || '—'} />
+                            <MetaItem label="Manager name" value={managerName || '—'} />
+                            <MetaItem label="Manager email" value={managerEmail || '—'} />
+                            <MetaItem label="Manager location" value={managerClub || '—'} />
+                            <MetaItem label="Manager notes" value={notesText || 'No notes'} />
+                          </dl>
+
+                          {member.receivedAt && (
+                            <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+                              Received {formatAdminDateTime(member.receivedAt)}
+                            </p>
+                          )}
                         </div>
-
-                        {(() => {
-                          const {
-                            managerName,
-                            managerEmail,
-                            managerClub,
-                            notesText,
-                          } = managerFieldsFromMember(member);
-                          return (
-                            <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
-                              <MetaItem label="First Name" value={member.person.firstName} />
-                              <MetaItem label="Last Name" value={member.person.lastName} />
-                              <MetaItem label="Email" value={member.person.email} />
-                              <MetaItem label="Location" value={member.person.location} />
-                              <MetaItem label="Manager name" value={managerName} />
-                              <MetaItem label="Manager email" value={managerEmail} />
-                              <MetaItem label="Manager location" value={managerClub} />
-                              <MetaItem label="Manager notes" value={notesText} />
-                            </dl>
-                          );
-                        })()}
-
-                        {member.receivedAt && (
-                          <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-                            Received {formatAdminDateTime(member.receivedAt)}
-                          </p>
-                        )}
                       </div>
                     );
                   })}
@@ -613,8 +549,7 @@ export default function GroupResolutionView({
             })()}
           </div>
 
-          {/* Final Resolved Values — collapsed accordion */}
-          <div className="overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white">
+          <div className="mt-6 overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white">
             <button
               type="button"
               onClick={() => setValuesOpen((open) => !open)}
@@ -718,12 +653,12 @@ export default function GroupResolutionView({
                   </div>
                 )}
 
-                <label htmlFor="group-resolve-note" className="mt-5 block w-full border-t border-[var(--color-border-default)] pt-4">
+                <label htmlFor="merge-page-resolve-note" className="mt-5 block w-full border-t border-[var(--color-border-default)] pt-4">
                   <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
                     Admin note <span className="normal-case tracking-normal">(optional)</span>
                   </span>
                   <textarea
-                    id="group-resolve-note"
+                    id="merge-page-resolve-note"
                     value={adminNote}
                     onChange={(e) => setAdminNote(e.target.value)}
                     placeholder="Saved with the resolution record"
@@ -735,48 +670,119 @@ export default function GroupResolutionView({
             )}
           </div>
 
-          {/* Resolve actions */}
-          <div className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2">
+          <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--color-border-default)] pt-4">
             <button
               type="button"
-              disabled={submitting}
-              onClick={openKeepConfirm}
-              className="group flex flex-col items-start gap-2 rounded-xl border border-[var(--color-border-default)] bg-white px-4 py-4 text-left transition-colors hover:border-[var(--color-brand-secondary-border)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+              disabled={submitting || !isFormValid || isEditing}
+              onClick={handleSaveResolved}
+              className={BTN_SECONDARY}
             >
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--color-surface-bg)] text-[var(--color-text-secondary)] ring-1 ring-[var(--color-border-default)] group-hover:text-[var(--color-brand-secondary)]">
-                <Database className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span className="text-sm font-semibold text-[var(--color-text-primary)]">
-                Keep Existing and Delete New Request
-              </span>
-              <span className="text-xs leading-snug text-[var(--color-text-secondary)]">
-                {hasDirectory
-                  ? 'Leave Directory unchanged and close the new requests.'
-                  : 'Discard these requests without adding anyone to Directory.'}
-              </span>
+              Save
             </button>
-
             <button
               type="button"
-              disabled={!isFormValid || submitting || previewLoading || isEditing}
-              onClick={openMergeConfirm}
-              className="group flex flex-col items-start gap-2 rounded-xl border border-[var(--color-brand-primary)]/20 bg-[var(--color-brand-primary)] px-4 py-4 text-left text-white transition-colors hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+              disabled={submitting || !isFormValid || isEditing}
+              onClick={handleConfirmMerge}
+              className={BTN_PRIMARY}
             >
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-white">
-                <Check className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span className="text-sm font-semibold">
-                {previewLoading ? 'Loading preview…' : 'Merge Record'}
-              </span>
-              <span className="text-xs leading-snug text-white/80">
-                {hasDirectory
-                  ? 'Overwrite Directory with resolved values — review the diff in the modal.'
-                  : 'Create a Directory record from the final resolved values.'}
-              </span>
+              <Check className="h-4 w-4" aria-hidden="true" />
+              {submitting ? 'Merging…' : 'Merge'}
             </button>
           </div>
-        </div>
-      </SectionCard>
+        </SectionCard>
+      ) : (
+        <>
+      {/* ── Section A: Current Directory Record (only if already_exists) ── */}
+      {hasDirectory && (
+        <SectionCard icon={Database} title="Current Directory Record">
+          {dirPerson ? (
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-8">
+              <MetaItem label="First Name" value={dirPerson.firstName} />
+              <MetaItem label="Last Name" value={dirPerson.lastName} />
+              <MetaItem label="Email" value={dirPerson.email} />
+              <MetaItem label="Location" value={dirPerson.location} />
+              {dirPerson.status && <MetaItem label="Status" value={dirPerson.status} />}
+            </dl>
+          ) : (
+            <p className="text-sm text-[var(--color-text-muted)] italic">
+              Directory record details not available locally. Values shown in the confirmation step.
+            </p>
+          )}
+          <p className="mt-4 text-xs text-[var(--color-text-muted)]">
+            This is the existing Directory record. Keep leaves it unchanged; Merge opens history so you can review and update it with final values.
+          </p>
+        </SectionCard>
+      )}
+
+      {/* ── New Request (latest only) ── */}
+      {currentRequest && (
+        <SectionCard
+          icon={Inbox}
+          title="New Request"
+        >
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
+              {formatRequestDisplayId(currentRequest.displayId)}
+            </span>
+            <Tag
+              variant={currentRequest.action === 'Add' ? 'add-action' : 'remove-action'}
+              label={currentRequest.action}
+            />
+            <Tag variant="new-person" label="Current request" />
+          </div>
+
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+            <MetaItem label="First Name" value={currentRequest.person?.firstName} />
+            <MetaItem label="Last Name" value={currentRequest.person?.lastName} />
+            <MetaItem label="Email" value={currentRequest.person?.email} />
+            <MetaItem label="Location" value={currentRequest.person?.location} />
+            <MetaItem label="Manager name" value={currentManager.managerName} />
+            <MetaItem label="Manager email" value={currentManager.managerEmail} />
+            <MetaItem label="Manager location" value={currentManager.managerClub} />
+            <MetaItem label="Manager notes" value={currentManager.notesText || 'No notes'} />
+          </dl>
+
+          {currentRequest.receivedAt && (
+            <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+              Received {formatAdminDateTime(currentRequest.receivedAt)}
+            </p>
+          )}
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border-default)] pt-4">
+            <button
+              type="button"
+              onClick={openMergePage}
+              className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--color-text-primary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:border-[var(--color-brand-secondary-border)] hover:text-[var(--color-brand-secondary)] cursor-pointer"
+            >
+              <Clock className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />
+              View Request History ({members.length})
+            </button>
+
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={openKeepConfirm}
+                className={BTN_SECONDARY}
+              >
+                Keep Existing and Delete New Request
+              </button>
+              <button
+                type="button"
+                disabled={!isFormValid || submitting || isEditing}
+                onClick={openMergeConfirm}
+                className={BTN_PRIMARY}
+              >
+                <Check className="h-4 w-4" aria-hidden="true" />
+                Merge & Update Request in Directory
+              </button>
+            </div>
+          </div>
+        </SectionCard>
+      )}
+
+        </>
+      )}
 
       {/* ── Keep confirmation ── */}
       <Modal
@@ -808,105 +814,6 @@ export default function GroupResolutionView({
             ? 'The Directory record will stay unchanged. Incoming requests in this group will be closed without writing new values.'
             : 'No Directory record will be created. Incoming requests in this group will be closed and discarded.'}
         </p>
-      </Modal>
-
-      {/* ── Merge confirmation ── */}
-      <Modal
-        isOpen={confirmAction === 'merge'}
-        onClose={closeConfirmModal}
-        title={hasDirectory ? 'Merge into Directory record?' : 'Merge and add to Directory?'}
-        wide={hasDirectory}
-        footer={
-          <>
-            <button
-              type="button"
-              onClick={closeConfirmModal}
-              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={
-                submitting
-                || !(modalValues?.firstName || '').trim()
-                || !(modalValues?.lastName || '').trim()
-              }
-              onClick={handleConfirmMerge}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-60"
-            >
-              {submitting
-                ? 'Resolving…'
-                : hasDirectory
-                  ? 'Confirm Merge'
-                  : 'Add to Directory'}
-            </button>
-          </>
-        }
-      >
-        {hasDirectory && previewData && modalValues ? (
-          <div className="space-y-4">
-            <p className="text-sm text-[var(--color-text-secondary)]">
-              This will overwrite{' '}
-              <strong className="text-[var(--color-text-primary)]">
-                {personFullName(previewData.currentValues || form)}
-              </strong>
-              {' '}
-              in Directory. Adjust resolved values below before confirming.
-            </p>
-
-            {previewData.anyChanged && (
-              <div className="flex items-center gap-2 rounded-lg border border-[var(--color-tag-review-exists-border)] bg-[var(--color-tag-review-exists-bg)] px-3 py-2 text-xs text-[var(--color-tag-review-exists-text)]">
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                {previewData.fields?.filter((f) => f.changed).length} field(s) differ from Directory.
-              </div>
-            )}
-
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[28rem] text-sm border-collapse">
-                <thead>
-                  <tr>
-                    <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] pb-2 w-[20%]">Field</th>
-                    <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] pb-2 w-[28%]">Directory</th>
-                    <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] pb-2 w-[28%]">Proposed</th>
-                    <th className="text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] pb-2 w-[24%]">Resolved</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-default)]">
-                  {(previewData.fields || []).map((f) => (
-                    <tr
-                      key={f.field}
-                      className={f.changed ? 'bg-[var(--color-tag-review-exists-bg)]/40' : ''}
-                    >
-                      <td className="py-2.5 pr-3 text-xs font-medium text-[var(--color-text-secondary)] align-middle">
-                        {f.label}
-                      </td>
-                      <td className="py-2.5 pr-3 text-xs text-[var(--color-text-muted)] font-mono align-middle">
-                        {f.currentValue || <span className="italic">—</span>}
-                      </td>
-                      <td className="py-2.5 pr-3 text-xs font-mono align-middle text-[var(--color-text-muted)]">
-                        {f.proposedValue || <span className="italic">—</span>}
-                      </td>
-                      <td className="py-2 align-middle">
-                        <input
-                          type="text"
-                          value={modalValues[f.field] ?? ''}
-                          onChange={(e) => updateModalField(f.field, e.target.value)}
-                          className={`${INPUT_CLASS} py-1.5 text-xs`}
-                          aria-label={`Resolved ${f.label}`}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-[var(--color-text-secondary)]">
-            This will create a new Directory record from the final resolved values and close the requests in this group.
-          </p>
-        )}
       </Modal>
 
       {/* ── Unlink confirmation modal ── */}

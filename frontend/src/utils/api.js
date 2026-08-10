@@ -101,9 +101,10 @@ export async function fetchJson(path, options = {}) {
       } catch {
         /* keep statusText */
       }
-      if (res.status === 401) {
-        // Token rejected (expired/invalid). Tell the auth layer so the user
-        // is signed out and routed to login instead of a broken dashboard.
+      if (res.status === 401 && headers.Authorization) {
+        // Token was sent and rejected (expired/invalid). Sign the user out.
+        // Skip when no Bearer was attached — that is often a race (e.g. an
+        // admin-only call before role is known), not a dead session.
         window.dispatchEvent(new CustomEvent('auth:session-expired'));
       }
       throw new Error(formatApiErrorDetail(detail));

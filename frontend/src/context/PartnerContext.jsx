@@ -23,7 +23,7 @@ function writeSelectedPartnerId(value) {
 }
 
 export function PartnerProvider({ children }) {
-  const { authReady, user } = useAuth();
+  const { authReady, user, role } = useAuth();
   const [partners, setPartners] = useState([]);
   const [selectedPartnerId, setSelectedPartnerIdState] = useState(readSelectedPartnerId());
 
@@ -61,10 +61,15 @@ export function PartnerProvider({ children }) {
   };
 
   useEffect(() => {
-    if (!authReady || !user) return;
+    // /api/partners is admin-only. Managers must not hit it — a 401 on that
+    // call fires auth:session-expired and immediately signs them out.
+    if (!authReady || !user || role !== 'admin') {
+      if (role && role !== 'admin') setPartners([]);
+      return;
+    }
     refreshPartners().catch(() => setPartners([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authReady, user]);
+  }, [authReady, user, role]);
 
   const selectedPartner = useMemo(
     () => partners.find((partner) => partner.id === selectedPartnerId) || null,
