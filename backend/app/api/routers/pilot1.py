@@ -333,6 +333,34 @@ def archive_person(
     return directory_rows_to_api_dicts(db, [req])[0]
 
 
+@router.post("/api/persons/bulk-archive", response_model=List[schemas.PersonOut])
+def bulk_archive_persons(
+    payload: schemas.BulkActionPayload,
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    if not payload.ids:
+        return []
+
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+
+    reqs = db.query(models.ManagerRequest).filter(models.ManagerRequest.id.in_(payload.ids)).all()
+    
+    if partner_id:
+        reqs = [r for r in reqs if not r.partner_id or r.partner_id == partner_id]
+
+    for req in reqs:
+        req.archived_at = datetime.now(timezone.utc)
+
+    db.commit()
+    for req in reqs:
+        db.refresh(req)
+
+    return directory_rows_to_api_dicts(db, reqs)
+
+
 @router.post("/api/persons/{person_id}/restore", response_model=schemas.PersonOut)
 def restore_person(
     person_id: str,
@@ -353,6 +381,33 @@ def restore_person(
     db.commit()
     db.refresh(req)
     return directory_rows_to_api_dicts(db, [req])[0]
+
+
+@router.post("/api/persons/bulk-restore", response_model=List[schemas.PersonOut])
+def bulk_restore_persons(
+    payload: schemas.BulkActionPayload,
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    if partner_id:
+        get_partner_or_404(db, partner_id)
+
+    if not payload.ids:
+        return []
+
+    reqs = db.query(models.ManagerRequest).filter(models.ManagerRequest.id.in_(payload.ids)).all()
+    
+    for req in reqs:
+        if partner_id and req.partner_id and req.partner_id != partner_id:
+            continue
+        req.archived_at = None
+
+    db.commit()
+    for req in reqs:
+        db.refresh(req)
+
+    return directory_rows_to_api_dicts(db, reqs)
 
 
 def _visible_new_requests_query(db: Session, partner_id: Optional[str] = None):
@@ -683,6 +738,77 @@ def dismiss_request(
     if was_new:
         notify_admin_requests_changed("dismiss_request")
     return request_to_api_dict(req)
+
+
+@router.post("/api/admin/requests/bulk-dismiss", response_model=List[schemas.RequestOut])
+def bulk_dismiss_requests(
+    payload: schemas.BulkActionPayload,
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(require_admin),
+):
+    if not payload.ids:
+        return []
+
+    reqs = db.query(models.ManagerRequest).filter(models.ManagerRequest.id.in_(payload.ids)).all()
+    all_dismissed = []
+    any_was_new = False
+    
+    for req in reqs:
+        if req.status == "dismissed":
+            all_dismissed.append(req)
+            continue
+            
+        was_new = req.status == "new"
+        if was_new:
+            any_was_new = True
+            
+        requests_to_dismiss = [req]
+        
+        if req.duplicate_group_id:
+            group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == req.duplicate_group_id).first()
+            if group and group.representative_request_id == req.id and group.status == "active":
+                group.status = "dismissed"
+                group.resolved_at = datetime.now(timezone.utc)
+                if admin.id != "dev-bypass":
+                    try:
+                        import uuid
+                        group.resolved_by_admin_id = uuid.UUID(admin.id)
+                    except ValueError:
+                        pass
+                
+                members = db.query(models.ManagerRequest).filter(
+                    models.ManagerRequest.duplicate_group_id == group.id,
+                    models.ManagerRequest.status == "new"
+                ).all()
+                requests_to_dismiss = members
+
+        for r in requests_to_dismiss:
+            if r.status == "new":
+                decrement_manager_pending_stat(db, r)
+                if r.manager_id:
+                    invalidate_manager_request_summary(str(r.manager_id))
+            r.status = "dismissed"
+            r.handled_at = datetime.now(timezone.utc)
+            if admin.id != "dev-bypass":
+                try:
+                    import uuid
+                    r.handled_by_admin_id = uuid.UUID(admin.id)
+                except ValueError:
+                    pass
+            all_dismissed.append(r)
+
+    db.commit()
+    for req in all_dismissed:
+        db.refresh(req)
+        
+    hydrate_request_display(all_dismissed)
+    hydrate_request_users(db, all_dismissed)
+    if any_was_new:
+        notify_admin_requests_changed("dismiss_request_bulk")
+        
+    unique_dismissed = {r.id: r for r in all_dismissed}.values()
+    return requests_to_api_dicts(db, list(unique_dismissed))
+
 
 @router.post("/api/admin/requests/manual", response_model=List[schemas.RequestOut])
 def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depends(get_db), admin=Depends(require_admin)):

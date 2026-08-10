@@ -1,14 +1,14 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Search, Plus, SortAsc, ChevronDown, Filter, ArrowRight, X
+  Search, Plus, SortAsc, ChevronDown, Filter, ArrowRight, X, Trash2
 } from 'lucide-react';
 import { formatTimestampSplit, isTodayInTimeZone, isYesterdayInTimeZone } from '../utils/dateTime';
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination } from '../components/ui';
 import RequestComparison from '../components/RequestComparison';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerColumnContent, getManagerDisplayName, isManualEntry, isAdminEntry } from '../utils/manualEntry';
-import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, dismissRequest, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
+import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, dismissRequest, bulkDismissRequests, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import { useRealtimeBroadcast } from '../hooks/useRealtimeBroadcast';
 import { useClientPagination } from '../hooks/useClientPagination';
@@ -1021,7 +1021,66 @@ export default function Requests() {
       await dismissRequest(req.id);
     } catch (err) {
       console.error(err);
-      showToast(err.message || 'Failed to dismiss — refreshing list.', 'error');
+      showToast(err.message || 'Failed to delete — refreshing list.', 'error');
+      loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
+        if (!isStale && Array.isArray(data.requests)) {
+          syncAdminNewRequestHighlights(data.requests, { isManualEntry });
+        }
+        setNewRequests(data.requests);
+        setLiveDirectory(data.persons);
+      }).catch(() => {});
+    }
+  };
+
+  // ── Bulk Action states ──
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  const handleToggleSelect = useCallback((id, isSelected) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (isSelected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const handleToggleSelectAll = useCallback((visibleIds, selectAll) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of visibleIds) {
+        if (selectAll) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleBulkDismissRequest = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    
+    setConfirmBulkDelete(false);
+    
+    ids.forEach((id) => {
+      removeRequestHighlight(id);
+      pendingCreatedIdsRef.current.delete(id);
+    });
+    bumpHighlights();
+
+    const nextRequests = newRequests.filter((r) => !selectedIds.has(r.id));
+    
+    bumpCacheEpoch(requestsCacheKey);
+    setNewRequests(nextRequests);
+    patchCache(requestsCacheKey, { requests: nextRequests });
+    setSelectedIds(new Set());
+    showToast(`Deleted ${ids.length} request${ids.length === 1 ? '' : 's'}.`, 'success');
+
+    try {
+      await bulkDismissRequests(ids);
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Failed to bulk delete — refreshing list.', 'error');
       loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
           syncAdminNewRequestHighlights(data.requests, { isManualEntry });
@@ -1315,6 +1374,33 @@ export default function Requests() {
         }
       />
 
+      {/* Bulk Action Toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between bg-white border border-[var(--color-border-default)] shadow-sm rounded-xl px-4 py-3 mb-4 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-[var(--color-brand-primary)]">
+              {selectedIds.size} selected
+            </span>
+            <div className="h-4 w-px bg-gray-300" />
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+            >
+              Clear selection
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setConfirmBulkDelete(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Controls Bar */}
       <ControlsBar
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
@@ -1400,6 +1486,9 @@ export default function Requests() {
           centerHeaders
           accent
           loading={tableLoading}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onToggleSelectAll={handleToggleSelectAll}
         />
       </div>
 
@@ -1699,6 +1788,37 @@ export default function Requests() {
             </p>
           </div>
         )}
+      </Modal>
+
+      {/* ── Confirm Bulk Delete modal ── */}
+      <Modal
+        isOpen={confirmBulkDelete}
+        onClose={() => setConfirmBulkDelete(false)}
+        confirm
+        title="Confirm bulk delete"
+        footer={
+          <>
+            <button
+              onClick={() => setConfirmBulkDelete(false)}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleBulkDismissRequest}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 shadow-sm cursor-pointer"
+            >
+              Confirm
+            </button>
+          </>
+        }
+      >
+        <p>
+          Are you sure you want to delete <strong>{selectedIds.size}</strong> selected request{selectedIds.size === 1 ? '' : 's'}?
+        </p>
+        <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+          This action will remove them from the incoming queue. If any selected request belongs to a duplicate group, the entire group will be resolved.
+        </p>
       </Modal>
 
     </AdminPageScroll>

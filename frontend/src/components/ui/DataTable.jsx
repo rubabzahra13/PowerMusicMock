@@ -80,6 +80,9 @@ export default function DataTable({
   getRowClassName,
   /** Match request-detail blue border + header accents */
   accent = false,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
 }) {
   const isRowClickable = typeof onRowClick === 'function';
   const shellClass = accent
@@ -92,6 +95,60 @@ export default function DataTable({
     ? 'text-[var(--color-brand-secondary)]'
     : 'text-[var(--color-text-secondary)]';
 
+  const selectable = !!selectedIds && typeof onToggleSelect === 'function';
+  
+  const handleHeaderCheckboxRef = (el) => {
+    if (el) {
+      const visibleIds = (rows || []).map((r) => String(r.id));
+      const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+      const someVisibleSelected = visibleIds.length > 0 && visibleIds.some((id) => selectedIds.has(id));
+      el.checked = allVisibleSelected;
+      el.indeterminate = !allVisibleSelected && someVisibleSelected;
+    }
+  };
+
+  const effectiveColumns = selectable
+    ? [
+        {
+          key: '_select',
+          label: (
+            <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                className="w-4 h-4 rounded border-[var(--color-border-default)] text-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)] cursor-pointer"
+                ref={handleHeaderCheckboxRef}
+                onChange={(e) => {
+                  if (onToggleSelectAll) {
+                    const visibleIds = (rows || []).map((r) => String(r.id));
+                    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+                    onToggleSelectAll(visibleIds, !allVisibleSelected);
+                  }
+                }}
+              />
+            </div>
+          ),
+          width: '2.5rem',
+          minWidth: '2.5rem',
+          noShrink: true,
+          headerClassName: 'text-center pl-2 pr-0',
+          cellClassName: 'text-center align-middle pl-2 pr-0',
+          render: (_, row) => (
+            <div className="flex h-full items-center justify-center pt-0.5" onClick={(e) => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                className="w-4 h-4 rounded border-[var(--color-border-default)] text-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)] cursor-pointer"
+                checked={selectedIds.has(String(row.id))}
+                onChange={(e) => {
+                  onToggleSelect(String(row.id), e.target.checked);
+                }}
+              />
+            </div>
+          )
+        },
+        ...columns
+      ]
+    : columns;
+
   return (
     <div
       className={`w-full border rounded-md bg-[var(--color-surface-card)] overflow-x-auto ${shellClass}`}
@@ -99,7 +156,7 @@ export default function DataTable({
       <table className={`w-full border-collapse text-left ${compact ? 'table-fixed min-w-[70rem]' : ''}`}>
         <thead>
           <tr className={headRowClass}>
-            {columns.map((column) => (
+            {effectiveColumns.map((column) => (
               <th
                 key={column.key}
                 className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wider select-none ${headCellClass} ${
@@ -118,7 +175,7 @@ export default function DataTable({
         </thead>
         <tbody className="divide-y divide-[var(--color-border-default)]">
           {loading ? (
-            <TableBodySkeleton columns={columns} rows={skeletonRows} />
+            <TableBodySkeleton columns={effectiveColumns} rows={skeletonRows} />
           ) : rows && rows.length > 0 ? (
             rows.map((row, rowIndex) => {
               const extraRowClass = getRowClassName ? getRowClassName(row) : '';
@@ -126,11 +183,13 @@ export default function DataTable({
               <tr
                 key={row.id || rowIndex}
                 onClick={() => isRowClickable && onRowClick(row)}
-                className={`transition-colors duration-150 border-b border-[var(--color-border-default)] last:border-b-0 hover:bg-[#f9fafb] ${
+                className={`transition-colors duration-150 border-b border-[var(--color-border-default)] last:border-b-0 ${
+                  selectable && selectedIds.has(String(row.id)) ? 'bg-[var(--color-surface-highlight)]' : 'hover:bg-[#f9fafb]'
+                } ${
                   isRowClickable ? 'cursor-pointer' : ''
                 } ${extraRowClass}`}
               >
-                {columns.map((column) => {
+                {effectiveColumns.map((column) => {
                   const rawValue = row[column.key];
                   const renderedValue = column.render
                     ? column.render(rawValue, row)
@@ -168,7 +227,7 @@ export default function DataTable({
           ) : (
             <tr>
               <td
-                colSpan={columns.length}
+                colSpan={effectiveColumns.length}
                 className="px-4 py-8 text-center text-sm text-[var(--color-text-secondary)] bg-white"
               >
                 {emptyMessage}

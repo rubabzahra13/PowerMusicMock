@@ -1,11 +1,11 @@
-import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2, Pencil, Loader2, Archive, RotateCcw } from 'lucide-react';
 
 import { formatTimestampSplit } from '../utils/dateTime';
 import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, Modal, Toast, useToast } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
-import { loadWithCache, updatePerson, archivePerson, restorePerson, fetchArchivedPeople } from '../utils/pilot2Api';
+import { loadWithCache, updatePerson, archivePerson, restorePerson, fetchArchivedPeople, bulkArchivePersons, bulkRestorePersons } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import { useClientPagination } from '../hooks/useClientPagination';
 import {
@@ -109,8 +109,10 @@ const SORT_PRESETS = [
   { value: 'displayId-asc', label: 'ID (oldest first)' },
   { value: 'dateAdded-desc', label: 'Timestamp (newest first)' },
   { value: 'dateAdded-asc', label: 'Timestamp (oldest first)' },
-  { value: 'personName-asc', label: 'Person name (A–Z)' },
-  { value: 'personName-desc', label: 'Person name (Z–A)' },
+  { value: 'firstName-asc', label: 'First name (A–Z)' },
+  { value: 'firstName-desc', label: 'First name (Z–A)' },
+  { value: 'lastName-asc', label: 'Last name (A–Z)' },
+  { value: 'lastName-desc', label: 'Last name (Z–A)' },
   { value: 'personEmail-asc', label: 'Person email (A–Z)' },
   { value: 'personEmail-desc', label: 'Person email (Z–A)' },
   { value: 'personLocation-asc', label: 'Person location (A–Z)' },
@@ -517,11 +519,18 @@ function DirectoryMobileList({
 
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               onClick={() => onOpenUser(row)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onOpenUser(row);
+                }
+              }}
               aria-label={`View ${name}`}
-              className={`flex w-full flex-col gap-3 px-4 py-3 text-left transition-colors hover:bg-[#f9fafb] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35 ${extraClass}`}
+              className={`flex w-full flex-col gap-3 px-4 py-3 text-left transition-colors hover:bg-[#f9fafb] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35 cursor-pointer ${extraClass}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1 space-y-2">
@@ -606,7 +615,7 @@ function DirectoryMobileList({
                 </div>
                 <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
               </div>
-            </button>
+            </div>
           </li>
         );
       })}
@@ -631,6 +640,105 @@ export default function UserLedger() {
   const [archivingUser, setArchivingUser] = useState(null);
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [restoringUserId, setRestoringUserId] = useState(null);
+
+  // ── Bulk Action states ──
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [confirmBulkArchive, setConfirmBulkArchive] = useState(false);
+  const [bulkArchiveLoading, setBulkArchiveLoading] = useState(false);
+
+  const handleToggleSelect = useCallback((id, isSelected) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (isSelected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const handleToggleSelectAll = useCallback((visibleIds, selectAll) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of visibleIds) {
+        if (selectAll) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleBulkArchive = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    
+    setConfirmBulkArchive(false);
+    setBulkArchiveLoading(true);
+    
+    try {
+      const archivedRecords = await bulkArchivePersons(ids, selectedPartnerId);
+      setLiveUserLedger((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+      setArchivedUserLedger((prev) => {
+        const remaining = prev.filter((r) => !selectedIds.has(r.id));
+        return [...archivedRecords, ...remaining];
+      });
+      
+      setSelectedIds(new Set());
+      toast.show(`Archived ${ids.length} record${ids.length === 1 ? '' : 's'} successfully`, 'success');
+    } catch (err) {
+      console.error(err);
+      toast.show(err.message || 'Failed to bulk archive records', 'error');
+    } finally {
+      setBulkArchiveLoading(false);
+    }
+  };
+
+  const [selectedArchivedIds, setSelectedArchivedIds] = useState(new Set());
+  const [confirmBulkRestore, setConfirmBulkRestore] = useState(false);
+  const [bulkRestoreLoading, setBulkRestoreLoading] = useState(false);
+
+  const handleToggleArchivedSelect = useCallback((id, isSelected) => {
+    setSelectedArchivedIds((prev) => {
+      const next = new Set(prev);
+      if (isSelected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const handleToggleArchivedSelectAll = useCallback((visibleIds, selectAll) => {
+    setSelectedArchivedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of visibleIds) {
+        if (selectAll) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleBulkRestore = async () => {
+    const ids = Array.from(selectedArchivedIds);
+    if (ids.length === 0) return;
+    
+    setConfirmBulkRestore(false);
+    setBulkRestoreLoading(true);
+    
+    try {
+      const restoredRecords = await bulkRestorePersons(ids, selectedPartnerId);
+      setArchivedUserLedger((prev) => prev.filter((r) => !selectedArchivedIds.has(r.id)));
+      setLiveUserLedger((prev) => {
+        const remaining = prev.filter((r) => !selectedArchivedIds.has(r.id));
+        return [...restoredRecords, ...remaining];
+      });
+      
+      setSelectedArchivedIds(new Set());
+      toast.show(`Restored ${ids.length} record${ids.length === 1 ? '' : 's'} successfully`, 'success');
+    } catch (err) {
+      console.error(err);
+      toast.show(err.message || 'Failed to bulk restore records', 'error');
+    } finally {
+      setBulkRestoreLoading(false);
+    }
+  };
 
   useEffect(() => {
     registerDirectoryPageVisit(location.key);
@@ -823,9 +931,14 @@ export default function UserLedger() {
 
     return [...filtered].sort((a, b) => {
       if (field === 'managerName') return personManagerName(a).localeCompare(personManagerName(b)) * sortDir;
-      if (field === 'personName') {
-        const nA = `${a.firstName} ${a.lastName}`.toLowerCase();
-        const nB = `${b.firstName} ${b.lastName}`.toLowerCase();
+      if (field === 'firstName') {
+        const nA = (a.firstName || '').toLowerCase();
+        const nB = (b.firstName || '').toLowerCase();
+        return nA.localeCompare(nB) * sortDir;
+      }
+      if (field === 'lastName') {
+        const nA = (a.lastName || '').toLowerCase();
+        const nB = (b.lastName || '').toLowerCase();
         return nA.localeCompare(nB) * sortDir;
       }
       if (field === 'personEmail') {
@@ -1117,6 +1230,8 @@ export default function UserLedger() {
                 setFilterEmail('All');
                 setFilterLocation('All');
                 setFilterClub('All');
+                setSelectedIds(new Set());
+                setSelectedArchivedIds(new Set());
               }}
               tabs={directoryViewTabs}
             />
@@ -1128,6 +1243,60 @@ export default function UserLedger() {
           </div>
         }
       />
+
+      {/* Bulk Action Toolbar */}
+      {selectedIds.size > 0 && directoryView === 'active' && (
+        <div className="flex items-center justify-between bg-white border border-[var(--color-border-default)] shadow-sm rounded-xl px-4 py-3 mb-4 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-[var(--color-brand-primary)]">
+              {selectedIds.size} selected
+            </span>
+            <div className="h-4 w-px bg-gray-300" />
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+            >
+              Clear selection
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setConfirmBulkArchive(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer"
+            >
+              <Archive className="w-4 h-4" />
+              <span>Archive</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Restore Toolbar */}
+      {selectedArchivedIds.size > 0 && directoryView === 'archived' && (
+        <div className="flex items-center justify-between bg-white border border-[var(--color-border-default)] shadow-sm rounded-xl px-4 py-3 mb-4 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-[var(--color-brand-primary)]">
+              {selectedArchivedIds.size} selected
+            </span>
+            <div className="h-4 w-px bg-gray-300" />
+            <button
+              onClick={() => setSelectedArchivedIds(new Set())}
+              className="text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+            >
+              Clear selection
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setConfirmBulkRestore(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Restore</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Controls Bar */}
       <ControlsBar
@@ -1202,6 +1371,9 @@ export default function UserLedger() {
           centerHeaders
           accent
           loading={tableLoading}
+          selectedIds={directoryView === 'active' ? selectedIds : (directoryView === 'archived' ? selectedArchivedIds : null)}
+          onToggleSelect={directoryView === 'active' ? handleToggleSelect : (directoryView === 'archived' ? handleToggleArchivedSelect : null)}
+          onToggleSelectAll={directoryView === 'active' ? handleToggleSelectAll : (directoryView === 'archived' ? handleToggleArchivedSelectAll : null)}
         />
       </div>
 
@@ -1450,6 +1622,78 @@ export default function UserLedger() {
         user={editingUser}
         onSave={handleSaveEditUser}
       />
+
+      {/* ── Confirm Bulk Archive modal ── */}
+      <Modal
+        isOpen={confirmBulkArchive}
+        onClose={() => !bulkArchiveLoading && setConfirmBulkArchive(false)}
+        confirm
+        title="Confirm bulk archive"
+        footer={
+          <>
+            <button
+              onClick={() => setConfirmBulkArchive(false)}
+              disabled={bulkArchiveLoading}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleBulkArchive}
+              disabled={bulkArchiveLoading}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center"
+            >
+              {bulkArchiveLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+              ) : null}
+              Confirm Archive
+            </button>
+          </>
+        }
+      >
+        <p>
+          Are you sure you want to archive <strong>{selectedIds.size}</strong> selected record{selectedIds.size === 1 ? '' : 's'}?
+        </p>
+        <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+          They will be moved to the Archive tab and will no longer appear in the active Directory. You can restore them later if needed.
+        </p>
+      </Modal>
+
+      {/* ── Confirm Bulk Restore modal ── */}
+      <Modal
+        isOpen={confirmBulkRestore}
+        onClose={() => !bulkRestoreLoading && setConfirmBulkRestore(false)}
+        confirm
+        title="Confirm bulk restore"
+        footer={
+          <>
+            <button
+              onClick={() => setConfirmBulkRestore(false)}
+              disabled={bulkRestoreLoading}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleBulkRestore}
+              disabled={bulkRestoreLoading}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center"
+            >
+              {bulkRestoreLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+              ) : null}
+              Confirm Restore
+            </button>
+          </>
+        }
+      >
+        <p>
+          Are you sure you want to restore <strong>{selectedArchivedIds.size}</strong> selected record{selectedArchivedIds.size === 1 ? '' : 's'}?
+        </p>
+        <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+          They will be moved back to the active Directory.
+        </p>
+      </Modal>
     </AdminPageScroll>
   );
 }

@@ -179,6 +179,7 @@ export const getNewRequestsPage = (partnerId = '') => {
 };
 export const getPilot2Workspace = () => request('/api/pilot2/workspace');
 export const dismissRequest = (id) => request(`/api/admin/requests/${id}/dismiss`, { method: 'POST' });
+export const bulkDismissRequests = (ids) => request('/api/admin/requests/bulk-dismiss', { method: 'POST', body: JSON.stringify({ ids }) });
 
 // Directory persons
 export const updatePerson = (id, data, partnerId = '') => {
@@ -194,9 +195,19 @@ export const archivePerson = (id, partnerId = '') => {
   return request(`/api/persons/${id}/archive${query}`, { method: 'POST' });
 };
 
+export const bulkArchivePersons = (ids, partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/persons/bulk-archive${query}`, { method: 'POST', body: JSON.stringify({ ids }) });
+};
+
 export const restorePerson = (id, partnerId = '') => {
   const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
   return request(`/api/persons/${id}/restore${query}`, { method: 'POST' });
+};
+
+export const bulkRestorePersons = (ids, partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/persons/bulk-restore${query}`, { method: 'POST', body: JSON.stringify({ ids }) });
 };
 
 export const fetchArchivedPeople = (partnerId = '') => {

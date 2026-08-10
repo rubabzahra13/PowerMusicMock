@@ -14,6 +14,10 @@ from app.input_validation import (
 )
 
 
+class BulkActionPayload(BaseModel):
+    ids: List[str]
+
+
 class SubmittedBy(BaseModel):
     firstName: Optional[str] = Field(default=None, max_length=100)
     lastName: Optional[str] = Field(default=None, max_length=100)
