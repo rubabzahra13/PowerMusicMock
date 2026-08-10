@@ -254,9 +254,9 @@ def process_request_grouping(
                 group.directory_person_id = dir_match_person.id
             # Absorb any other ungrouped candidates into this group too.
             _absorb_ungrouped_matches(
-                db, group, req_person, exclude_id=req.id, ungrouped_candidates=pending_candidates
+                db, group, req_person, exclude_id=req.id, ungrouped_candidates=candidates
             )
-            members = [req] + [c for c in (pending_candidates or []) if c.duplicate_group_id == group.id]
+            members = [req] + [c for c in candidates if c.duplicate_group_id == group.id]
             _sync_group_representative_and_tags(db, group, member_requests=members)
             # db.flush()
             return group
@@ -281,10 +281,10 @@ def process_request_grouping(
 
     # Absorb any remaining ungrouped candidates that also match.
     _absorb_ungrouped_matches(
-        db, group, req_person, exclude_id=req.id, ungrouped_candidates=pending_candidates, dismissed_set=dismissed_set
+        db, group, req_person, exclude_id=req.id, ungrouped_candidates=candidates, dismissed_set=dismissed_set
     )
 
-    members = [req] + [c for c in (pending_candidates or []) if c.duplicate_group_id == group.id]
+    members = [req] + [c for c in candidates if c.duplicate_group_id == group.id]
     if best_match_req and best_match_req not in members:
         members.append(best_match_req)
     _sync_group_representative_and_tags(db, group, member_requests=members)
