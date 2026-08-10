@@ -372,13 +372,13 @@ export default function Sidebar({
               </span>
             )}
             <HoverTip
-              label={showExpanded ? '' : 'New requests'}
+              label={showExpanded ? '' : 'New Requests'}
               placement="right"
               className={showExpanded ? 'w-full' : ''}
             >
-              <NavLink to="/new-requests" className={navItemClass} onClick={handleNavClick} aria-label="New requests">
+              <NavLink to="/new-requests" className={navItemClass} onClick={handleNavClick} aria-label="New Requests">
                 <Inbox className="h-4 w-4 shrink-0" />
-                {showExpanded ? <span>New requests</span> : null}
+                {showExpanded ? <span>New Requests</span> : null}
               </NavLink>
             </HoverTip>
             <HoverTip
