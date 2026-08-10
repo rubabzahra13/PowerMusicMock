@@ -231,7 +231,7 @@ export default function Sidebar({
                 options={
                   partners.length === 0
                     ? [{ value: '', label: 'No partners yet' }]
-                    : [{ value: '', label: 'All Partners' }, ...partners.map((p) => ({ value: p.id, label: p.name }))]
+                    : partners.map((p) => ({ value: p.id, label: p.name }))
                 }
                 className="w-full"
               />

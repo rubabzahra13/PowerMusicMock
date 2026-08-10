@@ -46,12 +46,15 @@ export function PartnerProvider({ children }) {
       return list;
     }
     
-    if (latestSelected === null) {
-      setSelectedPartnerId(list[0].id);
+    const p1 = list.find((p) => p.id === '1' || p.id === 1);
+    const defaultPartnerId = p1 ? p1.id : list[0].id;
+
+    if (latestSelected === null || latestSelected === '') {
+      setSelectedPartnerId(defaultPartnerId);
     } else {
-      const selectedExists = latestSelected === '' || list.some((partner) => partner.id === latestSelected);
+      const selectedExists = list.some((partner) => partner.id === latestSelected);
       if (!selectedExists) {
-        setSelectedPartnerId(list[0].id);
+        setSelectedPartnerId(defaultPartnerId);
       }
     }
     return list;
@@ -69,9 +72,8 @@ export function PartnerProvider({ children }) {
   );
 
   const setSelectedPartnerId = (partnerId) => {
-    const next = partnerId || '';
-    setSelectedPartnerIdState(next);
-    writeSelectedPartnerId(next);
+    setSelectedPartnerIdState(partnerId);
+    writeSelectedPartnerId(partnerId);
   };
 
   const createPartner = async (payload) => {

@@ -429,7 +429,7 @@ export default function Home() {
     };
     const load = () => {
       loadWithCache(
-        `home_dashboard_v2:${selectedPartnerId || 'all'}`, 
+        `home_dashboard_v2:${selectedPartnerId || ''}`, 
         () => getDashboard(selectedPartnerId), 
         applyDashboard
       ).catch((err) => {

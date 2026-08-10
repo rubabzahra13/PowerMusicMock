@@ -112,8 +112,8 @@ export default function PartnerSettings() {
 
   const partnerLabel = selectedPartner?.name || 'No partner selected';
 
-  const [accounts, setAccounts] = useState(() => readPmCache(`inboxes:${selectedPartnerId || 'all'}`) || []);
-  const [inboxesLoading, setInboxesLoading] = useState(() => !readPmCache(`inboxes:${selectedPartnerId || 'all'}`));
+  const [accounts, setAccounts] = useState(() => readPmCache(`inboxes:${selectedPartnerId || ''}`) || []);
+  const [inboxesLoading, setInboxesLoading] = useState(() => !readPmCache(`inboxes:${selectedPartnerId || ''}`));
   const [busyId, setBusyId] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState('');
@@ -122,14 +122,14 @@ export default function PartnerSettings() {
   const [addTitle, setAddTitle] = useState('');
   const [addBusy, setAddBusy] = useState(false);
 
-  const [managerDomains, setManagerDomains] = useState(() => readPmCache(`manager_domains:${selectedPartnerId || 'all'}`) || []);
-  const [domainsLoading, setDomainsLoading] = useState(() => !readPmCache(`manager_domains:${selectedPartnerId || 'all'}`));
+  const [managerDomains, setManagerDomains] = useState(() => readPmCache(`manager_domains:${selectedPartnerId || ''}`) || []);
+  const [domainsLoading, setDomainsLoading] = useState(() => !readPmCache(`manager_domains:${selectedPartnerId || ''}`));
   const [domainInput, setDomainInput] = useState('');
   const [domainAdding, setDomainAdding] = useState(false);
   const [pendingDomainRemove, setPendingDomainRemove] = useState(null);
 
-  const [autoSources, setAutoSources] = useState(() => readPmCache(`automated_sources:${selectedPartnerId || 'all'}`) || []);
-  const [sourcesLoading, setSourcesLoading] = useState(() => !readPmCache(`automated_sources:${selectedPartnerId || 'all'}`));
+  const [autoSources, setAutoSources] = useState(() => readPmCache(`automated_sources:${selectedPartnerId || ''}`) || []);
+  const [sourcesLoading, setSourcesLoading] = useState(() => !readPmCache(`automated_sources:${selectedPartnerId || ''}`));
   const [sourceInput, setSourceInput] = useState('');
   const [sourceAdding, setSourceAdding] = useState(false);
   const [pendingSourceRemove, setPendingSourceRemove] = useState(null);
@@ -147,9 +147,9 @@ export default function PartnerSettings() {
   );
   const atAccountLimit = connectedAccounts.length >= MAX_CONNECTED_INBOXES;
 
-  const inboxCacheKey = `inboxes:${selectedPartnerId || 'all'}`;
-  const domainsCacheKey = `manager_domains:${selectedPartnerId || 'all'}`;
-  const sourcesCacheKey = `automated_sources:${selectedPartnerId || 'all'}`;
+  const inboxCacheKey = `inboxes:${selectedPartnerId || ''}`;
+  const domainsCacheKey = `manager_domains:${selectedPartnerId || ''}`;
+  const sourcesCacheKey = `automated_sources:${selectedPartnerId || ''}`;
 
   const refreshInboxes = useCallback(() => {
     loadWithCache(inboxCacheKey, () => getInboxes(selectedPartnerId || ''), (rows) => {
