@@ -1,11 +1,11 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
-import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2, Pencil, Loader2, Archive, RotateCcw } from 'lucide-react';
+import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2, Pencil, Loader2, Archive, RotateCcw, Trash2 } from 'lucide-react';
 
 import { formatTimestampSplit } from '../utils/dateTime';
 import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, Modal, Toast, useToast } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
-import { loadWithCache, updatePerson, archivePerson, restorePerson, fetchArchivedPeople, bulkArchivePersons, bulkRestorePersons } from '../utils/pilot2Api';
+import { loadWithCache, updatePerson, archivePerson, restorePerson, fetchArchivedPeople, bulkArchivePersons, bulkRestorePersons, bulkDeletePersons } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import { useClientPagination } from '../hooks/useClientPagination';
 import {
@@ -482,6 +482,7 @@ function DirectoryMobileList({
   onEditUser,
   onArchiveUser,
   onRestoreUser,
+  onDeleteUser,
   highlightVersion,
   getRowClassName,
 }) {
@@ -579,6 +580,19 @@ function DirectoryMobileList({
                           <RotateCcw className="h-3.5 w-3.5" />
                         </button>
                       )}
+                      {onDeleteUser && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteUser(row);
+                          }}
+                          className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors"
+                          aria-label={`Permanently Delete ${name}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -640,6 +654,7 @@ export default function UserLedger() {
   const [archivingUser, setArchivingUser] = useState(null);
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [restoringUserId, setRestoringUserId] = useState(null);
+  const [deletingUserId, setDeletingUserId] = useState(null);
 
   // ── Bulk Action states ──
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -694,6 +709,8 @@ export default function UserLedger() {
   const [selectedArchivedIds, setSelectedArchivedIds] = useState(new Set());
   const [confirmBulkRestore, setConfirmBulkRestore] = useState(false);
   const [bulkRestoreLoading, setBulkRestoreLoading] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
 
   const handleToggleArchivedSelect = useCallback((id, isSelected) => {
     setSelectedArchivedIds((prev) => {
@@ -737,6 +754,42 @@ export default function UserLedger() {
       toast.show(err.message || 'Failed to bulk restore records', 'error');
     } finally {
       setBulkRestoreLoading(false);
+    }
+  };
+
+  const handleBulkDelete = async (singleUserId = null) => {
+    // If a specific ID is passed, use it (individual delete), otherwise use bulk selection
+    const ids = singleUserId ? [singleUserId] : Array.from(selectedArchivedIds);
+    if (ids.length === 0) return;
+    
+    setConfirmBulkDelete(false);
+    setBulkDeleteLoading(true);
+    
+    try {
+      await bulkDeletePersons(ids, selectedPartnerId);
+      
+      // Remove deleted records from the UI immediately
+      const idSet = new Set(ids);
+      setArchivedUserLedger((prev) => prev.filter((r) => !idSet.has(r.id)));
+      
+      // Remove them from selection
+      if (!singleUserId) {
+        setSelectedArchivedIds(new Set());
+      } else {
+        setSelectedArchivedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(singleUserId);
+          return next;
+        });
+      }
+      
+      setDeletingUserId(null);
+      toast.show(`Permanently deleted ${ids.length} record${ids.length === 1 ? '' : 's'}`, 'success');
+    } catch (err) {
+      console.error(err);
+      toast.show(err.message || 'Failed to permanently delete records', 'error');
+    } finally {
+      setBulkDeleteLoading(false);
     }
   };
 
@@ -1153,22 +1206,36 @@ export default function UserLedger() {
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              disabled={restoringUserId === row.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleRestoreUser(row);
-              }}
-              className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors"
-              aria-label={`Restore ${row.firstName || 'record'}`}
-            >
-              {restoringUserId === row.id ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RotateCcw className="h-4 w-4" />
-              )}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={restoringUserId === row.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRestoreUser(row);
+                }}
+                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors"
+                aria-label={`Restore ${row.firstName || 'record'}`}
+              >
+                {restoringUserId === row.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeletingUserId(row.id);
+                  setConfirmBulkDelete(true);
+                }}
+                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors"
+                aria-label={`Permanently Delete ${row.firstName || 'record'}`}
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </>
           )}
           <div className="flex items-center justify-center p-1" aria-hidden="true">
             <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" />
@@ -1294,6 +1361,16 @@ export default function UserLedger() {
               <RotateCcw className="w-4 h-4" />
               <span>Restore</span>
             </button>
+            <button
+              onClick={() => {
+                setDeletingUserId(null);
+                setConfirmBulkDelete(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Delete Permanently</span>
+            </button>
           </div>
         </div>
       )}
@@ -1350,6 +1427,10 @@ export default function UserLedger() {
         onEditUser={directoryView === 'active' ? setEditingUser : null}
         onArchiveUser={directoryView === 'active' ? setArchivingUser : null}
         onRestoreUser={directoryView === 'archived' ? handleRestoreUser : null}
+        onDeleteUser={directoryView === 'archived' ? (row) => {
+          setDeletingUserId(row.id);
+          setConfirmBulkDelete(true);
+        } : null}
         highlightVersion={highlightVersion}
         getRowClassName={(row) => {
           void highlightVersion;
@@ -1692,6 +1773,53 @@ export default function UserLedger() {
         </p>
         <p className="mt-2 text-sm text-[var(--color-text-muted)]">
           They will be moved back to the active Directory.
+        </p>
+      </Modal>
+
+      {/* ── Confirm Bulk Delete modal ── */}
+      <Modal
+        isOpen={confirmBulkDelete}
+        onClose={() => !bulkDeleteLoading && setConfirmBulkDelete(false)}
+        confirm
+        title={deletingUserId ? "Delete permanently" : "Delete records permanently"}
+        footer={
+          <>
+            <button
+              onClick={() => setConfirmBulkDelete(false)}
+              disabled={bulkDeleteLoading}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => handleBulkDelete(deletingUserId)}
+              disabled={bulkDeleteLoading}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center"
+            >
+              {bulkDeleteLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+              ) : null}
+              Delete Permanently
+            </button>
+          </>
+        }
+      >
+        <p>
+          {deletingUserId ? (
+            <>
+              Are you sure you want to permanently delete the record for <strong>{(() => {
+                const row = archivedUserLedger.find(r => r.id === deletingUserId);
+                return row ? `${row.firstName} ${row.lastName}`.trim() : 'this person';
+              })()}</strong>?
+            </>
+          ) : (
+            <>
+              Are you sure you want to permanently delete <strong>{selectedArchivedIds.size}</strong> selected record{selectedArchivedIds.size === 1 ? '' : 's'}?
+            </>
+          )}
+        </p>
+        <p className="mt-2 text-sm font-medium text-red-600">
+          This action cannot be undone.
         </p>
       </Modal>
     </AdminPageScroll>

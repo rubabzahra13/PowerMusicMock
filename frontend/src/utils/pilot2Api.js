@@ -210,6 +210,11 @@ export const bulkRestorePersons = (ids, partnerId = '') => {
   return request(`/api/persons/bulk-restore${query}`, { method: 'POST', body: JSON.stringify({ ids }) });
 };
 
+export const bulkDeletePersons = (ids, partnerId = '') => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/persons/bulk-delete${query}`, { method: 'POST', body: JSON.stringify({ ids }) });
+};
+
 export const fetchArchivedPeople = (partnerId = '') => {
   const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
   return request(`/api/persons/archived${query}`);
