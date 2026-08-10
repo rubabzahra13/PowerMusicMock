@@ -4,6 +4,7 @@ export default function Tag({
   compact: _compact = false,
   prefix: prefixOverride,
   wide = false,
+  fit = false,
 }) {
   let bgClass = '';
   let textClass = '';
@@ -95,16 +96,23 @@ export default function Tag({
 
   const equalSentViaWidth =
     wide || label === 'Manager Form' || label === 'Automated email' || label === 'Admin form'
-      ? 'min-w-[7.5rem] justify-center px-3'
+      ? 'min-w-0 max-w-full justify-center px-2'
       : '';
 
   return (
     <span
-      className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 py-0 text-xs font-semibold leading-none select-none ${equalSentViaWidth} ${bgClass} ${textClass} ${extraClass}`}
-      style={{ fontSize: 'var(--font-size-xs)' }}
+      title={`${prefix || ''}${label}`}
+      className={`inline-flex items-center rounded-full font-semibold select-none ${
+        fit
+          ? 'h-5 max-w-full min-w-0 px-1.5 text-[11px] leading-none whitespace-nowrap'
+          : `h-5 shrink-0 px-2 py-0 text-xs leading-none ${equalSentViaWidth}`
+      } ${bgClass} ${textClass} ${extraClass}`}
+      style={fit ? undefined : { fontSize: 'var(--font-size-xs)' }}
     >
-      {prefix}
-      {label}
+      <span className={fit ? 'truncate' : undefined}>
+        {prefix}
+        {label}
+      </span>
     </span>
   );
 }

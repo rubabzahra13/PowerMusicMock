@@ -35,7 +35,7 @@ TEMPLATES = [
         "name": "Renewal Reminder", "category": "Membership", "intent": "Renewal",
         "subject": "Re: Your renewal",
         "body": "Hi {{first_name}},\n\nYour {{membership_type}} membership at {{club_name}} is due for renewal.\n\n"
-                f"We'd love to keep you with us — please find your renewal options below.\n\n{SIGNOFF}",
+                f"We'd love to keep you with us. Please find your renewal options below.\n\n{SIGNOFF}",
     },
     {
         "name": "Payment Failed Notice", "category": "Payments", "intent": "Finance",
@@ -52,7 +52,7 @@ TEMPLATES = [
     },
     {
         "name": "Event Invitation", "category": "Events", "intent": "Events",
-        "subject": "You're invited — {{club_name}} event",
+        "subject": "You're invited: {{club_name}} event",
         "body": "Hi {{first_name}},\n\nWe'd like to invite you to an upcoming event at {{club_name}}.\n\n"
                 f"Details will be shared shortly. We hope to see you there!\n\n{SIGNOFF}",
     },

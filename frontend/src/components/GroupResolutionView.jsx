@@ -1,18 +1,18 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowLeft, ChevronRight, Check, Database, Clock, FileEdit,
+  ArrowLeft, ChevronRight, ChevronDown, Check, Database, Clock, FileEdit, Pencil,
   X, AlertTriangle, Users,
 } from 'lucide-react';
-import { Tag, Modal } from './ui';
+import { Tag, Modal, HoverTip } from './ui';
 import { formatAdminDateTime, formatRequestDisplayId } from '../utils/requestDisplayId';
+import { getManagerDisplayName, isManualEntry, MANUAL_ENTRY_CLUB } from '../utils/manualEntry';
+import { readManagerNotes } from '../utils/managerNotes';
 import {
   resolveGroupAdd,
   resolveGroupUpdate,
   resolveGroupUpdatePreview,
   resolveGroupKeepExisting,
-  resolveGroupDeleteFromDirectory,
-  resolveGroupMarkRemoved,
   unlinkGroupMember,
 } from '../utils/duplicateGroupApi';
 
@@ -122,17 +122,12 @@ export default function GroupResolutionView({
 
   // Members list (local — remove unlinked members instantly)
   const [members, setMembers] = useState(group.members);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
 
   // Update confirmation modal state
   const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showAddConfirm, setShowAddConfirm] = useState(false);
-  const [showMarkRemovedConfirm, setShowMarkRemovedConfirm] = useState(false);
-  const [showKeepExistingConfirm, setShowKeepExistingConfirm] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-
-  const isRemoveRequest = repMember?.action === 'Remove';
 
   const updateDraftField = (field, value) => setDraftForm((f) => ({ ...f, [field]: value }));
 
@@ -149,9 +144,9 @@ export default function GroupResolutionView({
 
   const isFormValid = form.firstName.trim() && form.lastName.trim();
 
-  const executeResolveAdd = async () => {
+  /* ── resolve & add (Case A) ── */
+  const handleResolveAdd = async () => {
     if (!isFormValid || submitting) return;
-    setShowAddConfirm(false);
     setSubmitting(true);
     try {
       await resolveGroupAdd(group.id, {
@@ -219,9 +214,8 @@ export default function GroupResolutionView({
   };
 
   /* ── resolve — keep existing (Case C) ── */
-  const executeKeepExisting = async () => {
+  const handleKeepExisting = async () => {
     if (submitting) return;
-    setShowKeepExistingConfirm(false);
     setSubmitting(true);
     try {
       await resolveGroupKeepExisting(group.id, {
@@ -230,41 +224,6 @@ export default function GroupResolutionView({
       onResolved('keep', null);
     } catch (err) {
       onResolved('error', err.message || 'Failed to resolve group.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /* ── resolve & delete from directory (Case D) ── */
-  const handleConfirmDelete = async () => {
-    if (submitting) return;
-    setShowDeleteConfirm(false);
-    setSubmitting(true);
-    try {
-      await resolveGroupDeleteFromDirectory(group.id, {
-        directoryPersonId: group.directoryPersonId,
-        adminNote: adminNote.trim() || null,
-      });
-      onResolved('delete', personFullName(form));
-    } catch (err) {
-      onResolved('error', err.message || 'Failed to delete from Directory.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /* ── resolve & mark as removed (Case E) ── */
-  const executeMarkRemoved = async () => {
-    if (submitting) return;
-    setShowMarkRemovedConfirm(false);
-    setSubmitting(true);
-    try {
-      await resolveGroupMarkRemoved(group.id, {
-        adminNote: adminNote.trim() || null,
-      });
-      onResolved('mark_removed', personFullName(form));
-    } catch (err) {
-      onResolved('error', err.message || 'Failed to mark as removed.');
     } finally {
       setSubmitting(false);
     }
@@ -299,13 +258,15 @@ export default function GroupResolutionView({
 
       {/* ── breadcrumb ── */}
       <nav aria-label="Breadcrumb" className="mb-8 flex w-full flex-wrap items-center gap-x-3 gap-y-2">
-        <Link
-          to="/new-requests"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
-          aria-label="Back to New requests"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        </Link>
+        <HoverTip label="Back to New requests">
+          <Link
+            to="/new-requests"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
+            aria-label="Back to New requests"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </HoverTip>
         <ol className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
           <li>
             <Link
@@ -360,20 +321,16 @@ export default function GroupResolutionView({
                   />
                   <Users className="h-4 w-4 text-[var(--color-text-muted)]" aria-hidden="true" />
                   <span className="text-sm text-[var(--color-text-secondary)]">
-                    Duplicate group
+                    Duplicate exists
                   </span>
                 </div>
               </div>
               <div className="mt-4 border-t border-[var(--color-border-default)] pt-4">
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  {members.length} request{members.length !== 1 ? 's' : ''} grouped
-                  {group.createdAt && (
-                    <>
-                      <span className="mx-1.5" aria-hidden="true">·</span>
-                      {formatAdminDateTime(group.createdAt)}
-                    </>
-                  )}
-                </p>
+                {repMember?.receivedAt && (
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    Received {formatAdminDateTime(repMember.receivedAt)}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -393,7 +350,7 @@ export default function GroupResolutionView({
             </dl>
           ) : (
             <p className="text-sm text-[var(--color-text-muted)] italic">
-              Directory record details not available locally - values shown in the confirmation step.
+              Directory record details not available locally. Values shown in the confirmation step.
             </p>
           )}
           <p className="mt-4 text-xs text-[var(--color-text-muted)]">
@@ -403,61 +360,115 @@ export default function GroupResolutionView({
       )}
 
       {/* ── Section B: Request History ── */}
-      <SectionCard icon={Clock} title={`Request History (${members.length})`}>
-        <div className="space-y-3">
-          {[...members]
-            .sort((a, b) => new Date(a.receivedAt) - new Date(b.receivedAt))
-            .map((member) => (
-              <div
-                key={member.id}
-                className={`rounded-xl border bg-white px-4 py-3.5 ${member.isRepresentative
-                  ? 'border-[var(--color-brand-secondary-border)] ring-1 ring-[var(--color-brand-secondary-border)]/40'
-                  : 'border-[var(--color-border-default)]'
-                  }`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
-                      {formatRequestDisplayId(member.displayId)}
-                    </span>
-                    <Tag
-                      variant={member.action === 'Add' ? 'add-action' : 'remove-action'}
-                      label={member.action}
-                    />
-                    {member.isRepresentative && (
-                      <Tag variant="new-person" label="Latest" />
+      <SectionCard
+        icon={Clock}
+        title={`Request History (${members.length})`}
+      >
+        {(() => {
+          const sortedByNewest = [...members].sort(
+            (a, b) => new Date(b.receivedAt) - new Date(a.receivedAt),
+          );
+          const latestId = sortedByNewest[0]?.id || null;
+
+          const historyCollapsible = members.length > 2;
+          const hiddenCount = sortedByNewest.length - 2;
+          const visibleMembers =
+            historyCollapsible && !historyExpanded
+              ? sortedByNewest.slice(0, 2)
+              : sortedByNewest;
+
+          return (
+            <div className="space-y-3">
+              {visibleMembers.map((member) => {
+                const isLatest = member.id === latestId;
+                const role = isLatest
+                  ? { variant: 'new-person', label: 'Current request' }
+                  : { variant: 'neutral', label: 'Older' };
+                return (
+                  <div
+                    key={member.id}
+                    className={`relative rounded-xl border px-4 py-3.5 ${isLatest
+                      ? 'border-[var(--color-surface-sidebar)] bg-[var(--color-surface-sidebar)]/[0.06] ring-2 ring-[var(--color-surface-sidebar)]/20'
+                      : 'border-[var(--color-border-default)] bg-white'
+                      } ${!isLatest && members.length > 1 ? 'pr-44' : ''}`}
+                  >
+                    {/* Unlink — not on the latest request */}
+                    {!isLatest && members.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setUnlinkTargetId(member.id)}
+                        className="absolute right-4 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border-default)] bg-white text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors cursor-pointer"
+                        title="Mark as not the same person"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Not the same person
+                      </button>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
+                        {formatRequestDisplayId(member.displayId)}
+                      </span>
+                      <Tag
+                        variant={member.action === 'Add' ? 'add-action' : 'remove-action'}
+                        label={member.action}
+                      />
+                      <Tag variant={role.variant} label={role.label} />
+                    </div>
+
+                    {(() => {
+                      const managerName =
+                        member.createdBy
+                        || getManagerDisplayName(member.submittedBy, member.tags, member);
+                      const managerEmail = (member.submittedBy?.email || '').trim();
+                      const clubRaw = (member.submittedBy?.club || '').trim();
+                      const managerClub =
+                        clubRaw && clubRaw !== MANUAL_ENTRY_CLUB && !isManualEntry(member.submittedBy)
+                          ? clubRaw
+                          : (clubRaw === MANUAL_ENTRY_CLUB ? MANUAL_ENTRY_CLUB : '');
+                      const notesText = readManagerNotes(member);
+                      return (
+                        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+                          <MetaItem label="First Name" value={member.person.firstName} />
+                          <MetaItem label="Last Name" value={member.person.lastName} />
+                          <MetaItem label="Email" value={member.person.email} />
+                          <MetaItem label="Location" value={member.person.location} />
+                          <MetaItem label="Manager name" value={managerName} />
+                          <MetaItem label="Manager email" value={managerEmail} />
+                          <MetaItem label="Manager location" value={managerClub} />
+                          <MetaItem label="Manager notes" value={notesText} />
+                        </dl>
+                      );
+                    })()}
+
+                    {member.receivedAt && (
+                      <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+                        Received {formatAdminDateTime(member.receivedAt)}
+                      </p>
                     )}
                   </div>
+                );
+              })}
 
-                  {/* Unlink button — not shown on representative */}
-                  {!member.isRepresentative && members.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setUnlinkTargetId(member.id)}
-                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold text-[var(--color-text-secondary)] hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                      title="Mark as not the same person"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                      Not the same person
-                    </button>
-                  )}
-                </div>
-
-                <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
-                  <MetaItem label="First Name" value={member.person.firstName} />
-                  <MetaItem label="Last Name" value={member.person.lastName} />
-                  <MetaItem label="Email" value={member.person.email} />
-                  <MetaItem label="Location" value={member.person.location} />
-                </dl>
-
-                {member.receivedAt && (
-                  <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-                    Received {formatAdminDateTime(member.receivedAt)}
-                  </p>
-                )}
-              </div>
-            ))}
-        </div>
+              {historyCollapsible && (
+                <button
+                  type="button"
+                  onClick={() => setHistoryExpanded((open) => !open)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--color-border-default)] bg-white/70 px-3 py-2.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-[var(--color-brand-secondary-border)] hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-brand-secondary)] transition-colors cursor-pointer"
+                  aria-expanded={historyExpanded}
+                >
+                  {historyExpanded
+                    ? 'Show less'
+                    : `View ${hiddenCount} more request${hiddenCount === 1 ? '' : 's'}`}
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 transition-transform ${historyExpanded ? 'rotate-180' : ''}`}
+                    aria-hidden="true"
+                  />
+                </button>
+              )}
+            </div>
+          );
+        })()}
       </SectionCard>
 
       {/* ── Section C: Final Resolved Values ── */}
@@ -466,14 +477,16 @@ export default function GroupResolutionView({
         title="Final Resolved Values"
         action={
           !isEditing ? (
-            <button
-              type="button"
-              onClick={handleEditClick}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border-default)] text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] transition-colors cursor-pointer"
-            >
-              <FileEdit className="h-3.5 w-3.5" />
-              Edit
-            </button>
+            <HoverTip label="Edit">
+              <button
+                type="button"
+                onClick={handleEditClick}
+                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors cursor-pointer"
+                aria-label="Edit final resolved values"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            </HoverTip>
           ) : null
         }
       >
@@ -581,72 +594,37 @@ export default function GroupResolutionView({
 
           <div className="mt-5 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--color-border-default)] pt-4">
             {!hasDirectory ? (
-              isRemoveRequest ? (
-                /* Case E */
+              /* Case A */
+              <button
+                type="button"
+                disabled={!isFormValid || submitting}
+                onClick={handleResolveAdd}
+                className={BTN_PRIMARY}
+              >
+                <Check className="h-4 w-4" aria-hidden="true" />
+                {submitting ? 'Resolving…' : 'Resolve & Add to Directory'}
+              </button>
+            ) : (
+              /* Case B / C */
+              <>
                 <button
                   type="button"
                   disabled={submitting}
-                  onClick={() => setShowMarkRemovedConfirm(true)}
-                  className={BTN_PRIMARY}
+                  onClick={handleKeepExisting}
+                  className={BTN_SECONDARY}
                 >
-                  <Check className="h-4 w-4" aria-hidden="true" />
-                  {submitting ? 'Resolving…' : 'Resolve & Mark as Removed'}
+                  {submitting ? 'Resolving…' : 'Resolve & Keep Existing'}
                 </button>
-              ) : (
-                /* Case A */
                 <button
                   type="button"
-                  disabled={!isFormValid || submitting}
-                  onClick={() => setShowAddConfirm(true)}
+                  disabled={!isFormValid || submitting || previewLoading}
+                  onClick={handlePreviewUpdate}
                   className={BTN_PRIMARY}
                 >
                   <Check className="h-4 w-4" aria-hidden="true" />
-                  {submitting ? 'Resolving…' : 'Resolve & Add to Directory'}
+                  {previewLoading ? 'Loading preview…' : submitting ? 'Updating…' : 'Resolve & Update Directory'}
                 </button>
-              )
-            ) : (
-              isRemoveRequest ? (
-                /* Case D / Case C (Remove context) */
-                <>
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => setShowKeepExistingConfirm(true)}
-                    className={BTN_SECONDARY}
-                  >
-                    {submitting ? 'Resolving…' : 'Resolve & Keep Existing Directory'}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => setShowDeleteConfirm(true)}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    {submitting ? 'Resolving…' : 'Resolve & Delete from Directory'}
-                  </button>
-                </>
-              ) : (
-                /* Case B / Case C (Add context) */
-                <>
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => setShowKeepExistingConfirm(true)}
-                    className={BTN_SECONDARY}
-                  >
-                    {submitting ? 'Resolving…' : 'Resolve & Keep Existing Directory'}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!isFormValid || submitting || previewLoading}
-                    onClick={handlePreviewUpdate}
-                    className={BTN_PRIMARY}
-                  >
-                    <Check className="h-4 w-4" aria-hidden="true" />
-                    {previewLoading ? 'Loading preview…' : submitting ? 'Updating…' : 'Resolve & Update Directory'}
-                  </button>
-                </>
-              )
+              </>
             )}
           </div>
         </div>
@@ -656,7 +634,7 @@ export default function GroupResolutionView({
       <Modal
         isOpen={showUpdateConfirm}
         onClose={() => setShowUpdateConfirm(false)}
-        title="Resolve and update directory?"
+        title="Update existing Directory record?"
         wide
         footer={
           <>
@@ -672,7 +650,7 @@ export default function GroupResolutionView({
               onClick={handleConfirmUpdate}
               className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
             >
-              Confirm and Update
+              Update Directory
             </button>
           </>
         }
@@ -680,7 +658,7 @@ export default function GroupResolutionView({
         {previewData && (
           <div className="space-y-3">
             <p className="text-sm text-[var(--color-text-secondary)]">
-              This will resolve this request group and update the existing Directory record with the final resolved values shown above. The other requests in this group will no longer remain active.
+              This will update <strong className="text-[var(--color-text-primary)]">{personFullName(form)}</strong>'s existing Directory record with the values below.
             </p>
 
             {previewData.anyChanged && (
@@ -719,131 +697,6 @@ export default function GroupResolutionView({
             </table>
           </div>
         )}
-      </Modal>
-
-      {/* ── Delete confirmation modal ── */}
-      <Modal
-        isOpen={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        title="Resolve and delete from directory?"
-        confirm
-        footer={
-          <>
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(false)}
-              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmDelete}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 shadow-sm cursor-pointer"
-            >
-              Delete and Resolve
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-[var(--color-text-secondary)]">
-            This will resolve the request and permanently delete the existing Directory record for this person. This action cannot be undone.
-          </p>
-        </div>
-      </Modal>
-
-      {/* ── Add to Directory confirmation modal ── */}
-      <Modal
-        isOpen={showAddConfirm}
-        onClose={() => setShowAddConfirm(false)}
-        title="Resolve and add to directory?"
-        footer={
-          <>
-            <button
-              type="button"
-              onClick={() => setShowAddConfirm(false)}
-              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={executeResolveAdd}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
-            >
-              Confirm and Add
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-[var(--color-text-secondary)]">
-            This will resolve this request group using the final resolved values shown above and add the person to the Directory. The other requests in this group will no longer remain active.
-          </p>
-        </div>
-      </Modal>
-
-      {/* ── Mark as Removed confirmation modal ── */}
-      <Modal
-        isOpen={showMarkRemovedConfirm}
-        onClose={() => setShowMarkRemovedConfirm(false)}
-        title="Resolve and mark as removed?"
-        footer={
-          <>
-            <button
-              type="button"
-              onClick={() => setShowMarkRemovedConfirm(false)}
-              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={executeMarkRemoved}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
-            >
-              Confirm and Mark as Removed
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-[var(--color-text-secondary)]">
-            This will resolve this request group and mark the person as removed. The requests in this group will no longer remain active.
-          </p>
-        </div>
-      </Modal>
-
-      {/* ── Keep Existing confirmation modal ── */}
-      <Modal
-        isOpen={showKeepExistingConfirm}
-        onClose={() => setShowKeepExistingConfirm(false)}
-        title="Resolve and keep existing directory?"
-        footer={
-          <>
-            <button
-              type="button"
-              onClick={() => setShowKeepExistingConfirm(false)}
-              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={executeKeepExisting}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
-            >
-              Confirm and Keep Existing
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-[var(--color-text-secondary)]">
-            This will resolve this request group without changing the existing Directory record. The current Directory information will remain unchanged, and the other requests in this group will no longer remain active.
-          </p>
-        </div>
       </Modal>
 
       {/* ── Unlink confirmation modal ── */}

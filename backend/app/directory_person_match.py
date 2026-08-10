@@ -204,7 +204,7 @@ def search_roster_rows(
     limit: int = 25,
     partner_id: Optional[str] = None,
 ) -> List[models.ManagerRequest]:
-    """Server-side roster search — no full-table scan in Python."""
+    """Server-side roster search by person name, email, or location."""
     pattern = f"%{query}%"
     query_obj = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
@@ -213,6 +213,12 @@ def search_roster_rows(
         or_(
             models.ManagerRequest.person_first_name.ilike(pattern),
             models.ManagerRequest.person_last_name.ilike(pattern),
+            # Full name "first last" style queries
+            func.concat(
+                models.ManagerRequest.person_first_name,
+                " ",
+                models.ManagerRequest.person_last_name,
+            ).ilike(pattern),
             models.ManagerRequest.person_email.ilike(pattern),
             models.ManagerRequest.person_location.ilike(pattern),
         ),
@@ -243,6 +249,34 @@ def roster_snapshot_rows(
         query = query.filter(models.ManagerRequest.partner_id == partner_id)
     rows = query.order_by(models.ManagerRequest.handled_at.desc()).limit(max(limit * 2, limit)).all()
     return _dedupe_latest_roster(rows)[:limit]
+
+
+def _dedupe_latest_person(rows: List[models.ManagerRequest]) -> List[models.ManagerRequest]:
+    """Keep the most recent handled row per person, regardless of Added/Removed."""
+    represented: List[models.ManagerRequest] = []
+    for row in sorted(rows, key=_handled_at_sort_key, reverse=True):
+        if any(same_person(row, prior) for prior in represented):
+            continue
+        represented.append(row)
+    return represented
+
+
+def directory_ledger_rows(
+    db: Session,
+    *,
+    limit: int = 1000,
+    partner_id: Optional[str] = None,
+) -> List[models.ManagerRequest]:
+    """Active Directory ledger: latest non-archived handled state per person (Added or Removed)."""
+    query = db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.status == "handled",
+        models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.archived_at.is_(None),
+    )
+    if partner_id:
+        query = query.filter(models.ManagerRequest.partner_id == partner_id)
+    rows = query.order_by(models.ManagerRequest.handled_at.desc()).limit(max(limit * 4, limit)).all()
+    return _dedupe_latest_person(rows)[:limit]
 
 
 def removed_snapshot_rows(

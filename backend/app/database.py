@@ -179,6 +179,6 @@ def verify_database_connection(db) -> None:
                 "from the Supabase dashboard (Connect → Session pooler) in DATABASE_URL."
             ) from exc
         raise DatabaseConnectionError(
-            "Database connection failed. Check DATABASE_URL on Vercel — the password "
+            "Database connection failed. Check DATABASE_URL on Vercel. The password "
             "must be URL-encoded (e.g. @ → %40) and use the Supabase session pooler URI."
         ) from exc

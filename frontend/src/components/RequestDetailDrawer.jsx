@@ -11,7 +11,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import { Tag } from './ui';
+import { Tag, HoverTip } from './ui';
 import RequestComparison from './RequestComparison';
 import {
   autoMailFromDirectoryRecord,
@@ -226,13 +226,15 @@ export default function RequestDetailView({
   return (
     <div className="relative z-0 min-w-0 w-full bg-[var(--color-surface-bg)] pb-16 select-none">
       <nav aria-label="Breadcrumb" className="mb-8 flex w-full flex-wrap items-center gap-x-3 gap-y-2">
-        <Link
-          to="/new-requests"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
-          aria-label="Back to New requests"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        </Link>
+        <HoverTip label="Back to New requests">
+          <Link
+            to="/new-requests"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
+            aria-label="Back to New requests"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </HoverTip>
         <ol className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
           <li>
             <Link
@@ -385,7 +387,7 @@ export default function RequestDetailView({
 
       <SourceInfoBlock
         id="manager-heading"
-        className={awaitingManager || (adminEntry && !attributedManager && !hasAdminOverlay) ? 'mt-1' : ''}
+        className={awaitingManager || (adminEntry && !attributedManager && !hasAdminOverlay) ? 'mt-5' : 'mt-4'}
         title={
           awaitingManager
             ? 'No manager request yet'

@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams, Link } from 'react-router-dom';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2, Pencil, Loader2, Archive, RotateCcw, Trash2 } from 'lucide-react';
 
 import { formatTimestampSplit } from '../utils/dateTime';
-import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, Modal, Toast, useToast } from '../components/ui';
+import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, Modal, Toast, useToast, HoverTip } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache, updatePerson, archivePerson, restorePerson, fetchArchivedPeople, bulkArchivePersons, bulkRestorePersons, bulkDeletePersons } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
@@ -29,6 +29,19 @@ const personHandledBy = (user) => user.handledBy || user.addedBy || 'Power Music
 const personAdminNotes = (user) => user.adminNotes || '';
 const formatAdminNotes = (user) => personAdminNotes(user).trim() || MANAGER_NOTES_EMPTY_LABEL;
 
+/** Directory UI status: Added/Removed only (never GroupResolved etc.). */
+function directoryStatusLabel(row) {
+  if (row?.status === 'Added' || row?.status === 'Removed') return row.status;
+  const action =
+    row?.action
+    || [...(row?.requestHistory || [])]
+      .reverse()
+      .find((event) => event?.action === 'Add' || event?.action === 'Remove')
+      ?.action;
+  if (action === 'Remove') return 'Removed';
+  return 'Added';
+}
+
 function buildFallbackHistory(user) {
   const events = [];
   if (user?.dateAdded) {
@@ -36,7 +49,7 @@ function buildFallbackHistory(user) {
       id: `${user.id}-handled`,
       type: 'handled',
       at: user.dateAdded,
-      title: `Marked as ${user.status}`,
+      title: `Marked as ${directoryStatusLabel(user)}`,
       detail: `By ${personHandledBy(user)}`,
       displayId: user.displayId,
     });
@@ -174,18 +187,22 @@ function ControlsBar({
             <Search className="h-4 w-4 text-[var(--color-brand-secondary)]/70 shrink-0" />
             <input
               type="text"
-              placeholder="Search name, email, club or location..."
+              placeholder="Search person name, email, or location..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="flex-1 bg-transparent text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none"
             />
             {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs leading-none cursor-pointer"
-              >
-                ✕
-              </button>
+              <HoverTip label="Clear search">
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear search"
+                  className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs leading-none cursor-pointer"
+                >
+                  ✕
+                </button>
+              </HoverTip>
             )}
           </div>
 
@@ -253,7 +270,14 @@ function ControlsBar({
         <div className="bg-[var(--color-brand-secondary-muted)]/35 px-4 py-4 rounded-b-2xl">
           <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
             {filterSlots.map((slot) => (
-              <div key={slot.label} className="flex flex-col gap-1 min-w-[140px]">
+              <div
+                key={slot.label}
+                className={`flex flex-col gap-1 ${
+                  slot.searchable === false
+                    ? 'min-w-[140px] max-w-full'
+                    : 'min-w-[140px] max-w-[min(18rem,100%)]'
+                }`}
+              >
                 <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-brand-secondary)]/80">
                   {slot.label}
                 </label>
@@ -262,7 +286,9 @@ function ControlsBar({
                   onChange={slot.onChange}
                   options={slot.options}
                   size="sm"
-                  className="w-full"
+                  className={slot.searchable === false ? 'w-full' : undefined}
+                  searchable={slot.searchable !== false}
+                  searchPlaceholder={`Search ${slot.label.toLowerCase()}…`}
                 />
               </div>
             ))}
@@ -291,13 +317,13 @@ function formatTimestamp(iso) {
   return formatTimestampSplit(iso);
 }
 
-const TimestampCell = ({ val }) => {
-  if (!val) return <span className="text-xs text-[var(--color-text-muted)]">{EMPTY_CELL}</span>;
+const TimestampCell = ({ val, className = '' }) => {
+  if (!val) return <span className="text-sm text-[var(--color-text-muted)]">{EMPTY_CELL}</span>;
   const { date, time } = formatTimestamp(val);
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">{date}</span>
-      <span className="text-xs text-[var(--color-text-muted)]">{time}</span>
+    <div className={`flex flex-col gap-0.5 ${className}`.trim()}>
+      <span className="text-sm font-semibold leading-5 whitespace-nowrap text-[var(--color-text-primary)]">{date}</span>
+      <span className="text-xs leading-4 whitespace-nowrap text-[var(--color-text-muted)]">{time}</span>
     </div>
   );
 };
@@ -539,59 +565,71 @@ function DirectoryMobileList({
                     <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
                       {formatRequestDisplayId(row.displayId)}
                     </span>
-                    <Tag variant={row.status === 'Added' ? 'added' : 'removed'} label={row.status} compact />
+                    <Tag
+                      variant={directoryStatusLabel(row) === 'Added' ? 'added' : 'removed'}
+                      label={directoryStatusLabel(row)}
+                      compact
+                    />
                     <div className="ml-auto flex items-center gap-1.5">
                       {onEditUser && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEditUser(row);
-                          }}
-                          className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
-                          aria-label={`Edit ${name}`}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
+                        <HoverTip label="Edit">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditUser(row);
+                            }}
+                            className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
+                            aria-label={`Edit ${name}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        </HoverTip>
                       )}
                       {onArchiveUser && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onArchiveUser(row);
-                          }}
-                          className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
-                          aria-label={`Archive ${name}`}
-                        >
-                          <Archive className="h-3.5 w-3.5" />
-                        </button>
+                        <HoverTip label="Archive">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onArchiveUser(row);
+                            }}
+                            className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
+                            aria-label={`Archive ${name}`}
+                          >
+                            <Archive className="h-3.5 w-3.5" />
+                          </button>
+                        </HoverTip>
                       )}
                       {onRestoreUser && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRestoreUser(row);
-                          }}
-                          className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
-                          aria-label={`Restore ${name}`}
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </button>
+                        <HoverTip label="Restore">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRestoreUser(row);
+                            }}
+                            className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
+                            aria-label={`Restore ${name}`}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </button>
+                        </HoverTip>
                       )}
                       {onDeleteUser && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteUser(row);
-                          }}
-                          className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors"
-                          aria-label={`Permanently Delete ${name}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <HoverTip label="Delete permanently">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteUser(row);
+                            }}
+                            className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors"
+                            aria-label={`Permanently Delete ${name}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </HoverTip>
                       )}
                     </div>
                   </div>
@@ -643,16 +681,17 @@ export default function UserLedger() {
   const [searchParams] = useSearchParams();
   const requestIdFromUrl = searchParams.get('id');
   const consumedDirectoryDeepLinkRef = useRef(null);
-  const { selectedPartnerId } = usePartners();
+  const { selectedPartnerId, partnerLabel } = usePartners();
   const [liveUserLedger, setLiveUserLedger] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
   const [highlightVersion, setHighlightVersion] = useState(0);
   const toast = useToast();
 
-  const [directoryView, setDirectoryView] = useState('active');
+  const directoryView = location.pathname.startsWith('/directory/archived') ? 'archived' : 'active';
   const [archivedUserLedger, setArchivedUserLedger] = useState([]);
   const [archivingUser, setArchivingUser] = useState(null);
   const [archiveLoading, setArchiveLoading] = useState(false);
+  const [restoringUser, setRestoringUser] = useState(null);
   const [restoringUserId, setRestoringUserId] = useState(null);
   const [deletingUserId, setDeletingUserId] = useState(null);
 
@@ -660,6 +699,7 @@ export default function UserLedger() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [confirmBulkArchive, setConfirmBulkArchive] = useState(false);
   const [bulkArchiveLoading, setBulkArchiveLoading] = useState(false);
+  const [confirmExportOpen, setConfirmExportOpen] = useState(false);
 
   const handleToggleSelect = useCallback((id, isSelected) => {
     setSelectedIds((prev) => {
@@ -840,7 +880,6 @@ export default function UserLedger() {
   const [filterLastName, setFilterLastName] = useState('All');
   const [filterEmail, setFilterEmail] = useState('All');
   const [filterLocation, setFilterLocation] = useState('All');
-  const [filterClub, setFilterClub] = useState('All');
   const [selectedUser, setSelectedUser] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
   const selectedUserRef = useRef(selectedUser);
@@ -890,6 +929,7 @@ export default function UserLedger() {
       if (selectedUser?.id === user.id) {
         setSelectedUser(restored);
       }
+      setRestoringUser(null);
       toast.show('Record restored to active Directory', 'success');
     } catch (err) {
       console.error(err);
@@ -906,19 +946,33 @@ export default function UserLedger() {
     setFilterLastName('All');
     setFilterEmail('All');
     setFilterLocation('All');
-    setFilterClub('All');
     setSortPreset(DEFAULT_SORT);
     setFilterOpen(true);
   };
 
+  const prevDirectoryViewRef = useRef(directoryView);
+  useEffect(() => {
+    if (prevDirectoryViewRef.current === directoryView) return;
+    prevDirectoryViewRef.current = directoryView;
+    setStatusTab('All');
+    setSearchQuery('');
+    setFilterFirstName('All');
+    setFilterLastName('All');
+    setFilterEmail('All');
+    setFilterLocation('All');
+    setSelectedIds(new Set());
+    setSelectedArchivedIds(new Set());
+    setSelectedUser(null);
+  }, [directoryView]);
+
   const currentLedger = directoryView === 'archived' ? archivedUserLedger : liveUserLedger;
 
-  const addedCount = currentLedger.filter((u) => u.status === 'Added').length;
-  const removedCount = currentLedger.filter((u) => u.status === 'Removed').length;
+  const addedCount = currentLedger.filter((u) => directoryStatusLabel(u) === 'Added').length;
+  const removedCount = currentLedger.filter((u) => directoryStatusLabel(u) === 'Removed').length;
   const allCount = currentLedger.length;
 
   const statusTabRows = useMemo(
-    () => (statusTab === 'All' ? currentLedger : currentLedger.filter((u) => u.status === statusTab)),
+    () => (statusTab === 'All' ? currentLedger : currentLedger.filter((u) => directoryStatusLabel(u) === statusTab)),
     [statusTab, currentLedger]
   );
 
@@ -950,13 +1004,6 @@ export default function UserLedger() {
     [statusTabRows]
   );
 
-  const clubOptions = useMemo(
-    () => buildFilterOptions(
-      [...new Set(statusTabRows.map((u) => u.club).filter(Boolean))].sort()
-    ),
-    [statusTabRows]
-  );
-
   const filteredLedger = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const { field, dir } = parseSortPreset(sortPreset);
@@ -967,19 +1014,15 @@ export default function UserLedger() {
       const matchesSearch =
         query === '' ||
         fullName.includes(query) ||
-        user.email.toLowerCase().includes(query) ||
-        user.location.toLowerCase().includes(query) ||
-        personManagerName(user).toLowerCase().includes(query) ||
-        (user.managerEmail && user.managerEmail.toLowerCase().includes(query)) ||
-        user.club.toLowerCase().includes(query) ||
-        (readManagerNotes(user) && readManagerNotes(user).toLowerCase().includes(query)) ||
-        (personAdminNotes(user) && personAdminNotes(user).toLowerCase().includes(query));
+        (user.firstName || '').toLowerCase().includes(query) ||
+        (user.lastName || '').toLowerCase().includes(query) ||
+        (user.email || '').toLowerCase().includes(query) ||
+        (user.location || '').toLowerCase().includes(query);
       const matchesFirstName = filterFirstName === 'All' || user.firstName === filterFirstName;
       const matchesLastName = filterLastName === 'All' || user.lastName === filterLastName;
       const matchesEmail = filterEmail === 'All' || user.email === filterEmail;
       const matchesLocation = filterLocation === 'All' || user.location === filterLocation;
-      const matchesClub = filterClub === 'All' || user.club === filterClub;
-      return matchesSearch && matchesFirstName && matchesLastName && matchesEmail && matchesLocation && matchesClub;
+      return matchesSearch && matchesFirstName && matchesLastName && matchesEmail && matchesLocation;
     });
 
     return [...filtered].sort((a, b) => {
@@ -1003,14 +1046,13 @@ export default function UserLedger() {
       if (field === 'dateAdded') return (new Date(a.dateAdded) - new Date(b.dateAdded)) * sortDir;
       return (a.displayId - b.displayId) * sortDir;
     });
-  }, [statusTabRows, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, filterClub, sortPreset]);
+  }, [statusTabRows, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset]);
 
   const activeFilterCount = [
     filterFirstName !== 'All',
     filterLastName !== 'All',
     filterEmail !== 'All',
-    filterLocation !== 'All',
-    filterClub !== 'All'
+    filterLocation !== 'All'
   ].filter(Boolean).length;
 
   const handleOpenUser = (row) => {
@@ -1038,9 +1080,7 @@ export default function UserLedger() {
     }
 
     consumedDirectoryDeepLinkRef.current = requestIdFromUrl;
-    if (row.status === 'Added' || row.status === 'Removed') {
-      setStatusTab(row.status);
-    }
+    setStatusTab(directoryStatusLabel(row));
     clearDirectoryPersonHighlight(row.email);
     setHighlightVersion((v) => v + 1);
     setSelectedUser(row);
@@ -1054,7 +1094,7 @@ export default function UserLedger() {
         `${user.firstName} ${user.lastName}`,
         user.email,
         user.location,
-        user.status,
+        directoryStatusLabel(user),
         formatAdminDate(user.dateAdded),
         personManagerName(user),
         user.managerEmail || '',
@@ -1067,47 +1107,105 @@ export default function UserLedger() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', 'user-ledger-export.csv');
+    const scope = directoryView === 'archived' ? 'archived' : 'directory';
+    const statusPart = statusTab === 'All' ? 'all' : statusTab.toLowerCase();
+    link.setAttribute('download', `${scope}-${statusPart}-export.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setConfirmExportOpen(false);
+    toast.show(
+      `Downloaded ${filteredLedger.length} record${filteredLedger.length === 1 ? '' : 's'}.`,
+      'success',
+    );
   };
+
+  const exportSummary = useMemo(() => {
+    const sortLabel = SORT_PRESETS.find((o) => o.value === sortPreset)?.label ?? 'Default';
+    const filters = [];
+    if (searchQuery.trim()) filters.push({ label: 'Search', value: searchQuery.trim() });
+    if (filterFirstName !== 'All') filters.push({ label: 'First name', value: filterFirstName });
+    if (filterLastName !== 'All') filters.push({ label: 'Last name', value: filterLastName });
+    if (filterEmail !== 'All') filters.push({ label: 'Email', value: filterEmail });
+    if (filterLocation !== 'All') filters.push({ label: 'Location', value: filterLocation });
+    return {
+      scope: directoryView === 'archived' ? 'Archived users' : 'Active Directory',
+      status: statusTab === 'All' ? 'All statuses' : statusTab,
+      sortLabel,
+      filters,
+      count: filteredLedger.length,
+      isFiltered:
+        statusTab !== 'All'
+        || searchQuery.trim() !== ''
+        || filterFirstName !== 'All'
+        || filterLastName !== 'All'
+        || filterEmail !== 'All'
+        || filterLocation !== 'All'
+        || sortPreset !== DEFAULT_SORT,
+    };
+  }, [
+    directoryView,
+    statusTab,
+    searchQuery,
+    filterFirstName,
+    filterLastName,
+    filterEmail,
+    filterLocation,
+    sortPreset,
+    filteredLedger.length,
+  ]);
 
   const columns = [
     {
       key: 'displayId',
       label: '#',
-      width: '52px',
+      width: '3.25rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap px-2',
+      cellClassName: 'text-center align-top whitespace-nowrap px-1',
       render: (val) => (
-        <span className="text-xs font-bold text-[var(--color-text-muted)] whitespace-nowrap tabular-nums">
+        <span className="inline-flex h-5 items-center justify-center text-sm font-semibold leading-5 text-[var(--color-text-primary)] whitespace-nowrap tabular-nums">
           {formatRequestDisplayId(val)}
         </span>
       )
     },
     {
       key: 'dateAdded',
-      label: 'Timestamp',
-      width: '108px',
+      label: 'Added at',
+      width: '6.5rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'align-middle whitespace-nowrap',
-      render: (val) => <TimestampCell val={val} />
+      cellClassName: 'align-top text-center',
+      render: (val) => <TimestampCell val={val} className="items-center" />
     },
     {
-      key: 'personName',
-      label: 'Person Name',
-      width: '18%',
+      key: 'firstName',
+      label: 'First Name',
+      width: '10%',
       headerClassName: 'text-center',
-      cellClassName: 'align-middle text-left max-w-0 overflow-hidden',
+      cellClassName: 'align-top text-left max-w-0 overflow-hidden',
       render: (_, row) => {
-        const { name } = formatPersonFields(row);
+        const firstName = (row.firstName || '').trim() || EMPTY_CELL;
         return (
-          <TruncateCell className="text-xs font-semibold text-[var(--color-text-primary)]" title={name}>
-            {name}
+          <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]" title={firstName}>
+            {firstName}
+          </TruncateCell>
+        );
+      },
+    },
+    {
+      key: 'lastName',
+      label: 'Last Name',
+      width: '10%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-top text-left max-w-0 overflow-hidden',
+      render: (_, row) => {
+        const lastName = (row.lastName || '').trim() || EMPTY_CELL;
+        return (
+          <TruncateCell className="text-sm font-semibold text-[var(--color-text-primary)]" title={lastName}>
+            {lastName}
           </TruncateCell>
         );
       },
@@ -1115,13 +1213,13 @@ export default function UserLedger() {
     {
       key: 'personEmail',
       label: 'Person Email',
-      width: '20%',
+      width: '18%',
       headerClassName: 'text-center',
-      cellClassName: 'align-middle text-left max-w-0 overflow-hidden',
+      cellClassName: 'align-top text-left max-w-0 overflow-hidden',
       render: (_, row) => {
         const { email } = formatPersonFields(row);
         return (
-          <TruncateCell className="text-xs font-mono text-[var(--color-text-secondary)]" title={email}>
+          <TruncateCell className="text-sm font-mono text-[var(--color-text-secondary)]" title={email}>
             {email}
           </TruncateCell>
         );
@@ -1130,13 +1228,13 @@ export default function UserLedger() {
     {
       key: 'personLocation',
       label: 'Person Location',
-      width: '16%',
+      width: '14%',
       headerClassName: 'text-center',
-      cellClassName: 'align-middle text-left max-w-0 overflow-hidden',
+      cellClassName: 'align-top text-left max-w-0 overflow-hidden',
       render: (_, row) => {
         const { location } = formatPersonFields(row);
         return (
-          <TruncateCell className="text-xs text-[var(--color-text-muted)]" title={location}>
+          <TruncateCell className="text-sm text-[var(--color-text-muted)]" title={location}>
             {location}
           </TruncateCell>
         );
@@ -1145,10 +1243,10 @@ export default function UserLedger() {
     {
       key: 'manager',
       label: 'Manager',
-      width: '22%',
+      width: '20%',
       wrap: true,
       headerClassName: 'text-center',
-      cellClassName: 'align-top text-left',
+      cellClassName: 'align-top max-w-0 overflow-hidden text-left',
       render: (_, row) => {
         const manager = getDirectoryManagerColumnContent(row);
         return (
@@ -1165,81 +1263,98 @@ export default function UserLedger() {
     {
       key: 'status',
       label: 'Status',
-      width: '72px',
+      width: '4.75rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'align-middle whitespace-nowrap text-center',
-      render: (val) => <Tag variant={val === 'Added' ? 'added' : 'removed'} label={val} />
+      render: (_, row) => {
+        const status = directoryStatusLabel(row);
+        return (
+          <div className="flex justify-center">
+            <Tag variant={status === 'Added' ? 'added' : 'removed'} label={status} compact />
+          </div>
+        );
+      },
     },
     {
       key: 'open',
-      label: '',
-      width: directoryView === 'active' ? '150px' : '100px',
+      label: 'Actions',
+      width: '7.5rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap px-1',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-1.5',
       render: (_, row) => (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center justify-center gap-1.5">
           {directoryView === 'active' ? (
             <>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEditingUser(row);
-                }}
-                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
-                aria-label={`Edit ${row.firstName || 'record'}`}
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setArchivingUser(row);
-                }}
-                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
-                aria-label={`Archive ${row.firstName || 'record'}`}
-              >
-                <Archive className="h-4 w-4" />
-              </button>
+              <HoverTip label="Edit">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingUser(row);
+                  }}
+                  className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
+                  aria-label={`Edit ${row.firstName || 'record'}`}
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              </HoverTip>
+              <HoverTip label="Archive">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setArchivingUser(row);
+                  }}
+                  className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
+                  aria-label={`Archive ${row.firstName || 'record'}`}
+                >
+                  <Archive className="h-4 w-4" />
+                </button>
+              </HoverTip>
             </>
           ) : (
             <>
-              <button
-                type="button"
-                disabled={restoringUserId === row.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRestoreUser(row);
-                }}
-                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors"
-                aria-label={`Restore ${row.firstName || 'record'}`}
-              >
-                {restoringUserId === row.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RotateCcw className="h-4 w-4" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeletingUserId(row.id);
-                  setConfirmBulkDelete(true);
-                }}
-                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors"
-                aria-label={`Permanently Delete ${row.firstName || 'record'}`}
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              <HoverTip label="Restore">
+                <button
+                  type="button"
+                  disabled={restoringUserId === row.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRestoringUser(row);
+                  }}
+                  className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors"
+                  aria-label={`Restore ${row.firstName || 'record'}`}
+                >
+                  {restoringUserId === row.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" />
+                  )}
+                </button>
+              </HoverTip>
+              <HoverTip label="Delete permanently">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeletingUserId(row.id);
+                    setConfirmBulkDelete(true);
+                  }}
+                  className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors"
+                  aria-label={`Permanently Delete ${row.firstName || 'record'}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </HoverTip>
             </>
           )}
-          <div className="flex items-center justify-center p-1" aria-hidden="true">
-            <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" />
-          </div>
+          <HoverTip label="Open details">
+            <div className="flex items-center justify-center p-1" aria-hidden="true">
+              <ArrowRight className="h-4 w-4 text-[var(--color-brand-secondary)]" />
+            </div>
+          </HoverTip>
         </div>
       )
     }
@@ -1251,12 +1366,7 @@ export default function UserLedger() {
     { key: 'Removed', label: 'Removed', count: removedCount }
   ];
 
-  const directoryViewTabs = [
-    { key: 'active', label: 'Active Directory', count: liveUserLedger.length },
-    { key: 'archived', label: 'Archive', count: archivedUserLedger.length }
-  ];
-
-  const listResetKey = [directoryView, statusTab, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, filterClub, sortPreset].join('|');
+  const listResetKey = [directoryView, statusTab, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset].join('|');
   const {
     pageItems,
     page,
@@ -1271,13 +1381,18 @@ export default function UserLedger() {
     <AdminPageScroll>
       <Toast />
       <PageHeader
-        section="Partner Support"
-        title="Users"
-        description="View and export the record of added and removed partner users."
+        section={`${partnerLabel} Support`}
+        title={directoryView === 'archived' ? 'Archived users' : 'Users'}
+        description={
+          directoryView === 'archived'
+            ? 'Records removed from the active Directory. Restore them anytime.'
+            : 'View and export the record of added and removed partner users.'
+        }
         workspace
         actions={
           <button
-            onClick={handleExportCSV}
+            type="button"
+            onClick={() => setConfirmExportOpen(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
           >
             <Download className="w-4 h-4" />
@@ -1285,28 +1400,33 @@ export default function UserLedger() {
           </button>
         }
         footer={
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CountTabs
-              value={directoryView}
-              onChange={(v) => {
-                setDirectoryView(v);
-                setStatusTab('All');
-                setSearchQuery('');
-                setFilterFirstName('All');
-                setFilterLastName('All');
-                setFilterEmail('All');
-                setFilterLocation('All');
-                setFilterClub('All');
-                setSelectedIds(new Set());
-                setSelectedArchivedIds(new Set());
-              }}
-              tabs={directoryViewTabs}
-            />
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <CountTabs
               value={statusTab}
               onChange={handleStatusTabSwitch}
               tabs={statusTabs}
             />
+            {directoryView === 'active' ? (
+              <Link
+                to="/directory/archived"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+              >
+                <span>Archived</span>
+                <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-md bg-[var(--color-surface-panel)] px-1.5 py-0.5 text-[11px] font-bold tabular-nums leading-none text-[var(--color-text-muted)]">
+                  {archivedUserLedger.length}
+                </span>
+              </Link>
+            ) : (
+              <Link
+                to="/directory"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--color-brand-primary)] transition-colors hover:text-[var(--color-surface-sidebar-hover)]"
+              >
+                ← Active Directory
+                <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-md bg-[var(--color-brand-primary)]/10 px-1.5 py-0.5 text-[11px] font-bold tabular-nums leading-none text-[var(--color-brand-primary)]">
+                  {liveUserLedger.length}
+                </span>
+              </Link>
+            )}
           </div>
         }
       />
@@ -1329,7 +1449,7 @@ export default function UserLedger() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setConfirmBulkArchive(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
             >
               <Archive className="w-4 h-4" />
               <span>Archive</span>
@@ -1356,7 +1476,7 @@ export default function UserLedger() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setConfirmBulkRestore(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
             >
               <RotateCcw className="w-4 h-4" />
               <span>Restore</span>
@@ -1366,7 +1486,7 @@ export default function UserLedger() {
                 setDeletingUserId(null);
                 setConfirmBulkDelete(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
             >
               <Trash2 className="w-4 h-4" />
               <span>Delete Permanently</span>
@@ -1406,12 +1526,6 @@ export default function UserLedger() {
             value: filterLocation,
             onChange: setFilterLocation,
             options: locationOptions
-          },
-          {
-            label: 'Manager Club',
-            value: filterClub,
-            onChange: setFilterClub,
-            options: clubOptions
           }
         ]}
         sortPreset={sortPreset}
@@ -1426,7 +1540,7 @@ export default function UserLedger() {
         onOpenUser={handleOpenUser}
         onEditUser={directoryView === 'active' ? setEditingUser : null}
         onArchiveUser={directoryView === 'active' ? setArchivingUser : null}
-        onRestoreUser={directoryView === 'archived' ? handleRestoreUser : null}
+        onRestoreUser={directoryView === 'archived' ? setRestoringUser : null}
         onDeleteUser={directoryView === 'archived' ? (row) => {
           setDeletingUserId(row.id);
           setConfirmBulkDelete(true);
@@ -1488,7 +1602,8 @@ export default function UserLedger() {
               ? `${nameParts[0][0] || ''}${nameParts[nameParts.length - 1][0] || ''}`
               : (nameParts[0] || '?').slice(0, 2)
           ).toUpperCase();
-          const isAdded = selectedUser.status === 'Added';
+          const isAdded = directoryStatusLabel(selectedUser) === 'Added';
+          const statusLabel = directoryStatusLabel(selectedUser);
 
           return (
             <div className="space-y-3 text-left select-none">
@@ -1498,58 +1613,64 @@ export default function UserLedger() {
                     {initials}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2 min-w-0">
-                        <h3 className="truncate text-base font-bold text-[var(--color-text-primary)]">
-                          {fullName}
-                        </h3>
+                    <div className="flex items-start gap-2">
+                      <h3 className="min-w-0 flex-1 break-words text-base font-bold leading-snug text-[var(--color-text-primary)]">
+                        {fullName}
+                      </h3>
+                      <div className="flex shrink-0 items-center gap-2 pt-0.5">
                         <Tag
                           variant={isAdded ? 'added' : 'removed'}
-                          label={selectedUser.status}
+                          label={statusLabel}
                           compact
                         />
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {directoryView === 'active' ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => setEditingUser(selectedUser)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors shadow-2xs"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setArchivingUser(selectedUser)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] bg-white text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors shadow-2xs"
-                            >
-                              <Archive className="w-3.5 h-3.5" />
-                              <span>Archive</span>
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={restoringUserId === selectedUser.id}
-                            onClick={() => handleRestoreUser(selectedUser)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border border-[var(--color-border-default)] bg-white text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors shadow-2xs"
-                          >
-                            {restoringUserId === selectedUser.id ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <RotateCcw className="w-3.5 h-3.5" />
-                            )}
-                            <span>Restore</span>
-                          </button>
-                        )}
+                        <div className="flex items-center gap-1.5">
+                          {directoryView === 'active' ? (
+                            <>
+                              <HoverTip label="Edit">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingUser(selectedUser)}
+                                  className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors"
+                                  aria-label={`Edit ${fullName}`}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              </HoverTip>
+                              <HoverTip label="Archive">
+                                <button
+                                  type="button"
+                                  onClick={() => setArchivingUser(selectedUser)}
+                                  className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 transition-colors"
+                                  aria-label={`Archive ${fullName}`}
+                                >
+                                  <Archive className="h-3.5 w-3.5" />
+                                </button>
+                              </HoverTip>
+                            </>
+                          ) : (
+                            <HoverTip label="Restore">
+                              <button
+                                type="button"
+                                disabled={restoringUserId === selectedUser.id}
+                                onClick={() => setRestoringUser(selectedUser)}
+                                className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 transition-colors"
+                                aria-label={`Restore ${fullName}`}
+                              >
+                                {restoringUserId === selectedUser.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </HoverTip>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <p className="mt-0.5 truncate font-mono text-xs text-[var(--color-text-secondary)]">
+                    <p className="mt-0.5 break-all font-mono text-xs text-[var(--color-text-secondary)]">
                       {personEmail}
                     </p>
-                    <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                    <p className="mt-0.5 break-words text-xs text-[var(--color-text-muted)]">
                       {personLocation}
                     </p>
                   </div>
@@ -1668,7 +1789,7 @@ export default function UserLedger() {
             </p>
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
               Archiving removes this person from active Directory views and exports.
-              Their historical record will be preserved and can be restored anytime from the Archive.
+              Their historical record will be preserved and can be restored anytime from Archived.
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -1696,6 +1817,51 @@ export default function UserLedger() {
         </Modal>
       )}
 
+      {/* Restore Confirmation Modal */}
+      {restoringUser && (
+        <Modal
+          isOpen={Boolean(restoringUser)}
+          onClose={() => !restoringUserId && setRestoringUser(null)}
+          title="Restore Directory Record"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-text-secondary)]">
+              Are you sure you want to restore{' '}
+              <strong className="font-semibold text-[var(--color-text-primary)]">
+                {restoringUser.firstName} {restoringUser.lastName}
+              </strong>
+              ?
+            </p>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+              Restoring moves this person back into the active Directory so they appear in views and exports again.
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRestoringUser(null)}
+                disabled={Boolean(restoringUserId)}
+                className="rounded-md border border-[var(--color-border-default)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={restoringUserId === restoringUser.id}
+                onClick={() => handleRestoreUser(restoringUser)}
+                className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-brand-primary)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-50"
+              >
+                {restoringUserId === restoringUser.id ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-3.5 w-3.5" />
+                )}
+                <span>Restore Record</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Edit Person Modal */}
       <EditPersonModal
         isOpen={editingUser !== null}
@@ -1703,6 +1869,78 @@ export default function UserLedger() {
         user={editingUser}
         onSave={handleSaveEditUser}
       />
+
+      {/* ── Confirm Export modal ── */}
+      <Modal
+        isOpen={confirmExportOpen}
+        onClose={() => setConfirmExportOpen(false)}
+        confirm
+        title="Export CSV"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setConfirmExportOpen(false)}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              disabled={exportSummary.count === 0}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+            >
+              <Download className="w-4 h-4" />
+              Download {exportSummary.count} record{exportSummary.count === 1 ? '' : 's'}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-[var(--color-text-secondary)]">
+          {exportSummary.isFiltered
+            ? 'This download uses your current view filters and sort, not the full Directory.'
+            : 'This download includes every record in the current Directory view.'}
+        </p>
+        <dl className="mt-4 space-y-2.5 text-sm">
+          <div className="flex items-start justify-between gap-4">
+            <dt className="text-[var(--color-text-muted)]">View</dt>
+            <dd className="font-semibold text-[var(--color-text-primary)] text-right">{exportSummary.scope}</dd>
+          </div>
+          <div className="flex items-start justify-between gap-4">
+            <dt className="text-[var(--color-text-muted)]">Status</dt>
+            <dd className="font-semibold text-[var(--color-text-primary)] text-right">{exportSummary.status}</dd>
+          </div>
+          <div className="flex items-start justify-between gap-4">
+            <dt className="text-[var(--color-text-muted)]">Sort</dt>
+            <dd className="font-semibold text-[var(--color-text-primary)] text-right">{exportSummary.sortLabel}</dd>
+          </div>
+          {exportSummary.filters.length > 0 ? (
+            <div className="border-t border-[var(--color-border-default)] pt-2.5 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+                Active filters
+              </p>
+              {exportSummary.filters.map((filter) => (
+                <div key={filter.label} className="flex items-start justify-between gap-4">
+                  <dt className="text-[var(--color-text-muted)]">{filter.label}</dt>
+                  <dd className="font-semibold text-[var(--color-text-primary)] text-right break-all">{filter.value}</dd>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-start justify-between gap-4">
+              <dt className="text-[var(--color-text-muted)]">Filters</dt>
+              <dd className="font-semibold text-[var(--color-text-primary)] text-right">None</dd>
+            </div>
+          )}
+          <div className="flex items-start justify-between gap-4 border-t border-[var(--color-border-default)] pt-2.5">
+            <dt className="text-[var(--color-text-muted)]">Records</dt>
+            <dd className="font-bold tabular-nums text-[var(--color-text-primary)] text-right">
+              {exportSummary.count}
+            </dd>
+          </div>
+        </dl>
+      </Modal>
 
       {/* ── Confirm Bulk Archive modal ── */}
       <Modal
@@ -1722,7 +1960,7 @@ export default function UserLedger() {
             <button
               onClick={handleBulkArchive}
               disabled={bulkArchiveLoading}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center"
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center"
             >
               {bulkArchiveLoading ? (
                 <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
@@ -1736,7 +1974,7 @@ export default function UserLedger() {
           Are you sure you want to archive <strong>{selectedIds.size}</strong> selected record{selectedIds.size === 1 ? '' : 's'}?
         </p>
         <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-          They will be moved to the Archive tab and will no longer appear in the active Directory. You can restore them later if needed.
+          They will be moved to Archived and will no longer appear in the active Directory. You can restore them later if needed.
         </p>
       </Modal>
 
@@ -1758,7 +1996,7 @@ export default function UserLedger() {
             <button
               onClick={handleBulkRestore}
               disabled={bulkRestoreLoading}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center"
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center"
             >
               {bulkRestoreLoading ? (
                 <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
@@ -1794,7 +2032,7 @@ export default function UserLedger() {
             <button
               onClick={() => handleBulkDelete(deletingUserId)}
               disabled={bulkDeleteLoading}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center"
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center"
             >
               {bulkDeleteLoading ? (
                 <Loader2 className="w-4 h-4 animate-spin inline mr-2" />

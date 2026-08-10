@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import HoverTip from './HoverTip';
 
 let bodyScrollLockCount = 0;
 let lockedScrollY = 0;
@@ -56,7 +57,7 @@ const closeButtonClass =
 const fullScreenShellStyle = {
   position: 'fixed',
   inset: 0,
-  zIndex: 60,
+  zIndex: 110,
 };
 
 const belowDrawerShellStyle = {
@@ -125,14 +126,16 @@ export default function Modal({
           aria-labelledby="modal-confirm-title"
           className="relative z-[1] flex w-full max-w-[400px] flex-col overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-modal)]"
         >
-          <button
-            type="button"
-            onClick={onClose}
-            className={`absolute top-3 right-3 z-10 ${closeButtonClass}`}
-            aria-label="Close modal"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <HoverTip label="Close" placement="right">
+            <button
+              type="button"
+              onClick={onClose}
+              className={`absolute top-3 right-3 z-10 ${closeButtonClass}`}
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </HoverTip>
 
           <div className="px-5 pb-4 pt-6 text-center sm:px-6">
             <h3
@@ -186,18 +189,20 @@ export default function Modal({
           </h3>
           <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
             {headerExtra}
-            <button
-              type="button"
-              onClick={onClose}
-              className={
-                brandChrome
-                  ? 'rounded-lg p-1.5 text-white/75 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30'
-                  : closeButtonClass
-              }
-              aria-label="Close modal"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <HoverTip label="Close" placement="right">
+              <button
+                type="button"
+                onClick={onClose}
+                className={
+                  brandChrome
+                    ? 'rounded-lg p-1.5 text-white/75 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30'
+                    : closeButtonClass
+                }
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </HoverTip>
           </div>
         </div>
 

@@ -24,7 +24,7 @@ export function StackedTextCell({
     : [secondary, tertiary].filter((line) => line != null && String(line).trim() !== '');
   return (
     <div className="min-w-0">
-      <span className={`${lineClass} text-sm font-semibold text-[var(--color-text-primary)] ${primaryClassName}`.trim()}>
+      <span className={`${lineClass} text-sm font-semibold leading-5 text-[var(--color-text-primary)] ${primaryClassName}`.trim()}>
         {primary}
       </span>
       {detailLines.map((line, index) => {
@@ -115,7 +115,7 @@ export default function DataTable({
             <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
               <input
                 type="checkbox"
-                className="w-4 h-4 rounded border-[var(--color-border-default)] text-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)] cursor-pointer"
+                className="w-4 h-4 rounded border-[var(--color-border-default)] accent-[var(--color-brand-secondary)] focus:ring-[var(--color-brand-secondary)] cursor-pointer"
                 ref={handleHeaderCheckboxRef}
                 onChange={(e) => {
                   if (onToggleSelectAll) {
@@ -127,16 +127,15 @@ export default function DataTable({
               />
             </div>
           ),
-          width: '2.5rem',
-          minWidth: '2.5rem',
+          width: '2.25rem',
           noShrink: true,
           headerClassName: 'text-center pl-2 pr-0',
-          cellClassName: 'text-center align-middle pl-2 pr-0',
+          cellClassName: 'text-center align-top pl-2 pr-0',
           render: (_, row) => (
-            <div className="flex h-full items-center justify-center pt-0.5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex h-5 items-center justify-center" onClick={(e) => e.stopPropagation()}>
               <input
                 type="checkbox"
-                className="w-4 h-4 rounded border-[var(--color-border-default)] text-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)] cursor-pointer"
+                className="w-4 h-4 rounded border-[var(--color-border-default)] accent-[var(--color-brand-secondary)] focus:ring-[var(--color-brand-secondary)] cursor-pointer"
                 checked={selectedIds.has(String(row.id))}
                 onChange={(e) => {
                   onToggleSelect(String(row.id), e.target.checked);
@@ -151,21 +150,23 @@ export default function DataTable({
 
   return (
     <div
-      className={`w-full border rounded-md bg-[var(--color-surface-card)] overflow-x-auto ${shellClass}`}
+      className={`w-full border rounded-md bg-[var(--color-surface-card)] ${
+        compact ? 'overflow-x-hidden' : 'overflow-x-auto'
+      } ${shellClass}`}
     >
-      <table className={`w-full border-collapse text-left ${compact ? 'table-fixed min-w-[70rem]' : ''}`}>
+      <table className={`w-full border-collapse text-left ${compact ? 'table-fixed' : ''}`}>
         <thead>
           <tr className={headRowClass}>
             {effectiveColumns.map((column) => (
               <th
                 key={column.key}
-                className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wider select-none ${headCellClass} ${
+                className={`${compact ? 'px-2' : 'px-3'} py-2.5 text-xs font-semibold uppercase tracking-wider select-none ${headCellClass} ${
                   centerHeaders ? 'text-center' : ''
                 } ${column.headerClassName || ''}`}
                 style={{
                   fontSize: 'var(--font-size-xs)',
                   ...(column.width ? { width: column.width } : {}),
-                  ...(column.minWidth ? { minWidth: column.minWidth } : {}),
+                  ...(column.minWidth && !compact ? { minWidth: column.minWidth } : {}),
                 }}
               >
                 {column.label}
@@ -197,21 +198,21 @@ export default function DataTable({
 
                   const cellStyle = {
                     ...(column.width ? { width: column.width } : {}),
-                    ...(column.minWidth ? { minWidth: column.minWidth } : {}),
+                    ...(column.minWidth && !compact ? { minWidth: column.minWidth } : {}),
                   };
                   const defaultCellClass = compact
                     ? column.noShrink
-                      ? 'align-middle whitespace-nowrap'
+                      ? 'align-top whitespace-nowrap'
                       : column.wrap
                         ? 'align-top whitespace-normal'
-                        : 'align-middle max-w-0 overflow-hidden'
+                        : 'align-top max-w-0 overflow-hidden'
                     : 'whitespace-nowrap align-middle';
 
                   return (
                     <td
                       key={column.key}
                       style={{ ...cellStyle }}
-                      className={`px-3 py-3 text-sm text-[var(--color-text-primary)] ${
+                      className={`${compact ? 'px-2' : 'px-3'} py-3 text-sm text-[var(--color-text-primary)] ${
                         column.cellClassName ?? defaultCellClass
                       }`}
                     >

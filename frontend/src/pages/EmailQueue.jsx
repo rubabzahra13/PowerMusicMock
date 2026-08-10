@@ -8,7 +8,7 @@ import {
 import { parseISO } from 'date-fns';
 import { sendEmail, sendReplyAll, sendForward, composeMessage, bulkPatchEmails, deleteEmailForever, emptyBin, loadWithCache, refreshCache, patchCache, getPilot2Workspace } from '../utils/pilot2Api';
 import { formatListTime, formatDetailTime, getDateGroupLabel } from '../utils/dateTime';
-import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton, DraftCreatingPanel } from '../components/ui';
+import { Toast, useToast, SelectDropdown, Modal, EmailListSkeleton, DraftCreatingPanel, HoverTip } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClass } from '../utils/responsiveLayout';
 import DraftBodyDisplay from '../components/email/DraftBodyDisplay';
@@ -270,7 +270,6 @@ function IntentBadge({ intent, confidence }) {
 
 function BulkActionChip({ icon: Icon, label, onClick, variant = 'default', disabled = false, fullWidth = false, iconOnly = false, active = false, iconClass = '' }) {
   if (iconOnly) {
-    // Gmail-style: flat icon button with a dark tooltip on hover/focus.
     const iconVariants = {
       primary: 'text-[var(--color-brand-primary)] hover:bg-[var(--color-surface-highlight-strong)]',
       default: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]',
@@ -288,26 +287,18 @@ function BulkActionChip({ icon: Icon, label, onClick, variant = 'default', disab
     const idle = iconVariants[variant] ?? iconVariants.default;
     const activeCls = activeVariants[variant] ?? activeVariants.default;
     return (
-      <div className="relative group shrink-0">
+      <HoverTip label={label} className="shrink-0">
         <button
           type="button"
           onClick={onClick}
           disabled={disabled}
           aria-label={label}
           aria-pressed={active || undefined}
-          className={`peer inline-flex items-center justify-center h-8 w-8 rounded-full transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 disabled:opacity-40 disabled:cursor-not-allowed ${active ? activeCls : idle}`}
+          className={`inline-flex items-center justify-center h-8 w-8 rounded-full transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 disabled:opacity-40 disabled:cursor-not-allowed ${active ? activeCls : idle}`}
         >
           <Icon className={`w-4 h-4 ${iconClass}`} aria-hidden="true" />
         </button>
-        {/* peer-focus-visible (not focus-within): a mouse click leaves the
-            button focused, which used to pin the tooltip open after hover. */}
-        <span
-          role="tooltip"
-          className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-[calc(100%+4px)] z-40 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-[10px] font-medium text-white opacity-0 scale-95 transition-all duration-100 group-hover:opacity-100 group-hover:scale-100 peer-focus-visible:opacity-100 peer-focus-visible:scale-100"
-        >
-          {label}
-        </span>
-      </div>
+      </HoverTip>
     );
   }
 
@@ -1353,14 +1344,17 @@ export default function EmailQueue() {
                 className="w-32 sm:w-36"
               />
             </div>
-            <button
-              type="button"
-              onClick={() => setComposeOpen(true)}
-              className="inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer shrink-0"
-            >
-              <PenSquare className="w-4 h-4" aria-hidden="true" />
-              <span className="hidden sm:inline">Compose</span>
-            </button>
+            <HoverTip label="Compose">
+              <button
+                type="button"
+                onClick={() => setComposeOpen(true)}
+                aria-label="Compose"
+                className="inline-flex items-center gap-2 h-9 px-3.5 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer shrink-0"
+              >
+                <PenSquare className="w-4 h-4" aria-hidden="true" />
+                <span className="hidden sm:inline">Compose</span>
+              </button>
+            </HoverTip>
           </div>
         }
       />
@@ -1415,43 +1409,49 @@ export default function EmailQueue() {
                 <span className="truncate">{activeMailboxLabel}</span>
               </h2>
               <div className="flex items-center gap-0.5 -mr-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => { setSearchOpen((o) => !o); setFilterOpen(false); setSortOpen(false); }}
-                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                    searchOpen || hasActiveSearch
-                      ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
-                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
-                  }`}
-                  aria-label="Search"
-                >
-                  <Search className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setFilterOpen((o) => !o); setSearchOpen(false); setSortOpen(false); }}
-                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                    filterOpen || hasActiveFilters
-                      ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
-                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
-                  }`}
-                  aria-label="Filter"
-                >
-                  <SlidersHorizontal className="w-4 h-4" />
-                </button>
-                <div className="relative" ref={sortRef}>
+                <HoverTip label="Search">
                   <button
                     type="button"
-                    onClick={() => { setSortOpen((o) => !o); setFilterOpen(false); setSearchOpen(false); }}
+                    onClick={() => { setSearchOpen((o) => !o); setFilterOpen(false); setSortOpen(false); }}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                      sortOpen || sortOrder !== 'newest'
+                      searchOpen || hasActiveSearch
                         ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
                         : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
                     }`}
-                    aria-label="Sort"
+                    aria-label="Search"
                   >
-                    <SortAsc className="w-4 h-4" />
+                    <Search className="w-4 h-4" />
                   </button>
+                </HoverTip>
+                <HoverTip label="Filter">
+                  <button
+                    type="button"
+                    onClick={() => { setFilterOpen((o) => !o); setSearchOpen(false); setSortOpen(false); }}
+                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                      filterOpen || hasActiveFilters
+                        ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                        : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                    }`}
+                    aria-label="Filter"
+                  >
+                    <SlidersHorizontal className="w-4 h-4" />
+                  </button>
+                </HoverTip>
+                <div className="relative" ref={sortRef}>
+                  <HoverTip label="Sort">
+                    <button
+                      type="button"
+                      onClick={() => { setSortOpen((o) => !o); setFilterOpen(false); setSearchOpen(false); }}
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                        sortOpen || sortOrder !== 'newest'
+                          ? 'bg-[var(--color-surface-highlight-strong)] text-[var(--color-brand-primary)]'
+                          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)]'
+                      }`}
+                      aria-label="Sort"
+                    >
+                      <SortAsc className="w-4 h-4" />
+                    </button>
+                  </HoverTip>
                   {sortOpen && (
                     <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-48 py-1 bg-white rounded-xl border border-[var(--color-border-default)] shadow-[var(--shadow-modal)]">
                       <button
@@ -1530,9 +1530,11 @@ export default function EmailQueue() {
                   className="w-full pl-9 pr-8 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)]"
                 />
                 {search && (
-                  <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+                  <HoverTip label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2">
+                    <button type="button" onClick={() => setSearch('')} aria-label="Clear search" className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </HoverTip>
                 )}
               </div>
             </div>
@@ -1705,15 +1707,16 @@ export default function EmailQueue() {
                         </>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={clearSelection}
-                      aria-label="Clear selection"
-                      title="Clear selection"
-                      className="inline-flex items-center justify-center h-7 w-7 rounded-full text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-white/80 transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35"
-                    >
-                      <X className="w-3.5 h-3.5" aria-hidden="true" />
-                    </button>
+                    <HoverTip label="Clear selection">
+                      <button
+                        type="button"
+                        onClick={clearSelection}
+                        aria-label="Clear selection"
+                        className="inline-flex items-center justify-center h-7 w-7 rounded-full text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-white/80 transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35"
+                      >
+                        <X className="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                    </HoverTip>
                   </>
                 )}
               </div>
@@ -1829,27 +1832,31 @@ export default function EmailQueue() {
                 {pageStart}–{pageEnd} of {filteredThreads.length}
               </span>
               <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  disabled={currentPage <= 1}
-                  onClick={() => setPage((p) => p - 1)}
-                  className="p-1.5 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                  aria-label="Previous page"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
+                <HoverTip label="Previous page">
+                  <button
+                    type="button"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((p) => p - 1)}
+                    className="p-1.5 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </HoverTip>
                 <span className="text-xs font-semibold text-[var(--color-text-primary)] px-1">
                   {currentPage}/{totalPages}
                 </span>
-                <button
-                  type="button"
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                  className="p-1.5 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                  aria-label="Next page"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+                <HoverTip label="Next page">
+                  <button
+                    type="button"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                    className="p-1.5 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-highlight)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </HoverTip>
               </div>
             </div>
           )}

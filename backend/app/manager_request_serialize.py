@@ -529,6 +529,7 @@ def directory_person_to_api_dict(
         "email": req.person_email,
         "location": req.person_location,
         "status": req.outcome or "",
+        "action": req.action or "",
         "dateAdded": req.handled_at,
         "addedBy": handled_by,
         "managerName": manager_name,

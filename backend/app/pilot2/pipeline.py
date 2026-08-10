@@ -407,7 +407,7 @@ def run_ai_for_email(db: Session, email: models.Email) -> models.Email:
 
     log(
         db, "draft_created",
-        f"Draft ({draft.tweak_level}) created for '{email.subject}' — intent "
+        f"Draft ({draft.tweak_level}) created for '{email.subject}'. Intent "
         f"{classification.intent} at {classification.confidence}% confidence.",
         email.id,
     )

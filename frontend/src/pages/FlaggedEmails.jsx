@@ -341,16 +341,16 @@ export default function FlaggedEmails() {
               </span>
               <div className="space-y-1.5">
                 <div className="text-xs text-[var(--color-text-secondary)] font-medium">
-                  {formatReceivedTime(selectedEmail.receivedAt)} - Email received, AI
+                  {formatReceivedTime(selectedEmail.receivedAt)}: Email received, AI
                   classification complete
                 </div>
                 <div className="text-xs text-[var(--color-text-secondary)] font-medium">
-                  {formatReceivedTime(selectedEmail.receivedAt)} -{' '}
+                  {formatReceivedTime(selectedEmail.receivedAt)}:{' '}
                   {selectedEmail.templateUsed ? (
                     <span>Draft created using {selectedEmail.templateUsed}</span>
                   ) : (
                     <span className="text-amber-600 font-semibold">
-                      Draft creation skipped - flagged for manual review
+                      Draft creation skipped. Flagged for manual review
                     </span>
                   )}
                 </div>

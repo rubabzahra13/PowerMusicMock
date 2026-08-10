@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import DottedScroll from './DottedScroll';
+import HoverTip from './HoverTip';
 
 export default function Drawer({
   isOpen,
@@ -39,19 +40,27 @@ export default function Drawer({
   if (typeof document === 'undefined') return null;
 
   const closeButton = (
-    <button
-      ref={closeRef}
-      type="button"
-      onClick={onClose}
-      className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus:outline-none"
-      aria-label="Close panel"
-    >
-      <X className="size-3.5 shrink-0" strokeWidth={2.25} aria-hidden="true" />
-    </button>
+    <HoverTip label="Close" placement="left">
+      <button
+        ref={closeRef}
+        type="button"
+        onClick={onClose}
+        className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] focus:outline-none"
+        aria-label="Close"
+      >
+        <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      </button>
+    </HoverTip>
   );
 
   const body = (
-    <div className={`flex flex-1 flex-col px-4 py-4 ${fill ? 'min-h-0 overflow-hidden' : ''}`}>
+    <div
+      className={`flex flex-1 flex-col px-4 ${
+        hideHeader
+          ? 'pb-4 pt-[max(3.25rem,calc(env(safe-area-inset-top)+2.5rem))]'
+          : 'py-4'
+      } ${fill ? 'min-h-0 overflow-hidden' : ''}`}
+    >
       {children}
     </div>
   );

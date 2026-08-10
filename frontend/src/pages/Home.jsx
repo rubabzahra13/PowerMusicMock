@@ -340,12 +340,12 @@ function DonutChart({ segments, centerLabel, centerValue }) {
   );
 }
 
-function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue }) {
+function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue, partnerLabel = 'Partner' }) {
   const total = Math.max(partnerReq + autoMail, 1);
   const rows = [
     {
       key: 'partner',
-      label: 'Partner requests',
+      label: `${partnerLabel} requests`,
       detail: `${Math.round((partnerReq / total) * 100)}% of pending`,
       value: partnerReq,
       pct: (partnerReq / total) * 100,
@@ -411,8 +411,7 @@ function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue }) {
 export default function Home() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { selectedPartnerId } = usePartners();
-
+  const { selectedPartnerId, partnerLabel } = usePartners();
   const [pendingRequests, setPendingRequests] = useState([]);
   const [kpis, setKpis] = useState({ pendingRequests: 0, usersInLedger: 0 });
   const [insights, setInsights] = useState(EMPTY_INSIGHTS);
@@ -492,7 +491,7 @@ export default function Home() {
       <PageHeader
         section="Overview"
         title="Hello Andrea."
-        description="A live view of partner requests, ledger health, and what needs your attention."
+        description={`A live view of ${partnerLabel} requests, ledger health, and what needs your attention.`}
         borderless
         className="shrink-0"
       />
@@ -512,7 +511,7 @@ export default function Home() {
             <InsightCard
               label="Pending requests"
               value={kpis.pendingRequests}
-              hint={`${insights.awaitingPartner} awaiting partner confirmation`}
+              hint={`${insights.awaitingPartner} awaiting ${partnerLabel} confirmation`}
               icon={Inbox}
               accent="blue"
               onClick={() => navigate('/new-requests')}
@@ -577,13 +576,14 @@ export default function Home() {
             <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:min-h-0 lg:h-full">
               <PanelHeader
                 title="How pending requests arrived"
-                subtitle="Partner form vs automated email"
+                subtitle={`${partnerLabel} form vs automated email`}
                 action={<QueueLink onClick={() => navigate('/new-requests')} />}
               />
               <PanelScrollBody>
                 <ArrivalSourceList
                   partnerReq={insights.partnerReq}
                   autoMail={insights.autoMail}
+                  partnerLabel={partnerLabel}
                   onOpenQueue={() => navigate('/new-requests')}
                 />
               </PanelScrollBody>

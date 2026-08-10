@@ -1,5 +1,6 @@
 import { X, AlertCircle, AlertTriangle } from 'lucide-react';
 import { useToast } from './useToast';
+import HoverTip from './HoverTip';
 
 const animationStyle = `
   @keyframes toastSlideIn {
@@ -53,13 +54,15 @@ export default function Toast() {
               </div>
 
               {/* Close Button */}
-              <button
-                onClick={() => dismissToast(toast.id)}
-                className="p-0.5 rounded-md text-[var(--color-text-secondary)] hover:bg-gray-100 hover:text-[var(--color-text-primary)] transition-colors focus:outline-none shrink-0"
-                aria-label="Dismiss toast"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <HoverTip label="Dismiss" placement="left">
+                <button
+                  onClick={() => dismissToast(toast.id)}
+                  className="p-0.5 rounded-md text-[var(--color-text-secondary)] hover:bg-gray-100 hover:text-[var(--color-text-primary)] transition-colors focus:outline-none shrink-0"
+                  aria-label="Dismiss"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </HoverTip>
             </div>
           );
         })}

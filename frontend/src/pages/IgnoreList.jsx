@@ -4,7 +4,7 @@ import { formatShortDate } from '../utils/dateTime';
 import PageHeader from '../components/layout/PageHeader';
 import { adminPageShellClassNarrow } from '../utils/responsiveLayout';
 import DottedScroll from '../components/ui/DottedScroll';
-import { Toast, useToast, CardListSkeleton, SelectDropdown, Modal } from '../components/ui';
+import { Toast, useToast, CardListSkeleton, SelectDropdown, Modal, HoverTip } from '../components/ui';
 import {
   clearCache,
   createIgnoreRule,
@@ -226,19 +226,21 @@ export default function IgnoreList() {
                         {rule.createdAt ? ` · Added ${formatAdded(rule.createdAt)}` : ''}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setPendingRemove(rule)}
-                      disabled={busyId === rule.id}
-                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                      aria-label={`Remove ${formatPattern(rule)}`}
-                    >
-                      {busyId === rule.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" aria-hidden="true" />
-                      )}
-                    </button>
+                    <HoverTip label="Remove">
+                      <button
+                        type="button"
+                        onClick={() => setPendingRemove(rule)}
+                        disabled={busyId === rule.id}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                        aria-label={`Remove ${formatPattern(rule)}`}
+                      >
+                        {busyId === rule.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
+                        )}
+                      </button>
+                    </HoverTip>
                   </li>
                 ))}
               </ul>

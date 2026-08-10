@@ -972,11 +972,11 @@ export default function ManagerForm() {
             <input
               id={ids.search}
               type="search"
-              placeholder="Search by name or email..."
+              placeholder="Search by name, email, or location..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               disabled={submitted}
-              aria-label="Search by name or email"
+              aria-label="Search by name, email, or location"
               className={`${inputClass} pl-9`}
             />
           </div>

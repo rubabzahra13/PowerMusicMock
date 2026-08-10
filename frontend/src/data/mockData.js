@@ -651,12 +651,12 @@ export const templates = [
     id: "tmpl-004", name: "Renewal Reminder", category: "Membership",
     status: "Active", timesUsed: 27, lastUpdated: "2026-06-01T10:15:00",
     subject: "Re: Your renewal",
-    body: "Hi {{first_name}},\n\nYour {{membership_type}} membership at {{club_name}} is due for renewal.\n\nWe'd love to keep you with us - please find your renewal options below.\n\nKind regards,\nPower Music Team"
+    body: "Hi {{first_name}},\n\nYour {{membership_type}} membership at {{club_name}} is due for renewal.\n\nWe'd love to keep you with us. Please find your renewal options below.\n\nKind regards,\nPower Music Team"
   },
   {
     id: "tmpl-005", name: "Payment Confirmation", category: "Payments",
     status: "Active", timesUsed: 9, lastUpdated: "2026-04-20T16:30:00",
-    subject: "Payment received - {{club_name}}",
+    subject: "Payment received: {{club_name}}",
     body: "Hi {{first_name}},\n\nWe're confirming receipt of your payment for {{membership_type}} at {{club_name}}.\n\nYour account is now up to date.\n\nKind regards,\nPower Music Team"
   },
   {
@@ -668,7 +668,7 @@ export const templates = [
   {
     id: "tmpl-007", name: "Event Invitation", category: "Events",
     status: "Active", timesUsed: 22, lastUpdated: "2026-06-05T13:00:00",
-    subject: "You're invited - {{club_name}} event",
+    subject: "You're invited: {{club_name}} event",
     body: "Hi {{first_name}},\n\nWe'd like to invite you to an upcoming event at {{club_name}}.\n\nDetails will be shared shortly. We hope to see you there!\n\nKind regards,\nPower Music Team"
   },
   {
@@ -680,13 +680,13 @@ export const templates = [
   {
     id: "tmpl-009", name: "Welcome Email", category: "Membership",
     status: "Active", timesUsed: 41, lastUpdated: "2026-04-01T08:30:00",
-    subject: "Welcome to Power Music - {{club_name}}",
+    subject: "Welcome to Power Music: {{club_name}}",
     body: "Hi {{first_name}},\n\nWelcome to {{club_name}}! We're thrilled to have you on board as a {{membership_type}} member.\n\nIf you have any questions during your first few weeks, don't hesitate to reach out.\n\nKind regards,\nPower Music Team"
   },
   {
     id: "tmpl-010", name: "Out of Office Auto-Reply", category: "Other",
     status: "Active", timesUsed: 0, lastUpdated: "2026-06-15T09:00:00",
-    subject: "Out of Office - {{club_name}}",
+    subject: "Out of Office: {{club_name}}",
     body: "Hi {{first_name}},\n\nWe are currently out of office and will respond upon our return.\n\nFor urgent matters, please call our main line.\n\nKind regards,\nPower Music Team"
   },
   {
@@ -698,7 +698,7 @@ export const templates = [
   {
     id: "tmpl-012", name: "Event Follow-Up", category: "Events",
     status: "Active", timesUsed: 3, lastUpdated: "2026-06-20T10:00:00",
-    subject: "Thank you for attending - {{club_name}}",
+    subject: "Thank you for attending: {{club_name}}",
     body: "Hi {{first_name}},\n\nWe hope you enjoyed the recent {{club_name}} event.\n\nWe'd love to hear your feedback.\n\nKind regards,\nPower Music Team"
   }
 ];
