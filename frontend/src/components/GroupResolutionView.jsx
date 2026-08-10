@@ -455,17 +455,15 @@ export default function GroupResolutionView({
           icon={Inbox}
           title="New Request"
           action={
-            hasDirectory ? (
-              <button
-                type="button"
-                disabled={!isFormValid || submitting || previewLoading}
-                onClick={openMergeConfirm}
-                className={BTN_PRIMARY}
-              >
-                <Check className="h-4 w-4" aria-hidden="true" />
-                {previewLoading ? 'Loading preview…' : submitting ? 'Updating…' : 'Add this Record'}
-              </button>
-            ) : null
+            <button
+              type="button"
+              disabled={!isFormValid || submitting || previewLoading || isEditing}
+              onClick={openMergeConfirm}
+              className={BTN_PRIMARY}
+            >
+              <Check className="h-4 w-4" aria-hidden="true" />
+              {previewLoading ? 'Loading preview…' : submitting ? 'Updating…' : 'Add this Record'}
+            </button>
           }
         >
           <div className="mb-3 flex flex-wrap items-center gap-2">
