@@ -148,8 +148,9 @@ def match_classification(
     total_score = first_name_score + last_name_score + email_score + loc_score
 
     # 1. Confirmed Duplicate (strict rule)
-    # Identical first name + last name + email
-    if same_first and same_last and same_email:
+    # Identical across all relevant fields (First Name + Last Name + Email + Location)
+    # Empty fields do not contribute to a confirmed match due to existing safeguards in same_email/same_loc.
+    if same_first and same_last and same_email and same_loc:
         return "confirmed_duplicate", total_score
 
     if total_score >= POTENTIAL_DUPLICATE_THRESHOLD:
