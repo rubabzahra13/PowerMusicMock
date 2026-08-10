@@ -107,7 +107,7 @@ export function matchesSentViaFilter(tags = [], filterValue) {
 export function requestTagLabel(tag) {
   if (tag === TAG_PARTNER_REQUEST) return 'Manager Form';
   if (tag === TAG_SENT_BY_ADMIN) return ADMIN_FORM_LABEL;
-  if (tag === TAG_CONFIRMED_DUPLICATE) return 'Confirmed Duplicate';
+  if (tag === TAG_CONFIRMED_DUPLICATE) return 'Duplicate';
   if (tag === TAG_POTENTIAL_DUPLICATE) return 'Potential Duplicate';
   if (tag === TAG_AUTO_MAIL) return 'Automated email';
   return tag;
@@ -121,7 +121,7 @@ const STATUS_TAGS = [
   },
   {
     tag: TAG_CONFIRMED_DUPLICATE,
-    label: 'Confirmed Duplicate',
+    label: 'Duplicate',
     variant: 'duplicate-confirmed',
   },
   {

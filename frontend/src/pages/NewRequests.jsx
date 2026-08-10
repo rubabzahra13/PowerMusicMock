@@ -485,6 +485,7 @@ export default function Requests() {
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkRequestId = searchParams.get('id');
   const statusDeepLink = searchParams.get('status');
+  const sentViaDeepLink = searchParams.get('sentVia');
   const consumedDeepLinkRef = useRef(null);
   const pendingCreatedIdsRef = useRef(new Set());
   const adminDisplayName = profile?.full_name?.trim() || 'Power Music Admin';
@@ -554,6 +555,21 @@ export default function Requests() {
       return next;
     }, { replace: true });
   }, [statusDeepLink, setSearchParams]);
+
+  useEffect(() => {
+    if (
+      sentViaDeepLink !== TAG_PARTNER_REQUEST
+      && sentViaDeepLink !== TAG_AUTO_MAIL
+      && sentViaDeepLink !== SENT_VIA_BOTH
+    ) return;
+    setFilterSentVia(sentViaDeepLink);
+    setFilterOpen(true);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('sentVia');
+      return next;
+    }, { replace: true });
+  }, [sentViaDeepLink, setSearchParams]);
 
   const applyRequestsPage = useCallback((data, isStale) => {
     if (Array.isArray(data.requests)) {
@@ -1073,7 +1089,7 @@ export default function Requests() {
     }
   };
 
-  // ── Column order: #, Received, Person, Manager, Type, Sent via, Status, Notes, Mark as, Actions
+  // ── Column order: #, Received, Person, Manager, Type, Sent via, Status, Notes, Actions
   const newColumns = [
     {
       key: 'displayId',
@@ -1225,17 +1241,18 @@ export default function Requests() {
     },
 
     {
-      key: 'markAs',
-      label: 'Mark as',
-      width: '4.75rem',
+      key: 'actions',
+      label: 'Actions',
+      width: '9.5rem',
       noShrink: true,
       headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap px-1',
+      cellClassName: 'text-center align-middle whitespace-nowrap px-1.5',
       render: (_, row) => (
-        <div className="flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-center gap-1.5">
           <button
             type="button"
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               if (row.duplicateGroupId) {
                 handleOpenRequest(row);
               } else {
@@ -1248,20 +1265,8 @@ export default function Requests() {
                 : 'bg-[#dc2626] text-white border-[#b91c1c] hover:bg-[#b91c1c]'
             }`}
           >
-            {row.action === 'Add' ? 'Added' : 'Removed'}
+            {row.action === 'Add' ? 'Add' : 'Remove'}
           </button>
-        </div>
-      ),
-    },
-    {
-      key: 'open',
-      label: 'Actions',
-      width: '4.5rem',
-      noShrink: true,
-      headerClassName: 'text-center',
-      cellClassName: 'text-center align-middle whitespace-nowrap px-1.5',
-      render: (_, row) => (
-        <div className="flex items-center justify-center gap-1.5">
           <HoverTip label="Delete">
             <button
               type="button"
@@ -1281,7 +1286,7 @@ export default function Requests() {
             </div>
           </HoverTip>
         </div>
-      )
+      ),
     },
   ];
 
@@ -1392,14 +1397,6 @@ export default function Requests() {
               { value: TAG_PARTNER_REQUEST, label: 'Manager Form' },
               { value: TAG_AUTO_MAIL, label: 'Automated email' },
               { value: SENT_VIA_BOTH, label: 'Manager +Auto Mail' },
-            ]
-          },
-          {
-            label: 'Needs review', value: filterNeedsReview, onChange: setFilterNeedsReview,
-            options: [
-              { value: 'All', label: 'All' },
-              { value: 'Yes', label: 'Yes' },
-              { value: 'No', label: 'No' },
             ]
           },
           {

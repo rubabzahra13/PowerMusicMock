@@ -90,6 +90,19 @@ export default function GroupDetail() {
         case 'delete':
           toastMsg = 'Resolved and Directory record permanently deleted.';
           break;
+        case 'unlinked':
+          toastMsg = 'Request unlinked. It stays here as a current request for this visit.';
+          break;
+        case 'unlinked_handled':
+          toastMsg = name
+            ? `${name} marked as handled.`
+            : 'Request marked as handled.';
+          break;
+        case 'unlinked_handled_done':
+          toastMsg = name
+            ? `${name} marked as handled.`
+            : 'Request marked as handled.';
+          break;
         case 'unlinked_dissolved':
           toastMsg = 'Group dissolved successfully.';
           break;
@@ -99,6 +112,12 @@ export default function GroupDetail() {
       }
 
       showToast(toastMsg, 'success');
+
+      // Stay on this page after unlink / partial handle so the admin can keep
+      // working here for this visit. Leaving + returning reloads normal UI.
+      if (type === 'unlinked' || type === 'unlinked_handled') {
+        return;
+      }
 
       // Refresh directory cache in the background for Directory page consistency
       if (type === 'add' || type === 'update') {

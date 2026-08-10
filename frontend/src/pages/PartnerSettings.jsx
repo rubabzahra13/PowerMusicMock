@@ -714,7 +714,7 @@ export default function PartnerSettings() {
             <SettingsPage>
           <SettingsSection
             id="connected-inbox"
-            title="Connected inbox"
+            title="Connected inbox (Power Music)"
             hint={`Used for automated add/remove email · ${getUserTimeZoneLabel()}`}
             action={(
               <TextButton
@@ -806,7 +806,7 @@ export default function PartnerSettings() {
 
           <SettingsSection
             id="auto-sources"
-            title="Automated email sources"
+            title={`Automated email sources (${partnerLabel})`}
             hint="Emails or domains that can create add/remove requests automatically."
             footer={(
               <AddBar

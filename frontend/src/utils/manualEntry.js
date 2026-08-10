@@ -4,8 +4,8 @@ import {
   TAG_VERIFIED,
 } from './requestTags';
 
-export const AWAITING_MANAGER_LABEL = 'Awaiting partner request';
-export const AWAITING_MANAGER_HINT = 'Automated notification only';
+export const AWAITING_MANAGER_LABEL = 'Auto Email Request';
+export const AWAITING_MANAGER_HINT = '';
 export const MANUAL_ENTRY_CLUB = 'Manual entry';
 export const SENT_BY_ADMIN_LABEL = 'Admin form';
 export const NO_MANAGER_NAME = 'No name';

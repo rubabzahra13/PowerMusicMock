@@ -8,6 +8,7 @@ import { Tag, Modal, HoverTip } from './ui';
 import { formatAdminDateTime, formatRequestDisplayId } from '../utils/requestDisplayId';
 import { getManagerDisplayName, isManualEntry, MANUAL_ENTRY_CLUB } from '../utils/manualEntry';
 import { readManagerNotes } from '../utils/managerNotes';
+import { fetchJson } from '../utils/api';
 import {
   resolveGroupAdd,
   resolveGroupUpdate,
@@ -110,7 +111,7 @@ function SectionCard({
 }
 
 function classificationTag(classification) {
-  if (classification === 'confirmed_duplicate') return { variant: 'duplicate-confirmed', label: 'Confirmed Duplicate' };
+  if (classification === 'confirmed_duplicate') return { variant: 'duplicate-confirmed', label: 'Duplicate' };
   if (classification === 'potential_duplicate') return { variant: 'duplicate-potential', label: 'Potential Duplicate' };
   if (classification === 'already_exists' || classification === 'already_exists_conflict') return { variant: 'already-exists', label: 'Already Exists' };
   return { variant: 'neutral', label: classification };
@@ -162,15 +163,20 @@ export default function GroupResolutionView({
   const [adminNote, setAdminNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Members list (local — remove unlinked members instantly)
+  // Members list — keep unlinked rows visible for this visit only so the admin
+  // can still treat them as current requests here. Remount reloads normal UI.
   const [members, setMembers] = useState(group.members);
+  const [sessionUnlinkedIds, setSessionUnlinkedIds] = useState([]);
+  const [unlinkedNotes, setUnlinkedNotes] = useState({});
   const [valuesOpen, setValuesOpen] = useState(true);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [mergePageOpen, setMergePageOpen] = useState(false);
 
   // Keep confirmation + merge-page values
-  const [confirmAction, setConfirmAction] = useState(null); // 'keep' | null
+  const [confirmAction, setConfirmAction] = useState(null); // 'keep' | 'merge' | null
+  const [markUnlinkedTarget, setMarkUnlinkedTarget] = useState(null);
   const [modalValues, setModalValues] = useState(null);
+  const [mergeEditing, setMergeEditing] = useState(false);
 
   const updateDraftField = (field, value) => setDraftForm((f) => ({ ...f, [field]: value }));
 
@@ -190,6 +196,19 @@ export default function GroupResolutionView({
 
   const closeConfirmModal = () => {
     setConfirmAction(null);
+    setMergeEditing(false);
+  };
+
+  const startMergeEdit = () => {
+    setDraftForm(form);
+    setMergeEditing(true);
+  };
+
+  const saveMergeEdit = () => {
+    if (!draftForm.firstName.trim() || !draftForm.lastName.trim()) return;
+    setForm(draftForm);
+    setModalValues({ ...draftForm });
+    setMergeEditing(false);
   };
 
   const closeMergePage = () => {
@@ -203,7 +222,13 @@ export default function GroupResolutionView({
     setConfirmAction('keep');
   };
 
-  /* ── merge — open clear on-page merge view (no modal) ── */
+  /* ── open the Request History page (timeline + Merge) ── */
+  const openHistoryPage = () => {
+    if (submitting) return;
+    setHistoryExpanded(true);
+    setMergePageOpen(true);
+  };
+
   const openMergePage = () => {
     if (submitting) return;
     setHistoryExpanded(true);
@@ -215,17 +240,6 @@ export default function GroupResolutionView({
   const openMergeConfirm = async () => {
     if (!isFormValid || submitting) return;
     openMergePage();
-  };
-
-  const handleSaveResolved = () => {
-    if (isEditing) {
-      if (!draftForm.firstName.trim() || !draftForm.lastName.trim()) return;
-      setForm(draftForm);
-      setIsEditing(false);
-      setModalValues({ ...draftForm });
-      return;
-    }
-    setModalValues({ ...form });
   };
 
   const handleConfirmMerge = async () => {
@@ -313,24 +327,109 @@ export default function GroupResolutionView({
         requestId2: memberId,
       });
 
-      const nextMembers = members.filter((m) => m.id !== memberId);
-      if (nextMembers.length <= 1 && !hasDirectory) {
-        // Group has dissolved completely
-        onResolved('unlinked_dissolved', null);
-      } else {
-        setMembers(nextMembers);
-      }
+      // Backend also ungroups the last peer when a non-directory group drops to 1.
+      const remainingActive = members.filter(
+        (m) => m.id !== memberId && !sessionUnlinkedIds.includes(m.id),
+      );
+      const groupDissolves = remainingActive.length <= 1 && !hasDirectory;
+      const newlyUnlinked = groupDissolves
+        ? [memberId, ...remainingActive.map((m) => m.id)]
+        : [memberId];
+
+      setSessionUnlinkedIds((prev) => [...new Set([...prev, ...newlyUnlinked])]);
+      // Stay on this page — unlinked rows become current requests for this visit.
+      onResolved('unlinked', null);
     } catch (err) {
       onResolved('error', err.message || 'Failed to unlink member.');
     }
   };
 
+  const handleMarkUnlinked = async () => {
+    const member = markUnlinkedTarget;
+    if (!member || submitting) return;
+    setSubmitting(true);
+    const note = (unlinkedNotes[member.id] || '').trim();
+    try {
+      await fetchJson(`/api/admin/requests/${encodeURIComponent(member.id)}/mark-handled`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminNote: note || null }),
+      });
+      const nextMembers = members.filter((m) => m.id !== member.id);
+      const nextUnlinked = sessionUnlinkedIds.filter((id) => id !== member.id);
+      setMembers(nextMembers);
+      setSessionUnlinkedIds(nextUnlinked);
+      setMarkUnlinkedTarget(null);
+      setUnlinkedNotes((prev) => {
+        const next = { ...prev };
+        delete next[member.id];
+        return next;
+      });
+      if (nextMembers.length === 0) {
+        onResolved('unlinked_handled_done', personFullName(member.person));
+      } else {
+        onResolved('unlinked_handled', personFullName(member.person));
+      }
+    } catch (err) {
+      onResolved('error', err.message || 'Failed to mark request as handled.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const isSessionUnlinked = (id) => sessionUnlinkedIds.includes(id);
+  const activeMembers = members.filter((m) => !isSessionUnlinked(m.id));
+  const unlinkedMembers = members.filter((m) => isSessionUnlinked(m.id));
+  // After a dissolve unlink, every row is session-unlinked — hide group merge.
+  const canStillMerge = activeMembers.length > 0;
+
   const tag = classificationTag(group.classification);
   const personName = personFullName(repMember?.person);
-  const currentRequest = [...members].sort(
+  const currentRequest = [...activeMembers].sort(
     (a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0),
-  )[0] || repMember;
+  )[0] || null;
   const currentManager = managerFieldsFromMember(currentRequest);
+
+  const renderUnlinkedCurrentActions = (member) => {
+    const isAdd = member.action === 'Add';
+    const actionLabel = isAdd ? 'Add User' : 'Remove User';
+    return (
+      <div className="mt-5 border-t border-[var(--color-border-default)] pt-4">
+        <div className="mb-3">
+          <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+            {actionLabel}
+          </h3>
+          <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
+            Confirm only after you’ve {isAdd ? 'added' : 'removed'}{' '}
+            {personFullName(member.person)} in Power Music.
+          </p>
+        </div>
+        <label className="block w-full">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+            Admin note <span className="normal-case tracking-normal">(optional)</span>
+          </span>
+          <textarea
+            value={unlinkedNotes[member.id] || ''}
+            onChange={(e) => setUnlinkedNotes((prev) => ({ ...prev, [member.id]: e.target.value }))}
+            placeholder="Saved with the directory record"
+            rows={2}
+            className="mt-2 w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-bg)] px-3.5 py-2.5 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:border-[var(--color-brand-secondary)] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-secondary)]/15"
+          />
+        </label>
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => setMarkUnlinkedTarget(member)}
+            className={BTN_PRIMARY}
+          >
+            <Check className="h-4 w-4" aria-hidden="true" />
+            {actionLabel}
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="relative z-0 min-w-0 w-full bg-[var(--color-surface-bg)] pb-16 select-none">
@@ -431,11 +530,7 @@ export default function GroupResolutionView({
             </button>
           }
         >
-          <div className="relative space-y-4 pl-6 sm:pl-8">
-            <div
-              className="pointer-events-none absolute bottom-4 left-[0.7rem] top-4 w-px bg-[var(--color-brand-secondary)]/35 sm:left-[0.95rem]"
-              aria-hidden="true"
-            />
+          <div className="space-y-4">
             {(() => {
               const sortedByNewest = [...members].sort(
                 (a, b) => new Date(b.receivedAt) - new Date(a.receivedAt),
@@ -452,6 +547,9 @@ export default function GroupResolutionView({
                 <div className="space-y-4">
                   {visibleMembers.map((member) => {
                     const isLatest = member.id === latestId;
+                    const unlinked = isSessionUnlinked(member.id);
+                    // Tags stay normal (Current request / Older). Unlinked only unlocks
+                    // standalone mark-handled actions for this visit.
                     const role = isLatest
                       ? { variant: 'new-person', label: 'Current request' }
                       : { variant: 'neutral', label: 'Older' };
@@ -463,10 +561,6 @@ export default function GroupResolutionView({
                     } = managerFieldsFromMember(member);
                     return (
                       <div key={member.id} className="relative">
-                        <span
-                          className="absolute -left-6 top-5 z-[1] h-3 w-3 rounded-sm border-2 border-[var(--color-brand-secondary)] bg-white sm:-left-7"
-                          aria-hidden="true"
-                        />
                         <div
                           className={`rounded-xl border bg-white px-4 py-3.5 ${isLatest
                             ? 'border-[var(--color-surface-sidebar)] ring-2 ring-[var(--color-surface-sidebar)]/20'
@@ -484,27 +578,28 @@ export default function GroupResolutionView({
                               />
                               <Tag variant={role.variant} label={role.label} />
                             </div>
-                            {!isLatest && members.length > 1 && (
-                              <div className="flex w-[11.5rem] shrink-0 flex-col overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-bg)]/80 shadow-[0_1px_0_rgba(26,26,46,0.04)]">
+                            {!unlinked && !isLatest && activeMembers.length > 1 ? (
+                              <div className="flex shrink-0 items-center gap-2">
+                                {group.classification !== 'confirmed_duplicate' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setUnlinkTargetId(member.id)}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] bg-white px-2.5 py-1.5 text-xs font-semibold text-[var(--color-text-secondary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                                  >
+                                    <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                                    Not the same person
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
                                   onClick={() => setUnlinkTargetId(member.id)}
-                                  className="inline-flex w-full items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-white hover:text-[var(--color-text-primary)] cursor-pointer"
-                                >
-                                  <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                                  Not the same person
-                                </button>
-                                <div className="h-px bg-[var(--color-border-default)]" aria-hidden="true" />
-                                <button
-                                  type="button"
-                                  onClick={() => setUnlinkTargetId(member.id)}
-                                  className="inline-flex w-full items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-600 shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 cursor-pointer"
                                 >
                                   <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                                   Delete
                                 </button>
                               </div>
-                            )}
+                            ) : null}
                           </div>
 
                           <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
@@ -523,6 +618,8 @@ export default function GroupResolutionView({
                               Received {formatAdminDateTime(member.receivedAt)}
                             </p>
                           )}
+
+                          {unlinked ? renderUnlinkedCurrentActions(member) : null}
                         </div>
                       </div>
                     );
@@ -549,146 +646,19 @@ export default function GroupResolutionView({
             })()}
           </div>
 
-          <div className="mt-6 overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white">
-            <button
-              type="button"
-              onClick={() => setValuesOpen((open) => !open)}
-              className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[var(--color-surface-highlight)] cursor-pointer sm:px-5"
-              aria-expanded={valuesOpen}
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-bg)] text-[var(--color-brand-secondary)] ring-1 ring-[var(--color-border-default)]">
-                  <Pencil className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <p className="text-sm font-semibold text-[var(--color-text-primary)]">
-                  {valuesOpen ? 'Hide Final Resolved Values' : 'Final Resolved Values'}
-                </p>
-              </div>
-              <ChevronDown
-                className={`h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform ${valuesOpen ? 'rotate-180' : ''}`}
-                aria-hidden="true"
-              />
-            </button>
-
-            {valuesOpen && (
-              <div className="border-t border-[var(--color-border-default)] bg-[var(--color-surface-bg)]/70 px-4 py-4 sm:px-5">
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <p className="text-xs text-[var(--color-text-secondary)]">
-                    Pre-filled from the latest request.
-                    <strong className="text-[var(--color-text-primary)]"> First Name and Last Name are required.</strong>
-                  </p>
-                  {!isEditing && (
-                    <HoverTip label="Edit">
-                      <button
-                        type="button"
-                        onClick={handleEditClick}
-                        className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] transition-colors cursor-pointer"
-                        aria-label="Edit final resolved values"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                    </HoverTip>
-                  )}
-                </div>
-
-                {!isEditing ? (
-                  <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-                    <MetaItem label="First Name" value={form.firstName || '—'} />
-                    <MetaItem label="Last Name" value={form.lastName || '—'} />
-                    <MetaItem label="Email" value={form.email || '—'} />
-                    <MetaItem label="Location" value={form.location || '—'} />
-                  </dl>
-                ) : (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className={LABEL_CLASS}>First Name *</label>
-                      <input
-                        type="text"
-                        value={draftForm.firstName}
-                        onChange={(e) => updateDraftField('firstName', e.target.value)}
-                        className={INPUT_CLASS}
-                        placeholder="First name"
-                      />
-                    </div>
-                    <div>
-                      <label className={LABEL_CLASS}>Last Name *</label>
-                      <input
-                        type="text"
-                        value={draftForm.lastName}
-                        onChange={(e) => updateDraftField('lastName', e.target.value)}
-                        className={INPUT_CLASS}
-                        placeholder="Last name"
-                      />
-                    </div>
-                    <div>
-                      <label className={LABEL_CLASS}>Email</label>
-                      <input
-                        type="email"
-                        value={draftForm.email}
-                        onChange={(e) => updateDraftField('email', e.target.value)}
-                        className={INPUT_CLASS}
-                        placeholder="Email address"
-                      />
-                    </div>
-                    <div>
-                      <label className={LABEL_CLASS}>Location</label>
-                      <input
-                        type="text"
-                        value={draftForm.location}
-                        onChange={(e) => updateDraftField('location', e.target.value)}
-                        className={INPUT_CLASS}
-                        placeholder="Location"
-                      />
-                    </div>
-                    <div className="col-span-full mt-1 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={handleSaveClick}
-                        disabled={!draftForm.firstName.trim() || !draftForm.lastName.trim()}
-                        className={BTN_PRIMARY}
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <label htmlFor="merge-page-resolve-note" className="mt-5 block w-full border-t border-[var(--color-border-default)] pt-4">
-                  <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-                    Admin note <span className="normal-case tracking-normal">(optional)</span>
-                  </span>
-                  <textarea
-                    id="merge-page-resolve-note"
-                    value={adminNote}
-                    onChange={(e) => setAdminNote(e.target.value)}
-                    placeholder="Saved with the resolution record"
-                    rows={2}
-                    className="mt-2 w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-white px-3.5 py-2.5 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:border-[var(--color-brand-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-secondary)]/15"
-                  />
-                </label>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--color-border-default)] pt-4">
-            <button
-              type="button"
-              disabled={submitting || !isFormValid || isEditing}
-              onClick={handleSaveResolved}
-              className={BTN_SECONDARY}
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              disabled={submitting || !isFormValid || isEditing}
-              onClick={handleConfirmMerge}
-              className={BTN_PRIMARY}
-            >
-              <Check className="h-4 w-4" aria-hidden="true" />
-              {submitting ? 'Merging…' : 'Merge'}
-            </button>
-          </div>
+          {canStillMerge ? (
+            <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={submitting || !isFormValid || isEditing}
+                onClick={() => setConfirmAction('merge')}
+                className={BTN_PRIMARY}
+              >
+                <Check className="h-4 w-4" aria-hidden="true" />
+                {submitting ? 'Merging…' : 'Merge'}
+              </button>
+            </div>
+          ) : null}
         </SectionCard>
       ) : (
         <>
@@ -714,7 +684,7 @@ export default function GroupResolutionView({
         </SectionCard>
       )}
 
-      {/* ── New Request (latest only) ── */}
+      {/* ── New Request (active group current) ── */}
       {currentRequest && (
         <SectionCard
           icon={Inbox}
@@ -751,38 +721,229 @@ export default function GroupResolutionView({
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border-default)] pt-4">
             <button
               type="button"
-              onClick={openMergePage}
+              onClick={openHistoryPage}
               className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--color-text-primary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:border-[var(--color-brand-secondary-border)] hover:text-[var(--color-brand-secondary)] cursor-pointer"
             >
               <Clock className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />
               View Request History ({members.length})
             </button>
 
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={openKeepConfirm}
-                className={BTN_SECONDARY}
-              >
-                Keep Existing and Delete New Request
-              </button>
-              <button
-                type="button"
-                disabled={!isFormValid || submitting || isEditing}
-                onClick={openMergeConfirm}
-                className={BTN_PRIMARY}
-              >
-                <Check className="h-4 w-4" aria-hidden="true" />
-                Merge & Update Request in Directory
-              </button>
-            </div>
+            {canStillMerge ? (
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {hasDirectory && (
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={openKeepConfirm}
+                    className={BTN_SECONDARY}
+                  >
+                    Keep Existing and Delete New Request
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={!isFormValid || submitting || isEditing}
+                  onClick={openMergeConfirm}
+                  className={BTN_PRIMARY}
+                >
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  Merge & Update Request in Directory
+                </button>
+              </div>
+            ) : null}
           </div>
         </SectionCard>
       )}
 
+      {/* ── Unlinked requests — mark-handled UI for this visit only ── */}
+      {unlinkedMembers.map((member) => {
+        const mgr = managerFieldsFromMember(member);
+        const isLatestUnlinked = !members.some(
+          (m) => m.id !== member.id && new Date(m.receivedAt || 0) > new Date(member.receivedAt || 0),
+        );
+        return (
+          <SectionCard
+            key={`unlinked-${member.id}`}
+            icon={Inbox}
+            title="New Request"
+          >
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
+                {formatRequestDisplayId(member.displayId)}
+              </span>
+              <Tag
+                variant={member.action === 'Add' ? 'add-action' : 'remove-action'}
+                label={member.action}
+              />
+              <Tag
+                variant={isLatestUnlinked ? 'new-person' : 'neutral'}
+                label={isLatestUnlinked ? 'Current request' : 'Older'}
+              />
+            </div>
+
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+              <MetaItem label="First Name" value={member.person?.firstName} />
+              <MetaItem label="Last Name" value={member.person?.lastName} />
+              <MetaItem label="Email" value={member.person?.email} />
+              <MetaItem label="Location" value={member.person?.location} />
+              <MetaItem label="Manager name" value={mgr.managerName} />
+              <MetaItem label="Manager email" value={mgr.managerEmail} />
+              <MetaItem label="Manager location" value={mgr.managerClub} />
+              <MetaItem label="Manager notes" value={mgr.notesText || 'No notes'} />
+            </dl>
+
+            {member.receivedAt && (
+              <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+                Received {formatAdminDateTime(member.receivedAt)}
+              </p>
+            )}
+
+            {!currentRequest ? (
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border-default)] pt-4">
+                <button
+                  type="button"
+                  onClick={openHistoryPage}
+                  className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--color-text-primary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:border-[var(--color-brand-secondary-border)] hover:text-[var(--color-brand-secondary)] cursor-pointer"
+                >
+                  <Clock className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />
+                  View Request History ({members.length})
+                </button>
+              </div>
+            ) : null}
+
+            {renderUnlinkedCurrentActions(member)}
+          </SectionCard>
+        );
+      })}
+
         </>
       )}
+
+      {/* ── Merge confirmation ── */}
+      <Modal
+        isOpen={confirmAction === 'merge'}
+        onClose={closeConfirmModal}
+        title={hasDirectory ? 'Merge and update Directory record?' : 'Merge and add to Directory?'}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={closeConfirmModal}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={submitting || !isFormValid || mergeEditing}
+              onClick={handleConfirmMerge}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-60"
+            >
+              {submitting ? 'Merging…' : 'Merge & Add to Directory'}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-[var(--color-text-secondary)]">
+          {hasDirectory
+            ? 'The final resolved values will overwrite the existing Directory record, and the requests in this group will be closed.'
+            : 'A new Directory record will be created from the final resolved values, and the requests in this group will be closed.'}
+        </p>
+
+        <div className="mt-4 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-bg)]/60 p-3.5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+              Final resolved values
+            </p>
+            {!mergeEditing ? (
+              <button
+                type="button"
+                onClick={startMergeEdit}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-default)] bg-white px-2.5 py-1 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] cursor-pointer"
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                Edit
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={saveMergeEdit}
+                disabled={!draftForm.firstName.trim() || !draftForm.lastName.trim()}
+                className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-brand-primary)] px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-60 cursor-pointer"
+              >
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                Save
+              </button>
+            )}
+          </div>
+
+          {!mergeEditing ? (
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
+              <MetaItem label="First Name" value={form.firstName || '—'} />
+              <MetaItem label="Last Name" value={form.lastName || '—'} />
+              <MetaItem label="Email" value={form.email || '—'} />
+              <MetaItem label="Location" value={form.location || '—'} />
+            </dl>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className={LABEL_CLASS}>First Name *</label>
+                <input
+                  type="text"
+                  value={draftForm.firstName}
+                  onChange={(e) => updateDraftField('firstName', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="First name"
+                />
+              </div>
+              <div>
+                <label className={LABEL_CLASS}>Last Name *</label>
+                <input
+                  type="text"
+                  value={draftForm.lastName}
+                  onChange={(e) => updateDraftField('lastName', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="Last name"
+                />
+              </div>
+              <div>
+                <label className={LABEL_CLASS}>Email</label>
+                <input
+                  type="email"
+                  value={draftForm.email}
+                  onChange={(e) => updateDraftField('email', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="Email address"
+                />
+              </div>
+              <div>
+                <label className={LABEL_CLASS}>Location</label>
+                <input
+                  type="text"
+                  value={draftForm.location}
+                  onChange={(e) => updateDraftField('location', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="Location"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <label htmlFor="merge-confirm-note" className="mt-4 block w-full">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            Admin note <span className="normal-case tracking-normal">(optional)</span>
+          </span>
+          <textarea
+            id="merge-confirm-note"
+            value={adminNote}
+            onChange={(e) => setAdminNote(e.target.value)}
+            placeholder="Saved with the resolution record"
+            rows={2}
+            className="mt-2 w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-white px-3.5 py-2.5 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:border-[var(--color-brand-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-secondary)]/15"
+          />
+        </label>
+      </Modal>
 
       {/* ── Keep confirmation ── */}
       <Modal
@@ -846,8 +1007,43 @@ export default function GroupResolutionView({
         }
       >
         <p className="text-sm text-[var(--color-text-secondary)]">
-          This will unlink this request from the current request history and create it as a separate new request.
+          This will unlink this request from the group. It stays on this page as a current request for this visit so you can mark it handled here.
         </p>
+      </Modal>
+
+      {/* ── Mark unlinked request handled ── */}
+      <Modal
+        isOpen={!!markUnlinkedTarget}
+        onClose={() => setMarkUnlinkedTarget(null)}
+        confirm
+        title="Confirm action"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setMarkUnlinkedTarget(null)}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={handleMarkUnlinked}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-60"
+            >
+              {submitting ? 'Saving…' : 'Confirm'}
+            </button>
+          </>
+        }
+      >
+        {markUnlinkedTarget ? (
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            Confirm you have {markUnlinkedTarget.action === 'Add' ? 'added' : 'removed'}{' '}
+            <strong>{personFullName(markUnlinkedTarget.person)}</strong> in Power Music before
+            continuing. This cannot be undone.
+          </p>
+        ) : null}
       </Modal>
     </div>
   );

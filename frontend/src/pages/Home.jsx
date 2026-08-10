@@ -14,7 +14,7 @@ import {
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache, getDashboard } from '../utils/pilot2Api';
 import { AdminPageScroll, DottedScroll, PanelListSkeleton } from '../components/ui';
-import { TAG_ALREADY_EXISTS } from '../utils/requestTags';
+import { TAG_ALREADY_EXISTS, TAG_PARTNER_REQUEST, TAG_AUTO_MAIL } from '../utils/requestTags';
 import { usePartners } from '../context/PartnerContext';
 
 const CHART = {
@@ -345,6 +345,7 @@ function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue, partnerLabel = '
   const rows = [
     {
       key: 'partner',
+      sentVia: TAG_PARTNER_REQUEST,
       label: `${partnerLabel} requests`,
       detail: `${Math.round((partnerReq / total) * 100)}% of pending`,
       value: partnerReq,
@@ -357,6 +358,7 @@ function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue, partnerLabel = '
     },
     {
       key: 'auto',
+      sentVia: TAG_AUTO_MAIL,
       label: 'Automated email',
       detail: `${Math.round((autoMail / total) * 100)}% of pending`,
       value: autoMail,
@@ -377,7 +379,7 @@ function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue, partnerLabel = '
           <li key={row.key}>
             <button
               type="button"
-              onClick={onOpenQueue}
+              onClick={() => onOpenQueue(row.sentVia)}
               className={`flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] ${row.accent} bg-white px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-surface-panel)]`}
             >
               <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${row.well}`}>
@@ -450,11 +452,22 @@ export default function Home() {
     [pendingRequests],
   );
 
-  const needsReviewCount = useMemo(
-    () => (Array.isArray(pendingRequests) ? pendingRequests : [])
-      .filter((req) => req.tags?.includes(TAG_ALREADY_EXISTS)).length,
-    [pendingRequests],
-  );
+  // Count pending by arrival channel the same way the New Requests "Sent via"
+  // filter does, so the card numbers match the list you land on when clicking.
+  // (A request tagged both must not be double-counted across the two rows.)
+  const arrivalCounts = useMemo(() => {
+    const list = Array.isArray(pendingRequests) ? pendingRequests : [];
+    let partner = 0;
+    let auto = 0;
+    for (const req of list) {
+      const tags = req.tags || [];
+      const hasPartner = tags.includes(TAG_PARTNER_REQUEST);
+      const hasAuto = tags.includes(TAG_AUTO_MAIL);
+      if (hasPartner && !hasAuto) partner += 1;
+      else if (hasAuto && !hasPartner) auto += 1;
+    }
+    return { partner, auto };
+  }, [pendingRequests]);
 
   const recentActivity = useMemo(
     () => (Array.isArray(activity) ? activity : []).slice(0, 5),
@@ -507,7 +520,7 @@ export default function Home() {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-3 pb-4 lg:min-h-0 lg:overflow-hidden lg:pb-0">
-          <div className="grid shrink-0 grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid shrink-0 grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
             <InsightCard
               label="Pending requests"
               value={kpis.pendingRequests}
@@ -515,14 +528,6 @@ export default function Home() {
               icon={Inbox}
               accent="blue"
               onClick={() => navigate('/new-requests')}
-            />
-            <InsightCard
-              label="Needs review"
-              value={needsReviewCount}
-              hint="Possible duplicates in the queue"
-              icon={AlertTriangle}
-              accent="pink"
-              onClick={() => navigate('/new-requests?status=Already%20exists')}
             />
             <InsightCard
               label="Users in Directory"
@@ -581,10 +586,12 @@ export default function Home() {
               />
               <PanelScrollBody>
                 <ArrivalSourceList
-                  partnerReq={insights.partnerReq}
-                  autoMail={insights.autoMail}
+                  partnerReq={arrivalCounts.partner}
+                  autoMail={arrivalCounts.auto}
                   partnerLabel={partnerLabel}
-                  onOpenQueue={() => navigate('/new-requests')}
+                  onOpenQueue={(sentVia) =>
+                    navigate(sentVia ? `/new-requests?sentVia=${encodeURIComponent(sentVia)}` : '/new-requests')
+                  }
                 />
               </PanelScrollBody>
             </section>
@@ -592,8 +599,12 @@ export default function Home() {
             <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:min-h-0 lg:h-full">
               <PanelHeader
                 title="Priority alerts"
-                subtitle={duplicateAlerts.length ? 'Possible duplicate people' : 'All clear'}
-                action={<QueueLink onClick={() => navigate('/new-requests')} />}
+                subtitle={duplicateAlerts.length ? 'Possible Duplicates' : 'All clear'}
+                action={(
+                  <span className="inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-[var(--color-brand-accent)]/10 px-2 py-0.5 text-xs font-bold text-[var(--color-brand-accent)]">
+                    {duplicateAlerts.length}
+                  </span>
+                )}
               />
               {duplicateAlerts.length === 0 ? (
                 <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl bg-[var(--color-surface-panel)] px-3 py-4 text-center">
@@ -634,7 +645,6 @@ export default function Home() {
               <PanelHeader
                 title="Recent activity"
                 subtitle="Latest request events"
-                action={<QueueLink onClick={() => navigate('/new-requests')} />}
               />
               {recentActivity.length === 0 ? (
                 <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl bg-[var(--color-surface-panel)] px-3 py-4 text-center">

@@ -536,7 +536,7 @@ export default function RequestDetailView({
                 id="finish-heading"
                 className="text-sm font-semibold tracking-tight text-[var(--color-text-primary)]"
               >
-                {isAdd ? 'Mark as added' : 'Mark as removed'}
+                {isAdd ? 'Add User' : 'Remove User'}
               </h2>
               <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
                 Confirm only after you’ve {isAdd ? 'added' : 'removed'} {personFullName} in Power Music.
@@ -565,7 +565,7 @@ export default function RequestDetailView({
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-surface-sidebar-hover)]"
             >
               <Check className="h-4 w-4" aria-hidden="true" />
-              {isAdd ? 'Mark as added' : 'Mark as removed'}
+              {isAdd ? 'Add User' : 'Remove User'}
             </button>
           </div>
         </div>

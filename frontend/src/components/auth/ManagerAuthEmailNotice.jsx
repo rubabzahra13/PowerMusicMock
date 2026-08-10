@@ -1,10 +1,11 @@
-import { MailOpen, Loader2 } from 'lucide-react';
+import { MailOpen, Loader2, AlertTriangle } from 'lucide-react';
 import { formatCooldown } from '../../utils/otpCooldown';
 import ManagerAuthShell, { buttonClass } from './ManagerAuthShell';
 
 export default function ManagerAuthEmailNotice({
   title,
   children,
+  tip = "Can't find the email in your inbox? Check your Spam folder (and All Mail) as well — confirmation links often land there.",
   backLabel = 'Back to sign in',
   onBack,
   onResend,
@@ -22,6 +23,16 @@ export default function ManagerAuthEmailNotice({
         </div>
         <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{title}</h2>
         <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-secondary)]">{children}</p>
+
+        {tip ? (
+          <div
+            className="mt-4 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-left text-sm text-amber-950"
+            role="note"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+            <p className="leading-relaxed">{tip}</p>
+          </div>
+        ) : null}
 
         {onResend && (
           <div className="mt-5 space-y-2">
