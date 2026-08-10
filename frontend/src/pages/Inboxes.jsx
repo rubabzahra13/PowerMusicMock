@@ -23,7 +23,7 @@ export default function Inboxes() {
       <div className="flex items-start gap-3 bg-[#fef3c7] border border-[#fde68a] rounded-md p-3.5">
         <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
         <span className="text-sm text-amber-900 font-semibold leading-normal">
-          Drafts are created inside your email client — not here. This dashboard is where you manage templates and review flagged emails.
+          Drafts are created inside your email client - not here. This dashboard is where you manage templates and review flagged emails.
         </span>
       </div>
 
@@ -112,7 +112,7 @@ export default function Inboxes() {
       {/* Processing Stats Table */}
       <div className="space-y-3 pt-4">
         <span className="block text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
-          Processing Summary — Today
+          Processing Summary - Today
         </span>
         <div className="bg-white rounded-lg border border-[var(--color-border-default)] shadow-sm overflow-hidden">
           <div className="overflow-x-auto">

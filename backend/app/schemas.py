@@ -660,6 +660,22 @@ class ResolveKeepExistingIn(BaseModel):
     adminNote: Optional[str] = Field(default=None, max_length=5000)
 
 
+class ResolveDeleteIn(BaseModel):
+    """POST /api/duplicate-groups/{id}/resolve-delete-directory (Case D).
+    
+    directoryPersonId must match group.directory_person_id.
+    """
+
+    directoryPersonId: str
+    adminNote: Optional[str] = Field(default=None, max_length=5000)
+
+
+class ResolveMarkRemovedIn(BaseModel):
+    """POST /api/duplicate-groups/{id}/resolve-mark-removed (Case E)."""
+
+    adminNote: Optional[str] = Field(default=None, max_length=5000)
+
+
 class FieldDiffOut(BaseModel):
     """One field in a resolve-update preview, with before/after values."""
 

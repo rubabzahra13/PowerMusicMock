@@ -11,6 +11,8 @@ import {
   resolveGroupUpdate,
   resolveGroupUpdatePreview,
   resolveGroupKeepExisting,
+  resolveGroupDeleteFromDirectory,
+  resolveGroupMarkRemoved,
   unlinkGroupMember,
 } from '../utils/duplicateGroupApi';
 
@@ -123,8 +125,14 @@ export default function GroupResolutionView({
 
   // Update confirmation modal state
   const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showAddConfirm, setShowAddConfirm] = useState(false);
+  const [showMarkRemovedConfirm, setShowMarkRemovedConfirm] = useState(false);
+  const [showKeepExistingConfirm, setShowKeepExistingConfirm] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  const isRemoveRequest = repMember?.action === 'Remove';
 
   const updateDraftField = (field, value) => setDraftForm((f) => ({ ...f, [field]: value }));
 
@@ -141,9 +149,9 @@ export default function GroupResolutionView({
 
   const isFormValid = form.firstName.trim() && form.lastName.trim();
 
-  /* ── resolve & add (Case A) ── */
-  const handleResolveAdd = async () => {
+  const executeResolveAdd = async () => {
     if (!isFormValid || submitting) return;
+    setShowAddConfirm(false);
     setSubmitting(true);
     try {
       await resolveGroupAdd(group.id, {
@@ -211,8 +219,9 @@ export default function GroupResolutionView({
   };
 
   /* ── resolve — keep existing (Case C) ── */
-  const handleKeepExisting = async () => {
+  const executeKeepExisting = async () => {
     if (submitting) return;
+    setShowKeepExistingConfirm(false);
     setSubmitting(true);
     try {
       await resolveGroupKeepExisting(group.id, {
@@ -221,6 +230,41 @@ export default function GroupResolutionView({
       onResolved('keep', null);
     } catch (err) {
       onResolved('error', err.message || 'Failed to resolve group.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* ── resolve & delete from directory (Case D) ── */
+  const handleConfirmDelete = async () => {
+    if (submitting) return;
+    setShowDeleteConfirm(false);
+    setSubmitting(true);
+    try {
+      await resolveGroupDeleteFromDirectory(group.id, {
+        directoryPersonId: group.directoryPersonId,
+        adminNote: adminNote.trim() || null,
+      });
+      onResolved('delete', personFullName(form));
+    } catch (err) {
+      onResolved('error', err.message || 'Failed to delete from Directory.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* ── resolve & mark as removed (Case E) ── */
+  const executeMarkRemoved = async () => {
+    if (submitting) return;
+    setShowMarkRemovedConfirm(false);
+    setSubmitting(true);
+    try {
+      await resolveGroupMarkRemoved(group.id, {
+        adminNote: adminNote.trim() || null,
+      });
+      onResolved('mark_removed', personFullName(form));
+    } catch (err) {
+      onResolved('error', err.message || 'Failed to mark as removed.');
     } finally {
       setSubmitting(false);
     }
@@ -349,7 +393,7 @@ export default function GroupResolutionView({
             </dl>
           ) : (
             <p className="text-sm text-[var(--color-text-muted)] italic">
-              Directory record details not available locally — values shown in the confirmation step.
+              Directory record details not available locally - values shown in the confirmation step.
             </p>
           )}
           <p className="mt-4 text-xs text-[var(--color-text-muted)]">
@@ -537,37 +581,72 @@ export default function GroupResolutionView({
 
           <div className="mt-5 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--color-border-default)] pt-4">
             {!hasDirectory ? (
-              /* Case A */
-              <button
-                type="button"
-                disabled={!isFormValid || submitting}
-                onClick={handleResolveAdd}
-                className={BTN_PRIMARY}
-              >
-                <Check className="h-4 w-4" aria-hidden="true" />
-                {submitting ? 'Resolving…' : 'Resolve & Add to Directory'}
-              </button>
-            ) : (
-              /* Case B / C */
-              <>
+              isRemoveRequest ? (
+                /* Case E */
                 <button
                   type="button"
                   disabled={submitting}
-                  onClick={handleKeepExisting}
-                  className={BTN_SECONDARY}
-                >
-                  {submitting ? 'Resolving…' : 'Resolve & Keep Existing'}
-                </button>
-                <button
-                  type="button"
-                  disabled={!isFormValid || submitting || previewLoading}
-                  onClick={handlePreviewUpdate}
+                  onClick={() => setShowMarkRemovedConfirm(true)}
                   className={BTN_PRIMARY}
                 >
                   <Check className="h-4 w-4" aria-hidden="true" />
-                  {previewLoading ? 'Loading preview…' : submitting ? 'Updating…' : 'Resolve & Update Directory'}
+                  {submitting ? 'Resolving…' : 'Resolve & Mark as Removed'}
                 </button>
-              </>
+              ) : (
+                /* Case A */
+                <button
+                  type="button"
+                  disabled={!isFormValid || submitting}
+                  onClick={() => setShowAddConfirm(true)}
+                  className={BTN_PRIMARY}
+                >
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  {submitting ? 'Resolving…' : 'Resolve & Add to Directory'}
+                </button>
+              )
+            ) : (
+              isRemoveRequest ? (
+                /* Case D / Case C (Remove context) */
+                <>
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => setShowKeepExistingConfirm(true)}
+                    className={BTN_SECONDARY}
+                  >
+                    {submitting ? 'Resolving…' : 'Resolve & Keep Existing Directory'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {submitting ? 'Resolving…' : 'Resolve & Delete from Directory'}
+                  </button>
+                </>
+              ) : (
+                /* Case B / Case C (Add context) */
+                <>
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => setShowKeepExistingConfirm(true)}
+                    className={BTN_SECONDARY}
+                  >
+                    {submitting ? 'Resolving…' : 'Resolve & Keep Existing Directory'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!isFormValid || submitting || previewLoading}
+                    onClick={handlePreviewUpdate}
+                    className={BTN_PRIMARY}
+                  >
+                    <Check className="h-4 w-4" aria-hidden="true" />
+                    {previewLoading ? 'Loading preview…' : submitting ? 'Updating…' : 'Resolve & Update Directory'}
+                  </button>
+                </>
+              )
             )}
           </div>
         </div>
@@ -577,7 +656,7 @@ export default function GroupResolutionView({
       <Modal
         isOpen={showUpdateConfirm}
         onClose={() => setShowUpdateConfirm(false)}
-        title="Update existing Directory record?"
+        title="Resolve and update directory?"
         wide
         footer={
           <>
@@ -593,7 +672,7 @@ export default function GroupResolutionView({
               onClick={handleConfirmUpdate}
               className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
             >
-              Update Directory
+              Confirm and Update
             </button>
           </>
         }
@@ -601,7 +680,7 @@ export default function GroupResolutionView({
         {previewData && (
           <div className="space-y-3">
             <p className="text-sm text-[var(--color-text-secondary)]">
-              This will update <strong className="text-[var(--color-text-primary)]">{personFullName(form)}</strong>'s existing Directory record with the values below.
+              This will resolve this request group and update the existing Directory record with the final resolved values shown above. The other requests in this group will no longer remain active.
             </p>
 
             {previewData.anyChanged && (
@@ -629,10 +708,10 @@ export default function GroupResolutionView({
                       {f.label}
                     </td>
                     <td className="py-2 pr-3 text-xs text-[var(--color-text-muted)] font-mono">
-                      {f.currentValue || <span className="italic">—</span>}
+                      {f.currentValue || <span className="italic">-</span>}
                     </td>
                     <td className={`py-2 text-xs font-mono ${f.changed ? 'font-semibold text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]'}`}>
-                      {f.proposedValue || <span className="italic">—</span>}
+                      {f.proposedValue || <span className="italic">-</span>}
                     </td>
                   </tr>
                 ))}
@@ -640,6 +719,131 @@ export default function GroupResolutionView({
             </table>
           </div>
         )}
+      </Modal>
+
+      {/* ── Delete confirmation modal ── */}
+      <Modal
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title="Resolve and delete from directory?"
+        confirm
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(false)}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmDelete}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 shadow-sm cursor-pointer"
+            >
+              Delete and Resolve
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            This will resolve the request and permanently delete the existing Directory record for this person. This action cannot be undone.
+          </p>
+        </div>
+      </Modal>
+
+      {/* ── Add to Directory confirmation modal ── */}
+      <Modal
+        isOpen={showAddConfirm}
+        onClose={() => setShowAddConfirm(false)}
+        title="Resolve and add to directory?"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowAddConfirm(false)}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={executeResolveAdd}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
+            >
+              Confirm and Add
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            This will resolve this request group using the final resolved values shown above and add the person to the Directory. The other requests in this group will no longer remain active.
+          </p>
+        </div>
+      </Modal>
+
+      {/* ── Mark as Removed confirmation modal ── */}
+      <Modal
+        isOpen={showMarkRemovedConfirm}
+        onClose={() => setShowMarkRemovedConfirm(false)}
+        title="Resolve and mark as removed?"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowMarkRemovedConfirm(false)}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={executeMarkRemoved}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
+            >
+              Confirm and Mark as Removed
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            This will resolve this request group and mark the person as removed. The requests in this group will no longer remain active.
+          </p>
+        </div>
+      </Modal>
+
+      {/* ── Keep Existing confirmation modal ── */}
+      <Modal
+        isOpen={showKeepExistingConfirm}
+        onClose={() => setShowKeepExistingConfirm(false)}
+        title="Resolve and keep existing directory?"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowKeepExistingConfirm(false)}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={executeKeepExisting}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
+            >
+              Confirm and Keep Existing
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            This will resolve this request group without changing the existing Directory record. The current Directory information will remain unchanged, and the other requests in this group will no longer remain active.
+          </p>
+        </div>
       </Modal>
 
       {/* ── Unlink confirmation modal ── */}

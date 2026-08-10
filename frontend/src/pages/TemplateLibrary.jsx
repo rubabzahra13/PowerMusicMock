@@ -24,19 +24,19 @@ const LANG_VARIANTS = {
     subjectPrefix: 'AW: ',
     salutation: 'Guten Tag {{first_name}},',
     closing: 'Mit freundlichen Grüßen,\nPower Music Team',
-    bodyMiddle: '[Automatisch übersetzt — Inhalte werden in Kürze bereitgestellt.]'
+    bodyMiddle: '[Automatisch übersetzt - Inhalte werden in Kürze bereitgestellt.]'
   },
   Spanish: {
     subjectPrefix: 'RE: ',
     salutation: 'Estimado/a {{first_name}},',
     closing: 'Atentamente,\nEquipo de Power Music',
-    bodyMiddle: '[Traducido automáticamente — el contenido se proporcionará en breve.]'
+    bodyMiddle: '[Traducido automáticamente - el contenido se proporcionará en breve.]'
   },
   Japanese: {
     subjectPrefix: 'RE: ',
     salutation: '{{first_name}} 様、',
     closing: 'よろしくお願いいたします。\nPower Music チーム',
-    bodyMiddle: '[自動翻訳 — コンテンツは近日中に提供されます。]'
+    bodyMiddle: '[自動翻訳 - コンテンツは近日中に提供されます。]'
   }
 };
 
@@ -163,7 +163,7 @@ function TemplateSuggestionPanel({
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</p>
                 <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-                  Based on how you edited drafts before sending — suggested fix for next time.
+                  Based on how you edited drafts before sending, here is a suggested fix for next time.
                 </p>
                 {item.rationale && (
                   <p className="mt-1.5 text-xs text-[var(--color-text-muted)] line-clamp-2">{item.rationale}</p>

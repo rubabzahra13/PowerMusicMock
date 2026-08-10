@@ -73,14 +73,30 @@ export default function GroupDetail() {
       // Bust the requests page cache so the list reflects the resolved group
       bumpCacheEpoch(requestsCacheKey);
 
-      const toastMsg =
-        type === 'add'
-          ? `${name} added to Directory.`
-          : type === 'update'
-            ? `Directory record for ${name} updated.`
-            : type === 'unlinked_dissolved'
-              ? 'Group dissolved successfully.'
-              : 'Group resolved — existing Directory record kept.';
+      let toastMsg = '';
+      switch (type) {
+        case 'add':
+          toastMsg = 'Resolved and added to Directory.';
+          break;
+        case 'mark_removed':
+          toastMsg = 'Request resolved and person marked as removed.';
+          break;
+        case 'update':
+          toastMsg = 'Request resolved and Directory record updated.';
+          break;
+        case 'keep':
+          toastMsg = 'Request resolved and existing Directory record kept unchanged.';
+          break;
+        case 'delete':
+          toastMsg = 'Resolved and Directory record permanently deleted.';
+          break;
+        case 'unlinked_dissolved':
+          toastMsg = 'Group dissolved successfully.';
+          break;
+        default:
+          toastMsg = 'Group resolved successfully.';
+          break;
+      }
 
       showToast(toastMsg, 'success');
 

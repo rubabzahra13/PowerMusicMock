@@ -2112,7 +2112,7 @@ export default function EmailQueue() {
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         {/* Gmail-style Reply / Reply-all / Forward switch.
-                            Hidden once the message has been sent — a
+                            Hidden once the message has been sent - a
                             replied-to thread doesn't need the picker. */}
                         {selectedEmail.draftStatus !== 'Sent' && !selectedDraftPending && (
                           <div

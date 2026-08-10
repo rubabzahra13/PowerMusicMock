@@ -1175,13 +1175,13 @@ export default function ManagerForm() {
                             </span>
                           </td>
                           <td className="whitespace-nowrap px-2 py-2 font-normal text-[var(--color-text-secondary)]">
-                            {row.email || '—'}
+                            {row.email || '-'}
                           </td>
                           <td className="whitespace-nowrap px-2 py-2 font-normal text-[var(--color-text-secondary)]">
-                            {row.location || '—'}
+                            {row.location || '-'}
                           </td>
                           <td className="whitespace-nowrap px-2 py-2 font-normal text-[var(--color-text-secondary)]">
-                            {dateLabel || '—'}
+                            {dateLabel || '-'}
                           </td>
                           <td className="whitespace-nowrap px-2 py-2">
                             <span

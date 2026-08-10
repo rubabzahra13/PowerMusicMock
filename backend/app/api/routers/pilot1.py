@@ -1652,3 +1652,87 @@ def resolve_group_keep_existing_api(
         "directoryPersonId": dir_person_id,
         "resolvedRequestCount": count,
     }
+
+
+# ── Task 2: Resolve & Delete from Directory (Case D) ──────────────────────────
+
+@router.post(
+    "/api/duplicate-groups/{group_id}/resolve-delete-directory",
+    response_model=schemas.ResolveGroupResultOut,
+)
+def resolve_group_delete_directory_api(
+    group_id: str,
+    payload: schemas.ResolveDeleteIn,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    from app.duplicate_group_service import resolve_group_delete_from_directory
+
+    group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Duplicate group not found")
+    if group.status != "active":
+        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}' — cannot resolve again")
+    if not group.directory_person_id:
+        raise HTTPException(status_code=400, detail="Group is not linked to a Directory record.")
+    if group.directory_person_id != payload.directoryPersonId:
+        raise HTTPException(status_code=400, detail="Mismatch on directoryPersonId.")
+
+    dir_person = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == group.directory_person_id).first()
+    if not dir_person:
+        raise HTTPException(status_code=404, detail="Linked Directory record not found.")
+
+    admin_id = str(admin.id) if getattr(admin, "id", None) else None
+
+    count = resolve_group_delete_from_directory(
+        db, group, directory_person=dir_person, admin_id=admin_id, admin_note=payload.adminNote
+    )
+
+    db.commit()
+    notify_admin_requests_changed("group_resolve_delete")
+
+    return {
+        "status": "resolved",
+        "groupId": group_id,
+        "resolutionType": "delete",
+        "directoryPersonId": payload.directoryPersonId,
+        "resolvedRequestCount": count,
+    }
+
+
+# ── Task 2: Resolve & Mark as Removed (Case E) ────────────────────────────────
+
+@router.post(
+    "/api/duplicate-groups/{group_id}/resolve-mark-removed",
+    response_model=schemas.ResolveGroupResultOut,
+)
+def resolve_group_mark_removed_api(
+    group_id: str,
+    payload: schemas.ResolveMarkRemovedIn = schemas.ResolveMarkRemovedIn(),
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    from app.duplicate_group_service import resolve_group_mark_removed
+
+    group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Duplicate group not found")
+    if group.status != "active":
+        raise HTTPException(status_code=409, detail=f"Group is already '{group.status}' — cannot resolve again")
+
+    admin_id = str(admin.id) if getattr(admin, "id", None) else None
+
+    count = resolve_group_mark_removed(
+        db, group, admin_id=admin_id, admin_note=payload.adminNote
+    )
+    dir_person_id = group.directory_person_id
+    db.commit()
+    notify_admin_requests_changed("group_resolve_mark_removed")
+
+    return {
+        "status": "resolved",
+        "groupId": group_id,
+        "resolutionType": "mark_removed",
+        "directoryPersonId": dir_person_id,
+        "resolvedRequestCount": count,
+    }

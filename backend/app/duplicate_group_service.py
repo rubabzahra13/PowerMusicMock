@@ -922,6 +922,90 @@ def resolve_group_keep_existing(
     return count
 
 
+# ── Case D: Resolve & Delete from Directory ──────────────────────────────────
+
+
+def resolve_group_delete_from_directory(
+    db: Session,
+    group: models.DuplicateGroup,
+    directory_person: models.ManagerRequest,
+    *,
+    admin_id: Optional[str],
+    admin_note: Optional[str] = None,
+) -> int:
+    """Resolve group by permanently deleting the Directory person.
+
+    Invariants:
+    - Permanently deletes the directory_person from the database.
+    - Nullifies directory_person_id in any other DuplicateGroups pointing to it.
+    - Does NOT call db.commit() — router commits.
+
+    Returns the count of requests marked as resolved.
+    """
+    now = datetime.now(timezone.utc)
+    
+    # 1. Nullify references in DuplicateGroup
+    from sqlalchemy import update
+    db.execute(
+        update(models.DuplicateGroup)
+        .where(models.DuplicateGroup.directory_person_id == directory_person.id)
+        .values(directory_person_id=None)
+    )
+    
+    # 2. Permanently delete the directory record
+    db.delete(directory_person)
+
+    count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
+
+    _finalize_group(
+        db, group,
+        resolution_type="delete",
+        final_values=None,
+        previous_values=None,
+        admin_id=admin_id,
+        admin_note=admin_note,
+        now=now,
+    )
+    db.flush()
+    return count
+
+
+# ── Case E: Resolve & Mark as Removed ────────────────────────────────────────
+
+
+def resolve_group_mark_removed(
+    db: Session,
+    group: models.DuplicateGroup,
+    *,
+    admin_id: Optional[str],
+    admin_note: Optional[str] = None,
+) -> int:
+    """Resolve group without modifying/creating the Directory (for Remove requests).
+
+    Invariants:
+    - Directory record is left completely unchanged (or none is created).
+    - Original group member rows are left immutable.
+    - Does NOT call db.commit() — router commits.
+
+    Returns the count of requests marked as resolved.
+    """
+    now = datetime.now(timezone.utc)
+
+    count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
+
+    _finalize_group(
+        db, group,
+        resolution_type="mark_removed",
+        final_values=None,
+        previous_values=None,
+        admin_id=admin_id,
+        admin_note=admin_note,
+        now=now,
+    )
+    db.flush()
+    return count
+
+
 # ── Preview helper (no writes) ───────────────────────────────────────────────
 
 _FIELD_LABELS = {

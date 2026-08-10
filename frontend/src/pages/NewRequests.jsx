@@ -993,7 +993,7 @@ export default function Requests() {
       }).catch(() => {});
     } catch (err) {
       console.error(err);
-      showToast(err.message || 'Failed to save — refreshing list.', 'error');
+      showToast(err.message || 'Failed to save. Refreshing list.', 'error');
       loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
           syncAdminNewRequestHighlights(data.requests, { isManualEntry });
@@ -1021,7 +1021,7 @@ export default function Requests() {
       await dismissRequest(req.id);
     } catch (err) {
       console.error(err);
-      showToast(err.message || 'Failed to delete — refreshing list.', 'error');
+      showToast(err.message || 'Failed to delete. Refreshing list.', 'error');
       loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
           syncAdminNewRequestHighlights(data.requests, { isManualEntry });
@@ -1080,7 +1080,7 @@ export default function Requests() {
       await bulkDismissRequests(ids);
     } catch (err) {
       console.error(err);
-      showToast(err.message || 'Failed to bulk delete — refreshing list.', 'error');
+      showToast(err.message || 'Failed to bulk delete. Refreshing list.', 'error');
       loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
         if (!isStale && Array.isArray(data.requests)) {
           syncAdminNewRequestHighlights(data.requests, { isManualEntry });
@@ -1186,7 +1186,7 @@ export default function Requests() {
         });
         if (!viaTags.length) {
           return (
-            <span className="text-xs font-medium text-[var(--color-text-muted)]">—</span>
+            <span className="text-xs font-medium text-[var(--color-text-muted)]">-</span>
           );
         }
         return (
