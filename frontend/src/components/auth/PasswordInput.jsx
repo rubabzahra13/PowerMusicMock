@@ -32,21 +32,23 @@ export default function PasswordInput({
         placeholder={placeholder}
         className={`${inputClass} pr-10`}
       />
-      <HoverTip label={tip} placement="left" className="absolute right-3 top-1/2 -translate-y-1/2">
-        <button
-          type="button"
-          onClick={() => setVisible((show) => !show)}
-          disabled={disabled}
-          className="text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] disabled:opacity-50"
-          aria-label={tip}
-        >
-          {visible ? (
-            <EyeOff className="h-4 w-4" aria-hidden="true" />
-          ) : (
-            <Eye className="h-4 w-4" aria-hidden="true" />
-          )}
-        </button>
-      </HoverTip>
+      <span className="absolute right-3 top-1/2 z-[1] -translate-y-1/2">
+        <HoverTip label={tip} placement="left">
+          <button
+            type="button"
+            onClick={() => setVisible((show) => !show)}
+            disabled={disabled}
+            className="inline-flex items-center justify-center text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] disabled:opacity-50"
+            aria-label={tip}
+          >
+            {visible ? (
+              <EyeOff className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Eye className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+        </HoverTip>
+      </span>
     </div>
   );
 }

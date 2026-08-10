@@ -350,31 +350,6 @@ export default function Sidebar({
           <div className={`space-y-1 ${showExpanded ? '' : 'flex flex-col items-center'}`}>
             {showExpanded && (
               <span className="mb-2 block px-3 text-[11px] font-semibold uppercase tracking-wider text-white/40">
-                Partner Addition
-              </span>
-            )}
-            <HoverTip
-              label={showExpanded ? '' : 'Add New Partner'}
-              placement="right"
-              className={showExpanded ? 'w-full' : ''}
-            >
-              <button
-                type="button"
-                onClick={() => setPartnerCreateOpen(true)}
-                aria-label="Add New Partner"
-                className={`group relative flex items-center gap-3 h-9 rounded-md text-sm font-medium text-white/85 transition-all duration-200 hover:bg-[var(--color-surface-sidebar-hover)] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
-                  showExpanded ? 'w-full px-3' : 'w-9 justify-center px-0'
-                }`}
-              >
-                <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {showExpanded ? <span>Add New Partner</span> : null}
-              </button>
-            </HoverTip>
-          </div>
-
-          <div className={`space-y-1 ${showExpanded ? '' : 'flex flex-col items-center'}`}>
-            {showExpanded && (
-              <span className="mb-2 block px-3 text-[11px] font-semibold uppercase tracking-wider text-white/40">
                 {partnerLabel} Overview
               </span>
             )}
@@ -430,6 +405,32 @@ export default function Sidebar({
         </div>
 
         <div className={`shrink-0 border-t border-white/[0.06] ${showExpanded ? 'p-3' : 'p-2'}`} ref={accountRef}>
+          <div className={`border-b border-white/[0.06] ${showExpanded ? 'mb-3 pb-3' : 'mb-2 pb-2'}`}>
+            <HoverTip
+              label={showExpanded ? '' : 'Add New Partner'}
+              placement="right"
+              className={showExpanded ? 'w-full' : ''}
+            >
+              <button
+                type="button"
+                onClick={() => setPartnerCreateOpen(true)}
+                aria-label="Add New Partner"
+                className={`flex items-center rounded-lg text-left transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
+                  showExpanded ? 'w-full gap-2.5 px-2.5 py-1.5' : 'mx-auto justify-center px-0 py-1.5'
+                }`}
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-white">
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                </span>
+                {showExpanded && (
+                  <span className="min-w-0 flex-1 text-xs font-semibold leading-snug text-white/85">
+                    Add New Partner
+                  </span>
+                )}
+              </button>
+            </HoverTip>
+          </div>
+
           <div className="relative">
             <HoverTip
               label={showExpanded ? '' : 'Expand sidebar for account'}

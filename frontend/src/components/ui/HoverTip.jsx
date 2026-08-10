@@ -47,7 +47,7 @@ export default function HoverTip({ label, children, className = '', placement = 
   return (
     <span
       ref={ref}
-      className={`relative inline-flex ${className}`.trim()}
+      className={`inline-flex ${className}`.trim()}
       onMouseEnter={show}
       onMouseLeave={hide}
       onFocus={show}

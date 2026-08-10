@@ -517,7 +517,15 @@ export default function Home() {
               onClick={() => navigate('/new-requests')}
             />
             <InsightCard
-              label="Users in ledger"
+              label="Needs review"
+              value={needsReviewCount}
+              hint="Possible duplicates in the queue"
+              icon={AlertTriangle}
+              accent="pink"
+              onClick={() => navigate('/new-requests?status=Already%20exists')}
+            />
+            <InsightCard
+              label="Users in Directory"
               value={kpis.usersInLedger}
               hint={`${insights.usersRemoved} removed on record`}
               icon={Users}
@@ -527,18 +535,10 @@ export default function Home() {
             <InsightCard
               label="Handled this week"
               value={insights.handledThisWeek}
-              hint={`${insights.receivedThisWeek} new requests received`}
+              hint={`${insights.receivedThisWeek} New Requests received`}
               icon={CheckCircle2}
               accent="pink"
               onClick={() => navigate('/directory')}
-            />
-            <InsightCard
-              label="Needs review"
-              value={needsReviewCount}
-              hint="Possible duplicates in the queue"
-              icon={AlertTriangle}
-              accent="pink"
-              onClick={() => navigate('/new-requests?status=Already%20exists')}
             />
           </div>
 
@@ -561,7 +561,7 @@ export default function Home() {
             <div className="h-[14rem] xl:col-span-2 xl:h-[16rem]">
               <ChartCard
                 title="Pending by action"
-                subtitle="What’s waiting in New requests"
+                subtitle="What’s waiting in New Requests"
               >
                 <DonutChart
                   segments={actionSegments}
