@@ -105,6 +105,17 @@ class DismissedDuplicateMatch(Base):
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class DismissedGroupMatch(Base):
+    """Admin decision persistence to permanently exclude a request from rejoining a specific group."""
+
+    __tablename__ = "dismissed_group_matches"
+
+    id = Column(String, primary_key=True)
+    request_id = Column(String, ForeignKey("manager_requests.id"), nullable=False, index=True)
+    group_id = Column(String, ForeignKey("duplicate_groups.id"), nullable=False, index=True)
+    dismissed_by_admin_id = Column(UUID(as_uuid=True), ForeignKey("powermusic_users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+
 
 class ManagerRequestView(Base):
     """When a manager last viewed a handled request (unread until seen_at >= handled_at)."""

@@ -126,8 +126,8 @@ POTENTIAL_DUPLICATE_THRESHOLD = 45.0
 def match_classification(
     left: schemas.PersonInfo,
     right: schemas.PersonInfo,
-) -> Optional[str]:
-    """Returns 'confirmed_duplicate', 'potential_duplicate', or None."""
+) -> Tuple[Optional[str], float]:
+    """Returns ('confirmed_duplicate' | 'potential_duplicate' | None, score)."""
     first_l, last_l, email_l, loc_l = _norm(left.firstName), _norm(left.lastName), _norm(left.email), _norm(left.location)
     first_r, last_r, email_r, loc_r = _norm(right.firstName), _norm(right.lastName), _norm(right.email), _norm(right.location)
 
@@ -139,11 +139,6 @@ def match_classification(
     same_email = bool(email_l and email_r and email_l == email_r)
     same_loc = bool(loc_l and loc_r and loc_l == loc_r)
 
-    # 1. Confirmed Duplicate (strict rule)
-    # Identical first name + last name + email
-    if same_first and same_last and same_email:
-        return "confirmed_duplicate"
-
     # 2. Potential Duplicate (Deterministic Field Scoring)
     first_name_score = jaro_winkler(first_l, first_r) * 30.0
     last_name_score = jaro_winkler(last_l, last_r) * 35.0
@@ -152,7 +147,12 @@ def match_classification(
 
     total_score = first_name_score + last_name_score + email_score + loc_score
 
-    if total_score >= POTENTIAL_DUPLICATE_THRESHOLD:
-        return "potential_duplicate"
+    # 1. Confirmed Duplicate (strict rule)
+    # Identical first name + last name + email
+    if same_first and same_last and same_email:
+        return "confirmed_duplicate", total_score
 
-    return None
+    if total_score >= POTENTIAL_DUPLICATE_THRESHOLD:
+        return "potential_duplicate", total_score
+
+    return None, total_score
