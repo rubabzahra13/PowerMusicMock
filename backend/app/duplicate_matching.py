@@ -121,7 +121,7 @@ def get_dismissed_request_ids_for(db: Session, req_id: str) -> Set[str]:
     return dismissed
 
 
-POTENTIAL_DUPLICATE_THRESHOLD = 60.0
+POTENTIAL_DUPLICATE_THRESHOLD = 45.0
 
 def match_classification(
     left: schemas.PersonInfo,
@@ -139,20 +139,16 @@ def match_classification(
     same_email = bool(email_l and email_r and email_l == email_r)
     same_loc = bool(loc_l and loc_r and loc_l == loc_r)
 
-    # 1. Confirmed Duplicate (existing hard rules retained)
-    # Identical name + email OR identical email + location OR identical name + email + location
+    # 1. Confirmed Duplicate (strict rule)
+    # Identical first name + last name + email
     if same_first and same_last and same_email:
-        return "confirmed_duplicate"
-    if same_email and same_loc and same_last:
-        return "confirmed_duplicate"
-    if same_email and same_first and same_last:
         return "confirmed_duplicate"
 
     # 2. Potential Duplicate (Deterministic Field Scoring)
-    first_name_score = jaro_winkler(first_l, first_r) * 25.0
-    last_name_score = jaro_winkler(last_l, last_r) * 30.0
-    email_score = 25.0 if same_email else 0.0
-    loc_score = 20.0 if same_loc else 0.0
+    first_name_score = jaro_winkler(first_l, first_r) * 30.0
+    last_name_score = jaro_winkler(last_l, last_r) * 35.0
+    loc_score = 25.0 if same_loc else 0.0
+    email_score = 10.0 if same_email else 0.0
 
     total_score = first_name_score + last_name_score + email_score + loc_score
 

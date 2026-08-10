@@ -86,14 +86,20 @@ def _pending_candidates(
     if req.partner_id:
         q = q.filter(models.ManagerRequest.partner_id == req.partner_id)
 
-    from sqlalchemy import func
+    from sqlalchemy import func, and_
     last_name = (req.person_last_name or "").strip().lower()
+    first_name = (req.person_first_name or "").strip().lower()
     email = (req.person_email or "").strip().lower()
     filters = []
     if last_name:
         filters.append(func.lower(models.ManagerRequest.person_last_name) == last_name)
     if email:
         filters.append(func.lower(models.ManagerRequest.person_email) == email)
+    if first_name and len(first_name) >= 3 and last_name and len(last_name) >= 3:
+        filters.append(and_(
+            func.lower(models.ManagerRequest.person_first_name).startswith(first_name[:3]),
+            func.lower(models.ManagerRequest.person_last_name).startswith(last_name[:3])
+        ))
     if filters:
         q = q.filter(or_(*filters))
 
@@ -115,14 +121,20 @@ def _directory_candidates(
     if req.partner_id:
         q = q.filter(models.ManagerRequest.partner_id == req.partner_id)
 
-    from sqlalchemy import func
+    from sqlalchemy import func, and_
     last_name = (req.person_last_name or "").strip().lower()
+    first_name = (req.person_first_name or "").strip().lower()
     email = (req.person_email or "").strip().lower()
     filters = []
     if last_name:
         filters.append(func.lower(models.ManagerRequest.person_last_name) == last_name)
     if email:
         filters.append(func.lower(models.ManagerRequest.person_email) == email)
+    if first_name and len(first_name) >= 3 and last_name and len(last_name) >= 3:
+        filters.append(and_(
+            func.lower(models.ManagerRequest.person_first_name).startswith(first_name[:3]),
+            func.lower(models.ManagerRequest.person_last_name).startswith(last_name[:3])
+        ))
     if filters:
         q = q.filter(or_(*filters))
 
