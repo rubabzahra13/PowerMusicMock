@@ -5,33 +5,13 @@ import GroupResolutionView from '../components/GroupResolutionView';
 import { usePartners } from '../context/PartnerContext';
 import { fetchJson } from '../utils/api';
 import {
+  getNewRequestsPage,
   loadWithCache,
   bumpCacheEpoch,
   refreshCache,
-  clearCache,
-  writeCache,
-  suppressNewRequests,
   REQUESTS_PAGE_CACHE_KEY,
 } from '../utils/pilot2Api';
 import { fetchGroupDetail } from '../utils/duplicateGroupApi';
-
-function removeResolvedGroupFromRequestsCache(requestsCacheKey, groupId, memberIds) {
-  try {
-    const raw = sessionStorage.getItem(`pm_cache_${requestsCacheKey}`);
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    if (!Array.isArray(data.requests)) return;
-    const ids = new Set(memberIds);
-    writeCache(requestsCacheKey, {
-      ...data,
-      requests: data.requests.filter(
-        (row) => !ids.has(row.id) && row.duplicateGroupId !== groupId,
-      ),
-    });
-  } catch {
-    /* ignore */
-  }
-}
 
 export default function GroupDetail() {
   const { groupId } = useParams();
@@ -53,49 +33,34 @@ export default function GroupDetail() {
 
   const goBack = useCallback(() => navigate('/new-requests'), [navigate]);
 
-  const groupCacheKey = `duplicate_group:${groupId}`;
-
   useEffect(() => {
-    let cancelled = false;
-    setNotFound(false);
     setLoading(true);
+    setNotFound(false);
 
     // Load directory from requests page cache
     loadWithCache(
       requestsCacheKey,
       () => getNewRequestsPage(selectedPartnerId || ''),
       (data) => {
-        if (cancelled) return;
         if (Array.isArray(data?.persons)) setDirectory(data.persons);
       },
     ).catch(() => {});
 
-    // Group detail: session cache makes reopen instant; still revalidates in background
-    loadWithCache(
-      groupCacheKey,
-      () => fetchGroupDetail(groupId),
-      (data) => {
-        if (cancelled) return;
+    // Fetch group detail (members, directoryPersonId, classification)
+    fetchGroupDetail(groupId)
+      .then((data) => {
         if (!data || data.status === 'resolved' || data.status === 'dismissed') {
-          clearCache(groupCacheKey);
           setNotFound(true);
-          setGroup(null);
         } else {
           setGroup(data);
-          setNotFound(false);
         }
         setLoading(false);
-      },
-    ).catch(() => {
-      if (cancelled) return;
-      setNotFound(true);
-      setLoading(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [groupId, groupCacheKey, requestsCacheKey, selectedPartnerId]);
+      })
+      .catch(() => {
+        setNotFound(true);
+        setLoading(false);
+      });
+  }, [groupId, requestsCacheKey, selectedPartnerId]);
 
   /** Called by GroupResolutionView when any resolve or unlink action completes. */
   const handleResolved = useCallback(
@@ -105,23 +70,33 @@ export default function GroupDetail() {
         return;
       }
 
-      // Instagram-style: drop this item from the feed immediately and keep a
-      // short local tombstone so a stale poll cannot resurrect it. Do not
-      // refreshCache here — that write-through is what was putting it back.
-      const memberIds = (group?.members || []).map((m) => m.id);
-      clearCache(groupCacheKey);
-      suppressNewRequests({ requestIds: memberIds, groupIds: [groupId] });
+      // Bust the requests page cache so the list reflects the resolved group
       bumpCacheEpoch(requestsCacheKey);
-      removeResolvedGroupFromRequestsCache(requestsCacheKey, groupId, memberIds);
 
-      const toastMsg =
-        type === 'add'
-          ? `${name} added to Directory.`
-          : type === 'update'
-            ? `Directory record for ${name} updated.`
-            : type === 'unlinked_dissolved'
-              ? 'Group dissolved successfully.'
-              : 'Group resolved. Existing Directory record kept.';
+      let toastMsg = '';
+      switch (type) {
+        case 'add':
+          toastMsg = 'Resolved and added to Directory.';
+          break;
+        case 'mark_removed':
+          toastMsg = 'Request resolved and person marked as removed.';
+          break;
+        case 'update':
+          toastMsg = 'Request resolved and Directory record updated.';
+          break;
+        case 'keep':
+          toastMsg = 'Request resolved and existing Directory record kept unchanged.';
+          break;
+        case 'delete':
+          toastMsg = 'Resolved and Directory record permanently deleted.';
+          break;
+        case 'unlinked_dissolved':
+          toastMsg = 'Group dissolved successfully.';
+          break;
+        default:
+          toastMsg = 'Group resolved successfully.';
+          break;
+      }
 
       showToast(toastMsg, 'success');
 
@@ -142,14 +117,14 @@ export default function GroupDetail() {
 
       navigate('/new-requests');
     },
-    [navigate, group, groupId, requestsCacheKey, groupCacheKey, directoryCacheKey, selectedPartnerId, showToast],
+    [navigate, requestsCacheKey, directoryCacheKey, selectedPartnerId, showToast],
   );
 
   /* ── loading state ── */
   if (loading) {
     return (
       <AdminPageScroll contentClassName="flex min-h-full items-center justify-center text-sm text-[var(--color-text-secondary)] select-none">
-        Loading request…
+        Loading group…
       </AdminPageScroll>
     );
   }

@@ -141,6 +141,17 @@ def _directory_candidates(
     return q.order_by(models.ManagerRequest.handled_at.desc()).limit(limit).all()
 
 
+def is_request_dismissed_from_group(db: Session, request_id: str, group_id: str) -> bool:
+    """True if request_id has been explicitly dismissed from group_id."""
+    if not request_id or not group_id:
+        return False
+    row = db.query(models.DismissedGroupMatch).filter(
+        models.DismissedGroupMatch.request_id == request_id,
+        models.DismissedGroupMatch.group_id == group_id
+    ).first()
+    return row is not None
+
+
 # ---------------------------------------------------------------------------
 # Core grouping entry point
 # ---------------------------------------------------------------------------
@@ -173,40 +184,81 @@ def process_request_grouping(
 
     # ── Step 1: scan pending new requests for a match ───────────────────────
     if pending_candidates is not None:
-        candidates = [
+        p_cands = [
             c for c in pending_candidates
-            if c.id != req.id
-            and c.status == "new"
-            and (not req.partner_id or c.partner_id == req.partner_id)
+            if c.id != req.id and c.status == "new" and (not req.partner_id or c.partner_id == req.partner_id)
         ]
     else:
-        candidates = _pending_candidates(db, req, exclude_id=req.id)
+        p_cands = _pending_candidates(db, req, exclude_id=req.id)
 
-    best_match_req: Optional[models.ManagerRequest] = None
-    best_classification: Optional[str] = None
+    # Evaluate pending matches grouped by duplicate_group_id
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for c in p_cands:
+        group_key = c.duplicate_group_id if c.duplicate_group_id else f"standalone_{c.id}"
+        groups[group_key].append(c)
 
-    for cand in candidates:
-        if are_requests_dismissed(db, req.id, cand.id, dismissed_set=dismissed_set):
-            continue
-        classification = match_classification(req_person, person_from_model(cand))
-        if classification:
-            if best_classification is None or (
-                classification == "confirmed_duplicate"
-                and best_classification != "confirmed_duplicate"
-            ):
-                best_match_req = cand
-                best_classification = classification
-            if best_classification == "confirmed_duplicate":
-                break
+    best_group_key = None
+    best_group_score = -1.0
+    best_group_classification = None
+    best_group_match_req = None
+
+    for group_key, members in groups.items():
+        if group_key.startswith("dup-grp-"):
+            if is_request_dismissed_from_group(db, req.id, group_key):
+                continue
+
+        group_max_score = -1.0
+        group_best_classification = None
+        group_best_member = None
+
+        for cand in members:
+            if are_requests_dismissed(db, req.id, cand.id, dismissed_set=dismissed_set):
+                continue
+            
+            classification, score = match_classification(req_person, person_from_model(cand))
+            if classification:
+                if group_best_classification != "confirmed_duplicate" and classification == "confirmed_duplicate":
+                    group_best_classification = classification
+                    group_max_score = score
+                    group_best_member = cand
+                elif classification == group_best_classification:
+                    if score > group_max_score:
+                        group_max_score = score
+                        group_best_member = cand
+                elif group_best_classification is None:
+                    group_best_classification = classification
+                    group_max_score = score
+                    group_best_member = cand
+
+        if group_best_classification:
+            is_better = False
+            if best_group_classification is None:
+                is_better = True
+            elif group_best_classification == "confirmed_duplicate" and best_group_classification != "confirmed_duplicate":
+                is_better = True
+            elif group_best_classification == best_group_classification:
+                if group_max_score > best_group_score:
+                    is_better = True
+                elif group_max_score == best_group_score:
+                    ts_group = group_best_member.handled_at or group_best_member.received_at
+                    ts_best = best_group_match_req.handled_at or best_group_match_req.received_at
+                    if ts_group > ts_best:
+                        is_better = True
+            
+            if is_better:
+                best_group_key = group_key
+                best_group_score = group_max_score
+                best_group_classification = group_best_classification
+                best_group_match_req = group_best_member
+
+    best_match_req = best_group_match_req
 
     # ── Step 2: scan directory for an already-exists conflict ───────────────
     if directory_candidates is not None:
         dir_candidates = [
             c for c in directory_candidates
-            if c.status == "handled"
-            and c.outcome == "Added"
-            and not c.archived_at
-            and (not req.partner_id or c.partner_id == req.partner_id)
+            if c.status == "handled" and c.outcome == "Added" and not c.archived_at and (not req.partner_id or c.partner_id == req.partner_id)
         ]
     else:
         dir_candidates = _directory_candidates(db, req)
@@ -216,20 +268,16 @@ def process_request_grouping(
     for dir_cand in dir_candidates:
         if are_requests_dismissed(db, req.id, dir_cand.id, dismissed_set=dismissed_set):
             continue
-        classification = match_classification(req_person, person_from_model(dir_cand))
+        classification, _ = match_classification(req_person, person_from_model(dir_cand))
         if classification:
             dir_match_person = dir_cand
             break
 
     # ── Step 3: determine final classification ──────────────────────────────
-    #
-    # Case A — no directory match, just between pending requests
-    # Case B — directory match only (no conflicting pending peers)
-    # Case C — directory match + conflicting pending peers (already_exists_conflict)
     if best_match_req and dir_match_person:
         final_classification = "already_exists_conflict"
     elif best_match_req:
-        final_classification = best_classification or "potential_duplicate"
+        final_classification = best_group_classification
     elif dir_match_person:
         final_classification = "already_exists"
     else:
@@ -254,9 +302,9 @@ def process_request_grouping(
                 group.directory_person_id = dir_match_person.id
             # Absorb any other ungrouped candidates into this group too.
             _absorb_ungrouped_matches(
-                db, group, req_person, exclude_id=req.id, ungrouped_candidates=candidates
+                db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands
             )
-            members = [req] + [c for c in candidates if c.duplicate_group_id == group.id]
+            members = [req] + [c for c in p_cands if c.duplicate_group_id == group.id]
             _sync_group_representative_and_tags(db, group, member_requests=members)
             # db.flush()
             return group
@@ -281,10 +329,10 @@ def process_request_grouping(
 
     # Absorb any remaining ungrouped candidates that also match.
     _absorb_ungrouped_matches(
-        db, group, req_person, exclude_id=req.id, ungrouped_candidates=candidates, dismissed_set=dismissed_set
+        db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands, dismissed_set=dismissed_set
     )
 
-    members = [req] + [c for c in candidates if c.duplicate_group_id == group.id]
+    members = [req] + [c for c in p_cands if c.duplicate_group_id == group.id]
     if best_match_req and best_match_req not in members:
         members.append(best_match_req)
     _sync_group_representative_and_tags(db, group, member_requests=members)
@@ -326,7 +374,10 @@ def _absorb_ungrouped_matches(
     for cand in candidates:
         if are_requests_dismissed(db, exclude_id or "", cand.id, dismissed_set=dismissed_set):
             continue
-        classification = match_classification(req_person, person_from_model(cand))
+        if is_request_dismissed_from_group(db, cand.id, group.id):
+            continue
+        
+        classification, score = match_classification(req_person, person_from_model(cand))
         if classification:
             cand.duplicate_group_id = group.id
             upgraded = _best_classification(group.classification, classification)
@@ -451,6 +502,18 @@ def unlink_duplicate_members(
         created_at=now,
     )
     db.add(dismissed)
+    
+    # NEW: Persist the explicit group-level dismissal so it never rejoins this group.
+    group_dismissed = models.DismissedGroupMatch(
+        id=f"dism-grp-{uuid.uuid4().hex[:12]}",
+        request_id=request_id_2,
+        group_id=group_id,
+        dismissed_by_admin_id=(
+            admin_id if admin_id and admin_id != "dev-bypass" else None
+        ),
+        created_at=now,
+    )
+    db.add(group_dismissed)
 
     # Remove req2 from the group and scrub its tags.
     req2.duplicate_group_id = None
@@ -486,7 +549,7 @@ def unlink_duplicate_members(
             if dir_person:
                 for m in remaining:
                     if not are_requests_dismissed(db, m.id, dir_person.id):
-                        c = match_classification(person_from_model(m), person_from_model(dir_person))
+                        c, _ = match_classification(person_from_model(m), person_from_model(dir_person))
                         if c:
                             dir_match = True
                             break
@@ -494,7 +557,7 @@ def unlink_duplicate_members(
         for i in range(len(remaining)):
             for j in range(i+1, len(remaining)):
                 if not are_requests_dismissed(db, remaining[i].id, remaining[j].id):
-                    c = match_classification(person_from_model(remaining[i]), person_from_model(remaining[j]))
+                    c, _ = match_classification(person_from_model(remaining[i]), person_from_model(remaining[j]))
                     if c:
                         peer_match_class = _best_classification(peer_match_class, c)
 
@@ -849,6 +912,90 @@ def resolve_group_keep_existing(
     _finalize_group(
         db, group,
         resolution_type="keep_existing",
+        final_values=None,
+        previous_values=None,
+        admin_id=admin_id,
+        admin_note=admin_note,
+        now=now,
+    )
+    db.flush()
+    return count
+
+
+# ── Case D: Resolve & Delete from Directory ──────────────────────────────────
+
+
+def resolve_group_delete_from_directory(
+    db: Session,
+    group: models.DuplicateGroup,
+    directory_person: models.ManagerRequest,
+    *,
+    admin_id: Optional[str],
+    admin_note: Optional[str] = None,
+) -> int:
+    """Resolve group by permanently deleting the Directory person.
+
+    Invariants:
+    - Permanently deletes the directory_person from the database.
+    - Nullifies directory_person_id in any other DuplicateGroups pointing to it.
+    - Does NOT call db.commit() — router commits.
+
+    Returns the count of requests marked as resolved.
+    """
+    now = datetime.now(timezone.utc)
+    
+    # 1. Nullify references in DuplicateGroup
+    from sqlalchemy import update
+    db.execute(
+        update(models.DuplicateGroup)
+        .where(models.DuplicateGroup.directory_person_id == directory_person.id)
+        .values(directory_person_id=None)
+    )
+    
+    # 2. Permanently delete the directory record
+    db.delete(directory_person)
+
+    count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
+
+    _finalize_group(
+        db, group,
+        resolution_type="delete",
+        final_values=None,
+        previous_values=None,
+        admin_id=admin_id,
+        admin_note=admin_note,
+        now=now,
+    )
+    db.flush()
+    return count
+
+
+# ── Case E: Resolve & Mark as Removed ────────────────────────────────────────
+
+
+def resolve_group_mark_removed(
+    db: Session,
+    group: models.DuplicateGroup,
+    *,
+    admin_id: Optional[str],
+    admin_note: Optional[str] = None,
+) -> int:
+    """Resolve group without modifying/creating the Directory (for Remove requests).
+
+    Invariants:
+    - Directory record is left completely unchanged (or none is created).
+    - Original group member rows are left immutable.
+    - Does NOT call db.commit() — router commits.
+
+    Returns the count of requests marked as resolved.
+    """
+    now = datetime.now(timezone.utc)
+
+    count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
+
+    _finalize_group(
+        db, group,
+        resolution_type="mark_removed",
         final_values=None,
         previous_values=None,
         admin_id=admin_id,
