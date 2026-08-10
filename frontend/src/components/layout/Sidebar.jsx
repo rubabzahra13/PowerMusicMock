@@ -353,20 +353,20 @@ export default function Sidebar({
                 Partner Addition
               </span>
             )}
-            <HoverTip label={showExpanded ? '' : 'Add New Partner'} placement="right">
+            <HoverTip
+              label={showExpanded ? '' : 'Add New Partner'}
+              placement="right"
+              className={showExpanded ? 'w-full' : ''}
+            >
               <button
                 type="button"
                 onClick={() => setPartnerCreateOpen(true)}
                 aria-label="Add New Partner"
-                className={`flex items-center rounded-lg text-left transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
-                  showExpanded
-                    ? 'w-full gap-3 px-3 h-9 text-sm font-semibold text-white'
-                    : 'h-9 w-9 justify-center text-white'
+                className={`group relative flex items-center gap-3 h-9 rounded-md text-sm font-medium text-white/85 transition-all duration-200 hover:bg-[var(--color-surface-sidebar-hover)] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
+                  showExpanded ? 'w-full px-3' : 'w-9 justify-center px-0'
                 }`}
               >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-white">
-                  <Plus className="h-4 w-4" aria-hidden="true" />
-                </span>
+                <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
                 {showExpanded ? <span>Add New Partner</span> : null}
               </button>
             </HoverTip>
