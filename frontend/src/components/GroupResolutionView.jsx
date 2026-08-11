@@ -141,7 +141,8 @@ function SectionCard({
 function classificationTag(classification) {
   if (classification === 'confirmed_duplicate') return { variant: 'duplicate-confirmed', label: 'Duplicate' };
   if (classification === 'potential_duplicate') return { variant: 'duplicate-potential', label: 'Potential Duplicate' };
-  if (classification === 'already_exists' || classification === 'already_exists_conflict') return { variant: 'already-exists', label: 'Exists in Directory' };
+  if (classification === 'already_exists' || classification === 'already_exists_conflict') return { variant: 'already-exists', label: 'Already Exists' };
+  if (classification === 'already_removed' || classification === 'already_removed_conflict') return { variant: 'already-removed', label: 'Already Removed' };
   return { variant: 'neutral', label: classification };
 }
 
@@ -291,14 +292,16 @@ export default function GroupResolutionView({
     setMergePageOpen(true);
   };
 
-  const openMergeConfirm = async () => {
+  const openMergeConfirm = () => {
     if (!isFormValid || submitting) return;
-    openMergePage();
+    setModalValues({ ...form });
+    setDraftForm({ ...form });
+    setConfirmAction('merge');
   };
 
   const handleConfirmMerge = async () => {
     const values = isEditing ? draftForm : (modalValues || form);
-    if (repMember?.action === 'Remove') {
+    if (currentRep?.action === 'Remove') {
       await handleResolveRemove(values);
       return;
     }
@@ -514,7 +517,7 @@ export default function GroupResolutionView({
       setSessionUnlinkedIds(nextUnlinked);
       setDeleteTarget(null);
       setDeleteImpact(null);
-      if (nextMembers.length === 0) {
+      if (nextMembers.length === 0 || (nextMembers.length === 1 && !hasDirectory)) {
         onResolved('member_deleted_done', personFullName(member.person));
       } else {
         onResolved('member_deleted', personFullName(member.person));
@@ -547,7 +550,7 @@ export default function GroupResolutionView({
         delete next[member.id];
         return next;
       });
-      if (nextMembers.length === 0) {
+      if (nextMembers.length === 0 || (nextMembers.length === 1 && !hasDirectory)) {
         onResolved('unlinked_handled_done', personFullName(member.person));
       } else {
         onResolved('unlinked_handled', personFullName(member.person));
@@ -566,10 +569,11 @@ export default function GroupResolutionView({
   const canStillMerge = activeMembers.length > 0;
 
   const tag = classificationTag(group.classification);
-  const personName = personFullName(repMember?.person);
   const currentRequest = [...activeMembers].sort(
     (a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0),
   )[0] || null;
+  const currentRep = currentRequest || repMember;
+  const personName = personFullName(currentRep?.person);
   const currentManager = managerFieldsFromMember(currentRequest);
 
   const renderUnlinkedOneVisitNotice = () => (
@@ -690,7 +694,7 @@ export default function GroupResolutionView({
               className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[var(--color-surface-bg)] text-lg font-semibold tracking-tight text-[var(--color-brand-secondary)] ring-1 ring-[var(--color-border-default)] sm:h-16 sm:w-16 sm:text-xl"
               aria-hidden="true"
             >
-              {initials(repMember?.person)}
+              {initials(currentRep?.person)}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -698,16 +702,16 @@ export default function GroupResolutionView({
                   <h1 className="text-2xl font-semibold leading-tight tracking-tight text-[var(--color-text-primary)] sm:text-[1.75rem]">
                     {personName}
                   </h1>
-                  {repMember?.person?.email && (
+                  {currentRep?.person?.email && (
                     <p className="mt-1.5 text-sm text-[var(--color-text-secondary)] font-mono">
-                      {repMember.person.email}
+                      {currentRep.person.email}
                     </p>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Tag
-                    variant={repMember?.action === 'Add' ? 'add-action' : 'remove-action'}
-                    label={repMember?.action === 'Add' ? 'Add person' : 'Remove person'}
+                    variant={currentRep?.action === 'Add' ? 'add-action' : 'remove-action'}
+                    label={currentRep?.action === 'Add' ? 'Add person' : 'Remove person'}
                   />
                   <Users className="h-4 w-4 text-[var(--color-text-muted)]" aria-hidden="true" />
                   <span className="text-sm text-[var(--color-text-secondary)]">
@@ -716,9 +720,9 @@ export default function GroupResolutionView({
                 </div>
               </div>
               <div className="mt-4 border-t border-[var(--color-border-default)] pt-4">
-                {repMember?.receivedAt && (
+                {currentRep?.receivedAt && (
                   <p className="text-xs text-[var(--color-text-muted)]">
-                    Received {formatAdminDateTime(repMember.receivedAt)}
+                    Received {formatAdminDateTime(currentRep.receivedAt)}
                   </p>
                 )}
               </div>
@@ -885,7 +889,11 @@ export default function GroupResolutionView({
               <button
                 type="button"
                 disabled={submitting || !isFormValid || isEditing}
-                onClick={() => setConfirmAction('merge')}
+                onClick={() => {
+                  setModalValues({ ...form });
+                  setDraftForm({ ...form });
+                  setConfirmAction('merge');
+                }}
                 className={BTN_PRIMARY}
               >
                 <Check className="h-4 w-4" aria-hidden="true" />
@@ -953,17 +961,19 @@ export default function GroupResolutionView({
           )}
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border-default)] pt-4">
-            <button
-              type="button"
-              onClick={openHistoryPage}
-              className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--color-text-primary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:border-[var(--color-brand-secondary-border)] hover:text-[var(--color-brand-secondary)] cursor-pointer"
-            >
-              <Clock className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />
-              View Request History ({members.length})
-            </button>
+            {members.length > 1 ? (
+              <button
+                type="button"
+                onClick={openHistoryPage}
+                className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--color-text-primary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:border-[var(--color-brand-secondary-border)] hover:text-[var(--color-brand-secondary)] cursor-pointer"
+              >
+                <Clock className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />
+                View Request History ({members.length})
+              </button>
+            ) : null}
 
             {canStillMerge ? (
-              <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className="flex flex-wrap items-center justify-end gap-3 ml-auto">
                 {hasDirectory && (
                   <button
                     type="button"
@@ -971,7 +981,7 @@ export default function GroupResolutionView({
                     onClick={openKeepConfirm}
                     className={BTN_SECONDARY}
                   >
-                    Keep Existing and Delete New Request
+                    Keep Existing and Delete New Request{members.length > 1 ? 's' : ''}
                   </button>
                 )}
                 <button
@@ -981,7 +991,9 @@ export default function GroupResolutionView({
                   className={BTN_PRIMARY}
                 >
                   <Check className="h-4 w-4" aria-hidden="true" />
-                  {repMember?.action === 'Remove' ? 'Merge and Remove' : 'Merge & Update Request in Directory'}
+                  {members.length === 1
+                    ? (currentRep?.action === 'Remove' ? 'Remove and Update Directory' : 'Add and Update Directory')
+                    : (hasDirectory ? 'Merge and Update Directory' : (currentRep?.action === 'Remove' ? 'Merge and Remove' : 'Merge & Add to Directory'))}
                 </button>
               </div>
             ) : null}
@@ -1036,7 +1048,7 @@ export default function GroupResolutionView({
               {renderUnlinkedOneVisitNotice()}
             </div>
 
-            {!currentRequest ? (
+            {!currentRequest && members.length > 1 ? (
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border-default)] pt-4">
                 <button
                   type="button"
@@ -1062,10 +1074,10 @@ export default function GroupResolutionView({
         isOpen={confirmAction === 'merge'}
         onClose={closeConfirmModal}
         title={
-          repMember?.action === 'Remove'
+          currentRep?.action === 'Remove'
             ? 'Merge and Remove?'
             : hasDirectory
-            ? 'Merge and update Directory record?'
+            ? (members.length > 1 ? 'Merge and Update Directory?' : 'Add and Update Directory?')
             : 'Merge and add to Directory?'
         }
         footer={
@@ -1084,19 +1096,23 @@ export default function GroupResolutionView({
               className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-60"
             >
               {submitting
-                ? 'Merging…'
-                : repMember?.action === 'Remove'
-                ? 'Merge and Remove'
-                : 'Merge & Add to Directory'}
+                ? (members.length === 1 ? 'Processing…' : 'Merging…')
+                : members.length === 1
+                ? (currentRep?.action === 'Remove' ? 'Remove and Update Directory' : 'Add and Update Directory')
+                : (hasDirectory ? 'Merge and Update Directory' : (currentRep?.action === 'Remove' ? 'Merge and Remove' : 'Merge & Add to Directory'))}
             </button>
           </>
         }
       >
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {repMember?.action === 'Remove'
-            ? 'The final resolved values will be used, and the person will be marked as removed in the Directory. The requests in this group will be closed.'
+          {currentRep?.action === 'Remove'
+            ? (hasDirectory && members.length > 1
+                ? 'The incoming requests will be merged/resolved, the final resolved values will be used, the existing Directory record will be updated to Removed, and the historical request versions will be dissolved.'
+                : 'The final resolved values will be used, and the person will be marked as removed in the Directory. The requests in this group will be closed.')
             : hasDirectory
-            ? 'The final resolved values will overwrite the existing Directory record, and the requests in this group will be closed.'
+            ? (members.length > 1
+                ? 'The incoming requests will be merged/resolved, the final resolved values will be used, the existing Directory record will be updated, and the historical request versions will be dissolved.'
+                : 'The final resolved values will overwrite the existing Directory record, and the requests in this group will be closed.')
             : 'A new Directory record will be created from the final resolved values, and the requests in this group will be closed.'}
         </p>
 
@@ -1199,7 +1215,7 @@ export default function GroupResolutionView({
       <Modal
         isOpen={confirmAction === 'keep'}
         onClose={closeConfirmModal}
-        title="Keep existing and delete new request?"
+        title={members.length > 1 ? "Keep existing and delete new requests?" : "Keep existing and delete new request?"}
         footer={
           <>
             <button
@@ -1222,7 +1238,9 @@ export default function GroupResolutionView({
       >
         <p className="text-sm text-[var(--color-text-secondary)]">
           {hasDirectory
-            ? 'The Directory record will stay unchanged. Incoming requests in this group will be closed without writing new values.'
+            ? (members.length > 1 
+                ? 'The existing Directory record will remain unchanged. All incoming requests in this group will be deleted/dissolved, and no Directory changes will be made.'
+                : 'The Directory record will stay unchanged. The incoming request will be closed without writing new values.')
             : 'No Directory record will be created. Incoming requests in this group will be closed and discarded.'}
         </p>
       </Modal>

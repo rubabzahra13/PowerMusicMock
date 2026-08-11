@@ -80,6 +80,7 @@ from app.directory_person_match import (
     search_roster_rows,
 )
 from app.duplicate_group_service import (
+    _clear_duplicate_tags,
     collect_selective_dismiss_targets,
     compute_group_classification_summary,
     finalize_group_after_selective_dismiss,
@@ -426,8 +427,8 @@ def bulk_delete_persons(
     db: Session = Depends(get_db),
     _admin=Depends(require_admin),
 ):
-    from sqlalchemy import update, delete
-    
+    from app.duplicate_group_service import permanently_delete_requests
+
     if partner_id:
         get_partner_or_404(db, partner_id)
 
@@ -435,46 +436,15 @@ def bulk_delete_persons(
         return {"success": True, "deleted_count": 0}
 
     reqs = db.query(models.ManagerRequest).filter(models.ManagerRequest.id.in_(payload.ids)).all()
-    
+
     if partner_id:
         reqs = [r for r in reqs if not r.partner_id or r.partner_id == partner_id]
-        
+
     valid_ids = [r.id for r in reqs]
     if not valid_ids:
         return {"success": True, "deleted_count": 0}
 
-    # 1. Nullify references in DuplicateGroup
-    db.execute(
-        update(models.DuplicateGroup)
-        .where(models.DuplicateGroup.directory_person_id.in_(valid_ids))
-        .values(directory_person_id=None)
-    )
-    db.execute(
-        update(models.DuplicateGroup)
-        .where(models.DuplicateGroup.representative_request_id.in_(valid_ids))
-        .values(representative_request_id=None)
-    )
-    
-    # 2. Delete related DismissedDuplicateMatch rows
-    db.execute(
-        delete(models.DismissedDuplicateMatch)
-        .where(
-            or_(
-                models.DismissedDuplicateMatch.request_id_1.in_(valid_ids),
-                models.DismissedDuplicateMatch.request_id_2.in_(valid_ids)
-            )
-        )
-    )
-    
-    # 3. Delete related ManagerRequestView rows
-    db.execute(
-        delete(models.ManagerRequestView)
-        .where(models.ManagerRequestView.request_id.in_(valid_ids))
-    )
-    
-    # 4. Delete the actual ManagerRequest records
-    deleted_count = db.query(models.ManagerRequest).filter(models.ManagerRequest.id.in_(valid_ids)).delete(synchronize_session=False)
-    
+    deleted_count = permanently_delete_requests(db, valid_ids)
     db.commit()
 
     return {"success": True, "deleted_count": deleted_count}
@@ -800,6 +770,8 @@ def dismiss_request(
                 invalidate_manager_request_summary(str(r.manager_id))
         r.status = "dismissed"
         r.handled_at = datetime.now(timezone.utc)
+        r.duplicate_group_id = None
+        _clear_duplicate_tags(r)
         if admin.id != "dev-bypass":
             try:
                 import uuid
@@ -868,6 +840,8 @@ def bulk_dismiss_requests(
                     invalidate_manager_request_summary(str(r.manager_id))
             r.status = "dismissed"
             r.handled_at = datetime.now(timezone.utc)
+            r.duplicate_group_id = None
+            _clear_duplicate_tags(r)
             if admin.id != "dev-bypass":
                 try:
                     import uuid
@@ -1516,6 +1490,8 @@ def resolve_group_add_api(
         )
 
     admin_id = str(admin.id) if getattr(admin, "id", None) else None
+    members = get_group_members(db, group.id)
+    member_count = len(members)
 
     try:
         dir_row = resolve_group_add(
@@ -1529,7 +1505,6 @@ def resolve_group_add_api(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    members = get_group_members(db, group.id)
     db.commit()
 
     # Notify realtime listeners that pending requests changed.
@@ -1540,7 +1515,7 @@ def resolve_group_add_api(
         "groupId": group_id,
         "resolutionType": "add",
         "directoryPersonId": dir_row.id,
-        "resolvedRequestCount": len(members),
+        "resolvedRequestCount": member_count,
     }
 
 
@@ -1632,6 +1607,8 @@ def resolve_group_update_api(
         raise HTTPException(status_code=404, detail="Directory person not found")
 
     admin_id = str(admin.id) if getattr(admin, "id", None) else None
+    members = get_group_members(db, group.id)
+    member_count = len(members)
 
     try:
         resolve_group_update(
@@ -1644,7 +1621,6 @@ def resolve_group_update_api(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    members = get_group_members(db, group.id)
     db.commit()
     notify_admin_requests_changed("group_resolve_update")
 
@@ -1653,7 +1629,7 @@ def resolve_group_update_api(
         "groupId": group_id,
         "resolutionType": "update",
         "directoryPersonId": dir_person.id,
-        "resolvedRequestCount": len(members),
+        "resolvedRequestCount": member_count,
     }
 
 

@@ -85,10 +85,12 @@ export default function GroupDetail() {
           toastMsg = 'User marked as removed in Directory.';
           break;
         case 'update':
-          toastMsg = 'Merged and Directory record updated.';
+          toastMsg = 'Directory record updated successfully.';
           break;
         case 'keep':
-          toastMsg = 'Kept existing Directory record. New request closed.';
+          toastMsg = group?.members?.length > 1
+            ? 'Existing Directory record kept. New requests deleted.'
+            : 'Existing Directory record kept. New request deleted.';
           break;
         case 'delete':
           toastMsg = 'Resolved and Directory record permanently deleted.';

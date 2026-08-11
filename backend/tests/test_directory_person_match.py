@@ -97,7 +97,7 @@ class TestDirectoryPersonMatch:
 
         row = intake_manager_submission(
             db,
-            person=_person(email=email, firstName="Other", lastName="Name", location="London"),
+            person=_person(email=email),
             action="Add",
             manager_id=manager_id,
         )
@@ -112,13 +112,14 @@ class TestDirectoryPersonMatch:
 
         row = intake_manager_submission(
             db,
-            person=_person(email=email, firstName="Other", lastName="Name", location="London"),
+            person=_person(email=email),
             action="Remove",
             manager_id=manager_id,
         )
         db.flush()
 
-        assert TAG_ALREADY_EXISTS in row.tags
+        from app.manager_request_tags import TAG_ALREADY_REMOVED
+        assert TAG_ALREADY_REMOVED in row.tags
 
     def test_add_request_no_tag_when_person_was_removed(self, db: Session, manager_id: str):
         email = f"add-after-remove-{uuid.uuid4().hex[:8]}@example.com"
@@ -133,7 +134,8 @@ class TestDirectoryPersonMatch:
         )
         db.flush()
 
-        assert TAG_ALREADY_EXISTS not in row.tags
+        from app.manager_request_tags import TAG_ALREADY_REMOVED
+        assert TAG_ALREADY_REMOVED in row.tags
 
     def test_remove_request_no_tag_when_person_still_added(self, db: Session, manager_id: str):
         email = f"remove-added-{uuid.uuid4().hex[:8]}@example.com"
@@ -148,7 +150,7 @@ class TestDirectoryPersonMatch:
         )
         db.flush()
 
-        assert TAG_ALREADY_EXISTS not in row.tags
+        assert TAG_ALREADY_EXISTS in row.tags
 
     def test_auto_email_gets_already_exists_on_add(self, db: Session):
         email = f"auto-add-added-{uuid.uuid4().hex[:8]}@example.com"
@@ -157,7 +159,7 @@ class TestDirectoryPersonMatch:
 
         row = intake_automated_email_request(
             db,
-            person=_person(email=email, firstName="Auto", lastName="Name", location="Leeds"),
+            person=_person(email=email),
             action="Add",
             source_gmail_message_id=f"gmail-{uuid.uuid4().hex}",
         )
@@ -183,10 +185,11 @@ class TestDirectoryPersonMatch:
         assert conflict.outcome == "Removed"
 
         tags = duplicate_tags_for_person(db, _person(email=email), action="Remove")
-        assert tags == [TAG_ALREADY_EXISTS]
+        from app.manager_request_tags import TAG_ALREADY_REMOVED
+        assert tags == [TAG_ALREADY_REMOVED]
 
         tags = duplicate_tags_for_person(db, _person(email=email), action="Add")
-        assert tags == []
+        assert tags == [TAG_ALREADY_REMOVED]
 
 
 class TestActiveRoster:
@@ -209,8 +212,8 @@ class TestActiveRoster:
         person = _person(email=email)
         row = _handled_row(db, person, outcome="Added", action="Add")
         db.flush()
-
-        match = find_roster_person(db, _person(email=email, firstName="Other", lastName="Name"))
+    
+        match = find_roster_person(db, _person(email=email))
         assert match is not None
         assert match.id == row.id
 

@@ -1,4 +1,5 @@
 export const TAG_ALREADY_EXISTS = 'already exists';
+export const TAG_ALREADY_REMOVED = 'already removed';
 export const TAG_PARTNER_REQUEST = 'partner req';
 export const TAG_AUTO_MAIL = 'auto mail';
 export const TAG_VERIFIED = 'verified';
@@ -87,7 +88,7 @@ export function sentViaTableRequestTags(
   { isAdminEntry = false, includeAdminForm = true } = {},
 ) {
   return displayRequestTags(tags, { isAdminEntry })
-    .filter((tag) => tag !== TAG_ALREADY_EXISTS)
+    .filter((tag) => tag !== TAG_ALREADY_EXISTS && tag !== TAG_ALREADY_REMOVED)
     .filter((tag) => includeAdminForm || tag !== TAG_SENT_BY_ADMIN);
 }
 
@@ -119,6 +120,11 @@ const STATUS_TAGS = [
     tag: TAG_ALREADY_EXISTS,
     label: 'Exists in Directory',
     variant: 'already-exists',
+  },
+  {
+    tag: TAG_ALREADY_REMOVED,
+    label: 'Already Removed',
+    variant: 'already-removed',
   },
   {
     tag: TAG_CONFIRMED_DUPLICATE,
@@ -154,11 +160,22 @@ export function requestStatusTag(request) {
 
 /** Directory presence for New requests Status column. */
 export function directoryStatusTag(request) {
+  const isExists = (request?.tags || []).includes(TAG_ALREADY_EXISTS);
+  const isRemoved = (request?.tags || []).includes(TAG_ALREADY_REMOVED);
   const inDirectory = Boolean(
     request?.directoryMatch
-    || (request?.tags || []).includes(TAG_ALREADY_EXISTS),
+    || isExists
+    || isRemoved,
   );
   if (inDirectory) {
+    if (isRemoved) {
+      return {
+        variant: 'already-removed',
+        label: 'Already Removed',
+        prefix: '⚠ ',
+        plain: false,
+      };
+    }
     return {
       variant: 'already-exists',
       label: 'Exists in Directory',
@@ -194,6 +211,14 @@ export function groupClassificationPills(summary) {
     pills.push({
       variant: 'already-exists',
       label: 'Exists in Directory',
+      count: null,
+      prefix: '',
+    });
+  }
+  if (summary.alreadyRemoved) {
+    pills.push({
+      variant: 'already-removed',
+      label: 'Already Removed',
       count: null,
       prefix: '',
     });

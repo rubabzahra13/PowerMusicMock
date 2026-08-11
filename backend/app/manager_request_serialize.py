@@ -55,6 +55,9 @@ def _effective_tags(
 ) -> List[str]:
     tags = list(req.tags or [])
     if directory_row:
+        from app.manager_request_tags import TAG_ALREADY_REMOVED, TAG_ALREADY_EXISTS
+        if directory_row.outcome == "Removed":
+            return merge_tags(tags, [TAG_ALREADY_REMOVED])
         return merge_tags(tags, [TAG_ALREADY_EXISTS])
     return tags
 

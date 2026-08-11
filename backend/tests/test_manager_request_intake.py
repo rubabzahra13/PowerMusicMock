@@ -109,7 +109,7 @@ class TestManagerRequestIntake:
         assert TAG_PARTNER_REQUEST in verified.tags
         assert TAG_AUTO_MAIL not in verified.tags
         assert TAG_CONFIRMED_DUPLICATE not in verified.tags
-        assert TAG_POTENTIAL_DUPLICATE not in verified.tags
+        assert TAG_POTENTIAL_DUPLICATE in verified.tags
         assert TAG_UNVERIFIED in auto_row.tags
         assert verified.manager_id is not None
         assert verified.person_last_name == "Mal"
@@ -147,7 +147,7 @@ class TestManagerRequestIntake:
         assert TAG_VERIFIED not in linked.tags
         assert TAG_PARTNER_REQUEST not in linked.tags
         assert TAG_CONFIRMED_DUPLICATE not in linked.tags
-        assert TAG_POTENTIAL_DUPLICATE not in linked.tags
+        assert TAG_POTENTIAL_DUPLICATE in linked.tags
 
     def test_admin_manual_creates_fresh_row(self, db: Session, manager_id: str):
         """Admin/manual submit should no longer reuse an existing request row."""
@@ -312,4 +312,6 @@ class TestManagerRequestIntake:
         )
         db.flush()
 
-        assert TAG_ALREADY_EXISTS in row.tags
+        assert TAG_ALREADY_EXISTS not in row.tags
+        from app.manager_request_tags import TAG_POTENTIAL_DUPLICATE
+        assert TAG_POTENTIAL_DUPLICATE in row.tags

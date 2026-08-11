@@ -23,6 +23,7 @@ export default function Tag({
       textClass = 'text-[var(--color-tag-removed-text)]';
       break;
     case 'already-exists':
+    case 'already-removed':
     case 'review-exists':
       bgClass = 'bg-[var(--color-tag-review-exists-bg)]';
       textClass = 'text-[var(--color-tag-review-exists-text)]';

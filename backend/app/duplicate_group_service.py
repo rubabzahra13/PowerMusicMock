@@ -43,7 +43,8 @@ def _clear_duplicate_tags(req: models.ManagerRequest) -> None:
     """Scrub all duplicate-related tags from a request."""
     if not req.tags:
         return
-    tags_to_remove = {TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE, TAG_ALREADY_EXISTS}
+    from app.manager_request_tags import TAG_ALREADY_REMOVED
+    tags_to_remove = {TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE, TAG_ALREADY_EXISTS, TAG_ALREADY_REMOVED}
     original_len = len(req.tags)
     req.tags = [t for t in req.tags if t not in tags_to_remove]
     if len(req.tags) != original_len:
@@ -56,13 +57,15 @@ def _best_classification(
 ) -> Optional[str]:
     """Return the more severe of two classification strings.
 
-    Severity order: confirmed_duplicate > potential_duplicate > already_exists > None
+    Severity order: confirmed_duplicate > already_exists_conflict > already_removed_conflict > potential_duplicate > already_exists > already_removed > None
     """
     order = {
-        "confirmed_duplicate": 4,
-        "already_exists_conflict": 3,
-        "potential_duplicate": 2,
-        "already_exists": 1,
+        "confirmed_duplicate": 6,
+        "already_exists_conflict": 5,
+        "already_removed_conflict": 4,
+        "potential_duplicate": 3,
+        "already_exists": 2,
+        "already_removed": 1,
         None: 0,
     }
     if order.get(classification_a, 0) >= order.get(classification_b, 0):
@@ -115,7 +118,7 @@ def _directory_candidates(
     """Fetch handled directory rows for conflict detection matching last_name or email."""
     q = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
-        models.ManagerRequest.outcome == "Added",
+        models.ManagerRequest.outcome.in_(("Added", "Removed")),
         models.ManagerRequest.archived_at.is_(None),
     )
     if req.partner_id:
@@ -258,7 +261,7 @@ def process_request_grouping(
     if directory_candidates is not None:
         dir_candidates = [
             c for c in directory_candidates
-            if c.status == "handled" and c.outcome == "Added" and not c.archived_at and (not req.partner_id or c.partner_id == req.partner_id)
+            if c.status == "handled" and c.outcome in ("Added", "Removed") and not c.archived_at and (not req.partner_id or c.partner_id == req.partner_id)
         ]
     else:
         dir_candidates = _directory_candidates(db, req)
@@ -275,11 +278,11 @@ def process_request_grouping(
 
     # ── Step 3: determine final classification ──────────────────────────────
     if best_match_req and dir_match_person:
-        final_classification = "already_exists_conflict"
+        final_classification = "already_removed_conflict" if dir_match_person.outcome == "Removed" else "already_exists_conflict"
     elif best_match_req:
         final_classification = best_group_classification
     elif dir_match_person:
-        final_classification = "already_exists"
+        final_classification = "already_removed" if dir_match_person.outcome == "Removed" else "already_exists"
     else:
         return None  # No match found — no group needed
 
@@ -410,15 +413,19 @@ def _sync_group_representative_and_tags(
     # Always fetch flushed DB members to guarantee we don't miss any older ones
     db_members = (
         db.query(models.ManagerRequest)
-        .filter(models.ManagerRequest.duplicate_group_id == group.id)
+        .filter(
+            models.ManagerRequest.duplicate_group_id == group.id,
+            models.ManagerRequest.status == "new",
+        )
         .all()
     )
 
     # Merge DB members with explicitly passed ones (which might not be flushed yet)
-    all_members = {m.id: m for m in db_members}
+    all_members = {m.id: m for m in db_members if m.status == "new"}
     if member_requests:
         for m in member_requests:
-            all_members[m.id] = m
+            if m.status == "new":
+                all_members[m.id] = m
 
     members = sorted(
         all_members.values(),
@@ -430,6 +437,7 @@ def _sync_group_representative_and_tags(
     )
 
     if not members:
+        group.representative_request_id = None
         return
 
     latest_req = members[0]
@@ -458,11 +466,17 @@ def _sync_group_representative_and_tags(
 
     # ── Directory tag is orthogonal to the peer relationship ───────────────────
     if group.directory_person_id:
-        tags_to_add.append(TAG_ALREADY_EXISTS)
+        from app.manager_request_tags import TAG_ALREADY_REMOVED, TAG_ALREADY_EXISTS
+        dir_person = db.query(models.ManagerRequest).filter_by(id=group.directory_person_id).first()
+        if dir_person and dir_person.outcome == "Removed":
+            tags_to_add.append(TAG_ALREADY_REMOVED)
+        else:
+            tags_to_add.append(TAG_ALREADY_EXISTS)
 
     # Strip any stale peer-duplicate tags before applying the freshly computed one
     # so we never accumulate both confirmed duplicate and potential duplicate.
-    stale_peer_tags = {TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE}
+    from app.manager_request_tags import TAG_ALREADY_REMOVED, TAG_ALREADY_EXISTS
+    stale_peer_tags = {TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE, TAG_ALREADY_EXISTS, TAG_ALREADY_REMOVED}
     latest_req.tags = [t for t in (latest_req.tags or []) if t not in stale_peer_tags]
     if tags_to_add:
         latest_req.tags = merge_tags(latest_req.tags, tags_to_add)
@@ -763,6 +777,7 @@ def finalize_group_after_selective_dismiss(
     def _mark_group_dismissed() -> None:
         group.status = "dismissed"
         group.resolved_at = now
+        group.representative_request_id = None
         if admin_id and admin_id != "dev-bypass":
             try:
                 group.resolved_by_admin_id = uuid.UUID(admin_id)
@@ -810,9 +825,17 @@ def finalize_group_after_selective_dismiss(
                     peer_match_class = _best_classification(peer_match_class, c)
 
     if dir_match and peer_match_class:
-        new_class = "already_exists_conflict"
+        new_class = (
+            "already_removed_conflict"
+            if (dir_person and dir_person.outcome == "Removed")
+            else "already_exists_conflict"
+        )
     elif dir_match:
-        new_class = "already_exists"
+        new_class = (
+            "already_removed"
+            if (dir_person and dir_person.outcome == "Removed")
+            else "already_exists"
+        )
     elif peer_match_class:
         new_class = peer_match_class
     else:
@@ -841,10 +864,13 @@ def get_group_members(
     db: Session,
     group_id: str,
 ) -> List[models.ManagerRequest]:
-    """Chronologically ordered list of all requests in a group."""
+    """Chronologically ordered list of all active requests in a group."""
     return (
         db.query(models.ManagerRequest)
-        .filter(models.ManagerRequest.duplicate_group_id == group_id)
+        .filter(
+            models.ManagerRequest.duplicate_group_id == group_id,
+            models.ManagerRequest.status == "new",
+        )
         .order_by(models.ManagerRequest.received_at.asc(), models.ManagerRequest.id.asc())
         .all()
     )
@@ -906,8 +932,18 @@ def compute_group_classification_summary(
             # elif: avoid double-counting if somehow both are present
             potential_count += 1
 
+    already_exists = False
+    already_removed = False
+    if group.directory_person_id:
+        dir_person = db.query(models.ManagerRequest).filter_by(id=group.directory_person_id).first()
+        if dir_person and dir_person.outcome == "Removed":
+            already_removed = True
+        else:
+            already_exists = True
+
     return {
-        "alreadyExists": bool(group.directory_person_id),
+        "alreadyExists": already_exists,
+        "alreadyRemoved": already_removed,
         "duplicateCount": duplicate_count,
         "potentialCount": potential_count,
     }
@@ -1010,42 +1046,82 @@ def _apply_merge_manager_provenance(
     dir_row.tags = tags
 
 
-def _mark_group_members_resolved(
-    db: Session,
-    group: models.DuplicateGroup,
-    *,
-    admin_id: Optional[str],
-    now: datetime,
-) -> int:
-    """Set status='handled', outcome='GroupResolved' on all group member requests.
+def permanently_delete_requests(db: Session, request_ids: List[str]) -> int:
+    """Permanently delete manager requests from the database along with all dependent references.
 
-    Returns the count of rows updated.
+    Cascade cleanups performed:
+    1. Decrement manager pending stats for any deleted requests with status == "new".
+    2. Nullify DuplicateGroup.representative_request_id and DuplicateGroup.directory_person_id where referencing deleted IDs.
+    3. Delete referencing rows in DismissedDuplicateMatch, DismissedGroupMatch, and ManagerRequestView.
+    4. Physically delete ManagerRequest records.
+
+    Returns the count of ManagerRequest rows deleted.
     """
-    members = get_group_members(db, group.id)
-    admin_uuid = None
-    if admin_id and admin_id != "dev-bypass":
-        try:
-            from uuid import UUID
-            admin_uuid = UUID(admin_id)
-        except ValueError:
-            pass
+    if not request_ids:
+        return 0
+    from sqlalchemy import delete, update, or_
+    valid_ids = [rid for rid in request_ids if rid]
+    if not valid_ids:
+        return 0
 
-    for req in members:
-        if req.status == "new":
-            req.status = "handled"
-            req.handled_at = now
-            req.outcome = OUTCOME_GROUP_RESOLVED
-            if admin_uuid:
-                req.handled_by_admin_id = admin_uuid
-            # Strip any pending duplicate/review tags from the representative.
-            from app.manager_request_tags import TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE, TAG_ALREADY_EXISTS
-            cleaned = [
-                t for t in (req.tags or [])
-                if t not in (TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE, TAG_ALREADY_EXISTS)
-            ]
-            req.tags = cleaned
+    rows = db.query(models.ManagerRequest).filter(models.ManagerRequest.id.in_(valid_ids)).all()
+    if not rows:
+        return 0
 
-    return len(members)
+    actual_ids = [r.id for r in rows]
+
+    # Decrement manager pending stats for active requests being deleted
+    from app.manager_request_stats import decrement_manager_pending_stat
+    from app.manager_request_summary_cache import invalidate_manager_request_summary
+    for r in rows:
+        if r.status == "new":
+            decrement_manager_pending_stat(db, r)
+            if r.manager_id:
+                invalidate_manager_request_summary(str(r.manager_id))
+
+    # 1. Nullify references in DuplicateGroup
+    db.execute(
+        update(models.DuplicateGroup)
+        .where(models.DuplicateGroup.directory_person_id.in_(actual_ids))
+        .values(directory_person_id=None)
+    )
+    db.execute(
+        update(models.DuplicateGroup)
+        .where(models.DuplicateGroup.representative_request_id.in_(actual_ids))
+        .values(representative_request_id=None)
+    )
+
+    # 2. Delete related DismissedDuplicateMatch rows
+    db.execute(
+        delete(models.DismissedDuplicateMatch)
+        .where(
+            or_(
+                models.DismissedDuplicateMatch.request_id_1.in_(actual_ids),
+                models.DismissedDuplicateMatch.request_id_2.in_(actual_ids),
+            )
+        )
+    )
+
+    # 3. Delete related DismissedGroupMatch rows
+    db.execute(
+        delete(models.DismissedGroupMatch)
+        .where(models.DismissedGroupMatch.request_id.in_(actual_ids))
+    )
+
+    # 4. Delete related ManagerRequestView rows
+    db.execute(
+        delete(models.ManagerRequestView)
+        .where(models.ManagerRequestView.request_id.in_(actual_ids))
+    )
+
+    # 5. Delete the actual ManagerRequest records
+    deleted_count = (
+        db.query(models.ManagerRequest)
+        .filter(models.ManagerRequest.id.in_(actual_ids))
+        .delete(synchronize_session=False)
+    )
+    db.flush()
+    return deleted_count
 
 
 def _finalize_group(
@@ -1105,69 +1181,101 @@ def resolve_group_add(
     admin_note: Optional[str] = None,
     source_request_id: Optional[str] = None,
 ) -> models.ManagerRequest:
-    """Create ONE new Directory record from final_values, resolve the group.
+    """Create ONE Directory record from final_values, resolve the group, and permanently delete discarded requests.
 
     Invariants:
-    - group must not already have a directory_person_id (caller should verify).
-    - final_values fields are written as-is; the backend never derives them from
-      the latest request automatically.
-    - Original group member rows are left immutable in their historical state;
-      only status/outcome/handled_at are updated on them.
+    - Retains the representative / source request, updating it in-place to status="handled", outcome="Added".
+    - Permanently deletes all other member requests in the group.
+    - Stamps group resolution metadata, links directory_person_id, and sets status='resolved'.
     - Does NOT call db.commit() — router commits.
 
-    Returns the newly created Directory ManagerRequest row.
+    Returns the Directory ManagerRequest row.
     """
     _validate_final_values(final_values)
-
     now = datetime.now(timezone.utc)
 
-    # Allocate an id for the new Directory row.
-    from app.request_display import allocate_request_ids
-    (new_id,) = allocate_request_ids(db, 1)
-
     members = get_group_members(db, group.id)
-    # Manager on Directory = manager of the current request Merge was clicked on.
-    manager_source = _current_request_member(
+    # Determine the retained request:
+    retained_req = _current_request_member(
         members,
         source_request_id=source_request_id,
         representative_request_id=group.representative_request_id,
     )
+    if retained_req is None and members:
+        # Fallback to the latest member
+        members_sorted = sorted(
+            members,
+            key=lambda r: (r.received_at or datetime.min.replace(tzinfo=timezone.utc), r.id or ""),
+            reverse=True,
+        )
+        retained_req = members_sorted[0]
 
-    # Create the Directory row.  We set status="handled" and outcome="Added"
-    # directly so it appears as a Directory entry.  This is a fresh row —
-    # none of the original request rows are mutated into the Directory record.
-    dir_row = models.ManagerRequest(
-        id=new_id,
-        received_at=now,
-        handled_at=now,
-        status="handled",
-        outcome="Added",
-        action="Add",
-        person_first_name=(final_values.firstName or "").strip(),
-        person_last_name=(final_values.lastName or "").strip(),
-        person_email=(final_values.email or "").strip(),
-        person_location=(final_values.location or "").strip(),
-        intake_persons={},
-        tags=[],
-        partner_id=partner_id or group.partner_id,
-    )
-    _apply_merge_manager_provenance(dir_row, manager_source, final_values=final_values)
+    admin_uuid = None
     if admin_id and admin_id != "dev-bypass":
         try:
             from uuid import UUID
-            dir_row.handled_by_admin_id = UUID(admin_id)
+            admin_uuid = UUID(admin_id)
         except ValueError:
             pass
-    if admin_note:
-        dir_row.admin_notes = admin_note
-    db.add(dir_row)
-    db.flush()
 
-    # Link the group to the new Directory row.
+    from app.manager_request_stats import decrement_manager_pending_stat
+    from app.manager_request_summary_cache import invalidate_manager_request_summary
+
+    if retained_req:
+        dir_row = retained_req
+        was_new = dir_row.status == "new"
+        dir_row.status = "handled"
+        dir_row.outcome = "Added"
+        dir_row.action = "Add"
+        dir_row.handled_at = now
+        dir_row.person_first_name = (final_values.firstName or "").strip()
+        dir_row.person_last_name = (final_values.lastName or "").strip()
+        dir_row.person_email = (final_values.email or "").strip()
+        dir_row.person_location = (final_values.location or "").strip()
+        _apply_merge_manager_provenance(dir_row, retained_req, final_values=final_values)
+        if admin_uuid:
+            dir_row.handled_by_admin_id = admin_uuid
+        if admin_note:
+            dir_row.admin_notes = admin_note
+        _clear_duplicate_tags(dir_row)
+        dir_row.duplicate_group_id = None
+        if was_new:
+            decrement_manager_pending_stat(db, dir_row)
+            if dir_row.manager_id:
+                invalidate_manager_request_summary(str(dir_row.manager_id))
+    else:
+        from app.request_display import allocate_request_ids
+        (new_id,) = allocate_request_ids(db, 1)
+        dir_row = models.ManagerRequest(
+            id=new_id,
+            received_at=now,
+            handled_at=now,
+            status="handled",
+            outcome="Added",
+            action="Add",
+            person_first_name=(final_values.firstName or "").strip(),
+            person_last_name=(final_values.lastName or "").strip(),
+            person_email=(final_values.email or "").strip(),
+            person_location=(final_values.location or "").strip(),
+            intake_persons={},
+            tags=[],
+            partner_id=partner_id or group.partner_id,
+        )
+        if admin_uuid:
+            dir_row.handled_by_admin_id = admin_uuid
+        if admin_note:
+            dir_row.admin_notes = admin_note
+        db.add(dir_row)
+        db.flush()
+
+    # Permanently delete discarded member requests
+    discarded_ids = [m.id for m in members if m.id != dir_row.id]
+    if discarded_ids:
+        permanently_delete_requests(db, discarded_ids)
+
+    # Link the group to the Directory row
     group.directory_person_id = dir_row.id
-
-    # Mark all original group member requests as resolved (without touching their data).
-    _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
+    group.representative_request_id = dir_row.id
 
     # Stamp the audit metadata and close the group.
     _finalize_group(
@@ -1196,18 +1304,17 @@ def resolve_group_update(
     admin_note: Optional[str] = None,
     source_request_id: Optional[str] = None,
 ) -> models.ManagerRequest:
-    """Update the existing Directory record in-place with final_values; resolve group.
+    """Update the existing Directory record in-place with final_values; resolve group and permanently delete incoming requests.
 
     Invariants:
     - group.directory_person_id must equal directory_person.id (caller verifies).
-    - Never creates a second Directory row.
-    - Original group member rows are left immutable.
+    - Updates directory_person in-place.
+    - Permanently deletes all incoming member requests in the group.
     - Does NOT call db.commit() — router commits.
 
     Returns the updated Directory ManagerRequest row.
     """
     _validate_final_values(final_values)
-
     now = datetime.now(timezone.utc)
 
     # Snapshot the current values for audit BEFORE modifying.
@@ -1224,7 +1331,6 @@ def resolve_group_update(
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
 
-    # Manager on Directory = manager of the current request Merge was clicked on.
     members = get_group_members(db, group.id)
     manager_source = _current_request_member(
         members,
@@ -1238,8 +1344,14 @@ def resolve_group_update(
     if admin_note:
         directory_person.admin_notes = admin_note
 
-    # Mark all original group member requests as resolved.
-    _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
+    # Permanently delete all incoming member requests
+    discarded_ids = [m.id for m in members if m.id != directory_person.id]
+    if discarded_ids:
+        permanently_delete_requests(db, discarded_ids)
+
+    # Clear representative pointer since member requests are deleted
+    group.representative_request_id = None
+    group.directory_person_id = directory_person.id
 
     # Stamp audit metadata and close the group.
     _finalize_group(
@@ -1265,18 +1377,24 @@ def resolve_group_keep_existing(
     admin_id: Optional[str],
     admin_note: Optional[str] = None,
 ) -> int:
-    """Resolve group without modifying the Directory; discard all incoming requests.
+    """Resolve group without modifying the Directory; permanently delete all incoming requests.
 
     Invariants:
     - Directory record is left completely unchanged.
-    - Original group member rows are left immutable.
+    - Incoming member requests are permanently deleted.
     - Does NOT call db.commit() — router commits.
 
-    Returns the count of requests marked as resolved.
+    Returns the count of requests deleted.
     """
     now = datetime.now(timezone.utc)
+    members = get_group_members(db, group.id)
+    discarded_ids = [m.id for m in members if m.id != group.directory_person_id]
+    count = len(discarded_ids)
 
-    count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
+    if discarded_ids:
+        permanently_delete_requests(db, discarded_ids)
+
+    group.representative_request_id = None
 
     _finalize_group(
         db, group,
@@ -1303,23 +1421,26 @@ def resolve_group_delete_from_directory(
     admin_id: Optional[str],
     admin_note: Optional[str] = None,
 ) -> int:
-    """Resolve group by archiving (marking as Removed) the Directory person.
+    """Resolve group by marking Directory person as Removed and permanently deleting incoming requests.
 
     Invariants:
     - Updates the directory_person with final_values.
-    - Sets archived_at to now() to mark the person as Removed in the Directory.
-    - Nullifies directory_person_id in any other DuplicateGroups pointing to it.
+    - Sets outcome="Removed", action="Remove", archived_at=None.
+    - Permanently deletes all incoming member requests.
     - Does NOT call db.commit() — router commits.
 
-    Returns the count of requests marked as resolved.
+    Returns the count of requests processed.
     """
     now = datetime.now(timezone.utc)
     
-    # 1. Nullify references in DuplicateGroup
+    # 1. Nullify references in other DuplicateGroups pointing to this directory person
     from sqlalchemy import update
     db.execute(
         update(models.DuplicateGroup)
-        .where(models.DuplicateGroup.directory_person_id == directory_person.id)
+        .where(
+            models.DuplicateGroup.directory_person_id == directory_person.id,
+            models.DuplicateGroup.id != group.id,
+        )
         .values(directory_person_id=None)
     )
     
@@ -1336,7 +1457,18 @@ def resolve_group_delete_from_directory(
     if TAG_REMOVED not in (directory_person.tags or []):
         directory_person.tags = (directory_person.tags or []) + [TAG_REMOVED]
 
-    count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
+    if admin_note:
+        directory_person.admin_notes = admin_note
+
+    members = get_group_members(db, group.id)
+    discarded_ids = [m.id for m in members if m.id != directory_person.id]
+    count = len(discarded_ids)
+
+    if discarded_ids:
+        permanently_delete_requests(db, discarded_ids)
+
+    group.representative_request_id = None
+    group.directory_person_id = directory_person.id
 
     _finalize_group(
         db, group,
@@ -1363,57 +1495,95 @@ def resolve_group_mark_removed(
     partner_id: Optional[str] = None,
     admin_note: Optional[str] = None,
 ) -> int:
-    """Resolve group and create a Removed Directory record (Case E).
+    """Resolve group and retain representative request as Removed Directory record (Case E), deleting discarded requests.
 
     Invariants:
-    - Creates a new Directory record with outcome='Removed' and archived_at=now.
-    - Original group member rows are left immutable.
+    - Retains representative / source request, updating it to status='handled', outcome='Removed', action='Remove'.
+    - Permanently deletes all other member requests in the group.
     - Does NOT call db.commit() — router commits.
 
-    Returns the count of requests marked as resolved.
+    Returns the count of requests processed.
     """
     now = datetime.now(timezone.utc)
-
-    # Allocate an id for the new Directory row.
-    from app.request_display import allocate_request_ids
-    from app.manager_request_tags import TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED
-    (new_id,) = allocate_request_ids(db, 1)
-
-    # Create the Directory row marked as Removed (outcome="Removed", archived_at=now)
-    dir_row = models.ManagerRequest(
-        id=new_id,
-        received_at=now,
-        handled_at=now,
-        status="handled",
-        outcome="Removed",
-        action="Remove",
-        person_first_name=(final_values.firstName or "").strip(),
-        person_last_name=(final_values.lastName or "").strip(),
-        person_email=(final_values.email or "").strip(),
-        person_location=(final_values.location or "").strip(),
-        intake_persons={
-            "admin": {
-                "firstName": (final_values.firstName or "").strip(),
-                "lastName": (final_values.lastName or "").strip(),
-                "email": (final_values.email or "").strip(),
-                "location": (final_values.location or "").strip(),
-            }
-        },
-        tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED],
-        partner_id=partner_id or group.partner_id,
-        archived_at=None,
+    members = get_group_members(db, group.id)
+    retained_req = _current_request_member(
+        members,
+        representative_request_id=group.representative_request_id,
     )
+    if retained_req is None and members:
+        members_sorted = sorted(
+            members,
+            key=lambda r: (r.received_at or datetime.min.replace(tzinfo=timezone.utc), r.id or ""),
+            reverse=True,
+        )
+        retained_req = members_sorted[0]
+
+    admin_uuid = None
     if admin_id and admin_id != "dev-bypass":
         try:
             from uuid import UUID
-            dir_row.handled_by_admin_id = UUID(admin_id)
+            admin_uuid = UUID(admin_id)
         except ValueError:
             pass
-    if admin_note:
-        dir_row.admin_notes = admin_note
-    db.add(dir_row)
 
-    count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
+    from app.manager_request_stats import decrement_manager_pending_stat
+    from app.manager_request_summary_cache import invalidate_manager_request_summary
+    from app.manager_request_tags import TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED
+
+    if retained_req:
+        dir_row = retained_req
+        was_new = dir_row.status == "new"
+        dir_row.status = "handled"
+        dir_row.outcome = "Removed"
+        dir_row.action = "Remove"
+        dir_row.handled_at = now
+        dir_row.person_first_name = (final_values.firstName or "").strip()
+        dir_row.person_last_name = (final_values.lastName or "").strip()
+        dir_row.person_email = (final_values.email or "").strip()
+        dir_row.person_location = (final_values.location or "").strip()
+        dir_row.archived_at = None
+        if admin_uuid:
+            dir_row.handled_by_admin_id = admin_uuid
+        if admin_note:
+            dir_row.admin_notes = admin_note
+        _clear_duplicate_tags(dir_row)
+        dir_row.tags = (dir_row.tags or []) + [TAG_REMOVED]
+        dir_row.duplicate_group_id = None
+        if was_new:
+            decrement_manager_pending_stat(db, dir_row)
+            if dir_row.manager_id:
+                invalidate_manager_request_summary(str(dir_row.manager_id))
+    else:
+        from app.request_display import allocate_request_ids
+        (new_id,) = allocate_request_ids(db, 1)
+        dir_row = models.ManagerRequest(
+            id=new_id,
+            received_at=now,
+            handled_at=now,
+            status="handled",
+            outcome="Removed",
+            action="Remove",
+            person_first_name=(final_values.firstName or "").strip(),
+            person_last_name=(final_values.lastName or "").strip(),
+            person_email=(final_values.email or "").strip(),
+            person_location=(final_values.location or "").strip(),
+            tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED],
+            partner_id=partner_id or group.partner_id,
+            archived_at=None,
+        )
+        if admin_uuid:
+            dir_row.handled_by_admin_id = admin_uuid
+        if admin_note:
+            dir_row.admin_notes = admin_note
+        db.add(dir_row)
+        db.flush()
+
+    discarded_ids = [m.id for m in members if m.id != dir_row.id]
+    if discarded_ids:
+        permanently_delete_requests(db, discarded_ids)
+
+    group.directory_person_id = dir_row.id
+    group.representative_request_id = dir_row.id
 
     _finalize_group(
         db, group,
@@ -1425,7 +1595,7 @@ def resolve_group_mark_removed(
         now=now,
     )
     db.flush()
-    return count
+    return len(members) or 1
 
 
 # ── Preview helper (no writes) ───────────────────────────────────────────────

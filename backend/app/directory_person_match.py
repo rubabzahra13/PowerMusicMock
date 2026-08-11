@@ -194,9 +194,9 @@ def find_directory_conflict(
     action: str,
     directory_rows: List[models.ManagerRequest],
 ) -> Optional[models.ManagerRequest]:
-    """Directory row that triggers already-exists for this request action."""
+    """Directory row that triggers already-exists or already-removed for this request action."""
     match = find_latest_directory_match(person, directory_rows)
-    if match and directory_outcome_conflicts(action, match.outcome):
+    if match:
         return match
     return None
 
@@ -380,10 +380,14 @@ def duplicate_tags_for_person(
     action: str,
     partner_id: Optional[str] = None,
 ) -> List[str]:
-    if find_directory_conflict(
+    match = find_directory_conflict(
         person=person,
         action=action,
         directory_rows=_probe_handled_rows(db, person, partner_id=partner_id),
-    ):
+    )
+    if match:
+        from app.manager_request_tags import TAG_ALREADY_REMOVED
+        if match.outcome == "Removed":
+            return [TAG_ALREADY_REMOVED]
         return [TAG_ALREADY_EXISTS]
     return []

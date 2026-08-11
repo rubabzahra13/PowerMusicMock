@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Iterable, List
 
 TAG_ALREADY_EXISTS = "already exists"
+TAG_ALREADY_REMOVED = "already removed"
 TAG_PARTNER_REQUEST = "partner req"
 TAG_AUTO_MAIL = "auto mail"
 TAG_VERIFIED = "verified"
@@ -25,6 +26,7 @@ MANAGER_SUBMIT_TAGS = [TAG_VERIFIED, TAG_PARTNER_REQUEST]
 ALLOWED_TAGS = frozenset(
     {
         TAG_ALREADY_EXISTS,
+        TAG_ALREADY_REMOVED,
         TAG_PARTNER_REQUEST,
         TAG_AUTO_MAIL,
         TAG_VERIFIED,
@@ -44,6 +46,7 @@ TAG_DISPLAY_ORDER = [
     TAG_POTENTIAL_DUPLICATE,
     TAG_AUTO_MAIL,
     TAG_ALREADY_EXISTS,
+    TAG_ALREADY_REMOVED,
     TAG_REMOVED,
 ]
 
