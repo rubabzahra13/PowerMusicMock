@@ -973,7 +973,7 @@ export default function GroupResolutionView({
                 className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--color-text-primary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:border-[var(--color-brand-secondary-border)] hover:text-[var(--color-brand-secondary)] cursor-pointer"
               >
                 <Clock className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />
-                View Request History ({members.length})
+                Previous Requests
               </button>
             ) : null}
 
@@ -1061,7 +1061,7 @@ export default function GroupResolutionView({
                   className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--color-text-primary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:bg-[var(--color-surface-highlight)] hover:border-[var(--color-brand-secondary-border)] hover:text-[var(--color-brand-secondary)] cursor-pointer"
                 >
                   <Clock className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />
-                  View Request History ({members.length})
+                  Previous Requests
                 </button>
               </div>
             ) : null}
