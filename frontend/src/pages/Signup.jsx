@@ -422,8 +422,8 @@ export default function Signup() {
           >
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
             <p className="leading-relaxed">
-              Can&apos;t find the email in your inbox? Check your Spam folder (and All Mail) as well —
-              reset links often land there.
+              Can&apos;t find the email in your inbox? Check your Spam folder (and All Mail) as well.
+              Reset links often land there.
             </p>
           </div>
 

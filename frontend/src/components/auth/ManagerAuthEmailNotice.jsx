@@ -5,7 +5,7 @@ import ManagerAuthShell, { buttonClass } from './ManagerAuthShell';
 export default function ManagerAuthEmailNotice({
   title,
   children,
-  tip = "Can't find the email in your inbox? Check your Spam folder (and All Mail) as well — confirmation links often land there.",
+  tip = "Can't find the email in your inbox? Check your Spam folder (and All Mail) as well. Confirmation links often land there.",
   backLabel = 'Back to sign in',
   onBack,
   onResend,
