@@ -242,3 +242,65 @@ export function groupClassificationPills(summary) {
   return pills;
 }
 
+/** Directory-only pills for New Requests Status column. */
+export function groupDirectoryStatusPills(summary) {
+  if (!summary) return [];
+  const pills = [];
+  if (summary.alreadyExists) {
+    pills.push({
+      variant: 'already-exists',
+      label: 'Exists in Directory',
+      count: null,
+      prefix: '',
+    });
+  }
+  if (summary.alreadyRemoved) {
+    pills.push({
+      variant: 'already-removed',
+      label: 'Already Removed',
+      count: null,
+      prefix: '',
+    });
+  }
+  return pills;
+}
+
+/**
+ * One user-facing hint when related requests may be the same person.
+ * Umbrella label — not "Duplicate" or "Potential Duplicate" (those are detail-page terms).
+ */
+export function duplicateStatusIndicator({
+  duplicateCount = 0,
+  potentialCount = 0,
+} = {}) {
+  if (duplicateCount <= 0 && potentialCount <= 0) return null;
+
+  return {
+    label: 'Similar requests found',
+    title: 'Other requests that may be the same person — open to review',
+  };
+}
+
+export function groupDuplicateStatusIndicator(summary) {
+  if (!summary) return null;
+  return duplicateStatusIndicator({
+    duplicateCount: summary.duplicateCount || 0,
+    potentialCount: summary.potentialCount || 0,
+  });
+}
+
+/** Directory status tags only — duplicate tags are shown separately. */
+export function requestDirectoryStatusTags(request) {
+  return requestStatusTags(request).filter(
+    (tag) => tag.label === 'Exists in Directory' || tag.label === 'Already Removed',
+  );
+}
+
+export function requestDuplicateStatusIndicator(request) {
+  const tags = request?.tags || [];
+  return duplicateStatusIndicator({
+    duplicateCount: tags.includes(TAG_CONFIRMED_DUPLICATE) ? 1 : 0,
+    potentialCount: tags.includes(TAG_POTENTIAL_DUPLICATE) ? 1 : 0,
+  });
+}
+

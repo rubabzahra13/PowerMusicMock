@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { formatTimestampSplit, isTodayInTimeZone, isYesterdayInTimeZone } from '../utils/dateTime';
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, HoverTip } from '../components/ui';
+import DuplicateStatusHint, { StatusColumnPlainLabel } from '../components/ui/DuplicateStatusHint';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerColumnContent, getManagerDisplayName, isManualEntry, isAdminEntry } from '../utils/manualEntry';
 import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, dismissRequest, getDismissImpact, bulkDismissRequests, applyNewRequestsSuppressions, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
@@ -27,7 +28,7 @@ import { usePartners } from '../context/PartnerContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 import { formatPersonFields, formatPersonName, formatPersonEmail, formatPersonLocation } from '../utils/personDisplay';
-import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, requestStatusTag, requestStatusTags, matchesSentViaFilter, SENT_VIA_BOTH, groupClassificationPills } from '../utils/requestTags';
+import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, requestStatusTag, requestStatusTags, matchesSentViaFilter, SENT_VIA_BOTH, groupDirectoryStatusPills, groupDuplicateStatusIndicator, requestDirectoryStatusTags, requestDuplicateStatusIndicator } from '../utils/requestTags';
 import { hasAnyDataDiffs } from '../utils/requestComparison';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
 import { writeDirectoryCache } from '../utils/managerDirectoryCache';
@@ -309,10 +310,13 @@ function NewRequestsMobileList({
           includeAdminForm: false,
         });
 
-        // Grouped rows: aggregated summary pills
-        const mobileGroupPills = groupClassificationPills(row.groupClassificationSummary);
-        const statusTags = mobileGroupPills.length > 0 ? [] : requestStatusTags(row);
-        const directoryStatus = (mobileGroupPills.length > 0 || statusTags.length > 0) ? null : requestStatusTag(row);
+        const mobileDirectoryPills = groupDirectoryStatusPills(row.groupClassificationSummary);
+        const mobileDuplicateIndicator = groupDuplicateStatusIndicator(row.groupClassificationSummary);
+        const hasGroupedStatus = mobileDirectoryPills.length > 0 || mobileDuplicateIndicator;
+        const directoryTags = hasGroupedStatus ? [] : requestDirectoryStatusTags(row);
+        const duplicateIndicator = hasGroupedStatus ? null : requestDuplicateStatusIndicator(row);
+        const hasDuplicateStatus = directoryTags.length > 0 || duplicateIndicator;
+        const directoryStatus = (hasGroupedStatus || hasDuplicateStatus) ? null : requestStatusTag(row);
 
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
@@ -343,22 +347,19 @@ function NewRequestsMobileList({
                         {formatRequestDisplayId(row.displayId)}
                       </span>
                       <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={row.action} compact />
-                      {mobileGroupPills.length > 0 ? (
+                      {hasGroupedStatus || hasDuplicateStatus ? (
                         <span className="flex flex-wrap items-center justify-start gap-1.5">
-                          {mobileGroupPills.map((pill) => (
+                          {mobileDirectoryPills.map((pill) => (
                             <Tag
                               key={pill.label}
                               variant={pill.variant}
-                              label={pill.count != null ? `${pill.label} × ${pill.count}` : pill.label}
+                              label={pill.label}
                               prefix={pill.prefix}
                               compact
                               wide
                             />
                           ))}
-                        </span>
-                      ) : statusTags.length > 0 ? (
-                        <span className="flex flex-wrap items-center justify-start gap-1.5">
-                          {statusTags.map((tag) => (
+                          {directoryTags.map((tag) => (
                             <Tag
                               key={tag.label}
                               variant={tag.variant}
@@ -368,11 +369,10 @@ function NewRequestsMobileList({
                               wide
                             />
                           ))}
+                          <DuplicateStatusHint indicator={mobileDuplicateIndicator || duplicateIndicator} />
                         </span>
                       ) : directoryStatus.plain ? (
-                        <span className="text-xs font-medium text-[var(--color-text-secondary)]">
-                          {directoryStatus.label}
-                        </span>
+                        <StatusColumnPlainLabel label={directoryStatus.label} />
                       ) : (
                         <Tag
                           variant={directoryStatus.variant}
@@ -1295,32 +1295,32 @@ export default function Requests() {
       headerClassName: 'text-center',
       cellClassName: 'align-middle overflow-hidden text-center px-1',
       render: (_, row) => {
-        // --- Grouped row: use aggregated classification summary pills ---
-        const groupPills = groupClassificationPills(row.groupClassificationSummary);
-        if (groupPills.length > 0) {
+        const directoryPills = groupDirectoryStatusPills(row.groupClassificationSummary);
+        const groupedDuplicateIndicator = groupDuplicateStatusIndicator(row.groupClassificationSummary);
+        const directoryTags = directoryPills.length > 0 || groupedDuplicateIndicator
+          ? []
+          : requestDirectoryStatusTags(row);
+        const duplicateIndicator = directoryPills.length > 0 || groupedDuplicateIndicator
+          ? groupedDuplicateIndicator
+          : requestDuplicateStatusIndicator(row);
+        const status = (directoryPills.length > 0 || directoryTags.length > 0 || duplicateIndicator)
+          ? null
+          : requestStatusTag(row);
+
+        if (directoryPills.length > 0 || directoryTags.length > 0 || duplicateIndicator) {
           return (
-            <span className="flex max-w-full flex-col items-center justify-center gap-1">
-              {groupPills.map((pill) => (
+            <span className="flex max-w-full flex-col items-center justify-center gap-1 text-center">
+              {directoryPills.map((pill) => (
                 <Tag
                   key={pill.label}
                   variant={pill.variant}
-                  label={pill.count != null ? `${pill.label} × ${pill.count}` : pill.label}
+                  label={pill.label}
                   prefix={pill.prefix}
                   compact
                   fit
                 />
               ))}
-            </span>
-          );
-        }
-
-        // --- Fallback: existing per-tag logic for non-grouped rows ---
-        const statusTags = requestStatusTags(row);
-        const status = statusTags.length > 0 ? null : requestStatusTag(row);
-        if (statusTags.length > 0) {
-          return (
-            <span className="flex max-w-full flex-col items-center justify-center gap-1 text-center">
-              {statusTags.map((tag) => (
+              {directoryTags.map((tag) => (
                 <Tag
                   key={tag.label}
                   variant={tag.variant}
@@ -1330,15 +1330,12 @@ export default function Requests() {
                   fit
                 />
               ))}
+              <DuplicateStatusHint indicator={duplicateIndicator} />
             </span>
           );
         }
         if (status.plain) {
-          return (
-            <span className="text-sm font-medium text-[var(--color-text-secondary)]">
-              {status.label}
-            </span>
-          );
+          return <StatusColumnPlainLabel label={status.label} />;
         }
         return (
           <div className="flex max-w-full justify-center text-center">

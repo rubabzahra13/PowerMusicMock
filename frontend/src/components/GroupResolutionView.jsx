@@ -75,12 +75,20 @@ function personFullName(person) {
 
 function MetaItem({ label, value }) {
   if (!value) return null;
+  const text = String(value);
+  const isPlaceholder = text === '—' || /^No notes$/i.test(text);
   return (
     <div className="min-w-0">
-      <dt className="text-[11px] font-bold uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
         {label}
       </dt>
-      <dd className="mt-1 break-words text-sm font-medium text-[var(--color-text-primary)]">
+      <dd
+        className={`mt-1 break-words text-sm ${
+          isPlaceholder
+            ? 'font-normal text-[var(--color-text-muted)]'
+            : 'font-semibold text-[var(--color-text-primary)]'
+        }`}
+      >
         {value}
       </dd>
     </div>
@@ -680,9 +688,6 @@ export default function GroupResolutionView({
             // Fallback for older API responses without classificationSummary
             return <Tag variant={tag.variant} label={tag.label} />;
           })()}
-          {members.length > 1 && (
-            <Tag variant="neutral" label={`${members.length} requests`} />
-          )}
         </div>
       </nav>
 
