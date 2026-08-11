@@ -1,4 +1,4 @@
-import { X, AlertCircle, AlertTriangle } from 'lucide-react';
+import { X, AlertCircle, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useToast } from './useToast';
 import HoverTip from './HoverTip';
 
@@ -18,6 +18,29 @@ const animationStyle = `
   }
 `;
 
+const TOAST_VARIANTS = {
+  success: {
+    borderClass: 'border-l-[var(--color-signal-green)]',
+    Icon: CheckCircle,
+    iconColor: 'text-[var(--color-signal-green)]',
+  },
+  error: {
+    borderClass: 'border-l-[var(--color-signal-red)]',
+    Icon: AlertCircle,
+    iconColor: 'text-[var(--color-signal-red)]',
+  },
+  warning: {
+    borderClass: 'border-l-[var(--color-signal-amber)]',
+    Icon: AlertTriangle,
+    iconColor: 'text-[var(--color-signal-amber)]',
+  },
+  info: {
+    borderClass: 'border-l-[var(--color-signal-neutral)]',
+    Icon: null,
+    iconColor: '',
+  },
+};
+
 export default function Toast() {
   const { toasts, dismissToast } = useToast();
 
@@ -28,26 +51,15 @@ export default function Toast() {
       <style>{animationStyle}</style>
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-3 pointer-events-none select-none">
         {toasts.map((toast) => {
-          let borderClass = 'border-l-[var(--color-brand-accent)]';
-          let Icon = null;
-          let iconColor = '';
-
-          if (toast.type === 'error') {
-            borderClass = 'border-l-[var(--color-signal-red)]';
-            Icon = AlertCircle;
-            iconColor = 'text-[var(--color-signal-red)]';
-          } else if (toast.type === 'warning') {
-            borderClass = 'border-l-[var(--color-signal-amber)]';
-            Icon = AlertTriangle;
-            iconColor = 'text-[var(--color-signal-amber)]';
-          }
+          const variant = TOAST_VARIANTS[toast.type] || TOAST_VARIANTS.success;
+          const { borderClass, Icon, iconColor } = variant;
 
           return (
             <div
               key={toast.id}
               className={`w-[320px] bg-white border border-[var(--color-border-default)] border-l-4 ${borderClass} rounded shadow-[var(--shadow-modal)] p-4 flex items-start gap-3 pointer-events-auto transform transition-all duration-300 animate-toast-slide-in`}
             >
-              {Icon && <Icon className={`w-5 h-5 shrink-0 ${iconColor}`} aria-hidden="true" />}
+              {Icon ? <Icon className={`w-5 h-5 shrink-0 ${iconColor}`} aria-hidden="true" /> : null}
 
               <div className={`flex-1 text-sm text-[var(--color-text-primary)] font-medium leading-tight ${Icon ? 'pt-0.5' : ''}`}>
                 {toast.message}
