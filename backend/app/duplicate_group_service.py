@@ -480,6 +480,7 @@ def unlink_duplicate_members(
     request_id_1: str,
     request_id_2: str,
     admin_id: Optional[str] = None,
+    strict_single: bool = False,
 ) -> Optional[dict]:
     """Unlink request_id_2 from its group (false-positive vs request_id_1).
 
@@ -520,20 +521,21 @@ def unlink_duplicate_members(
     # Cohort = target + any confirmed-duplicate siblings still in this group.
     # Those leave together as their own duplicate cluster.
     cohort: List[models.ManagerRequest] = [req2]
-    siblings = (
-        db.query(models.ManagerRequest)
-        .filter(
-            models.ManagerRequest.duplicate_group_id == group.id,
-            models.ManagerRequest.id != req2.id,
-            models.ManagerRequest.id != req1.id,
+    if not strict_single:
+        siblings = (
+            db.query(models.ManagerRequest)
+            .filter(
+                models.ManagerRequest.duplicate_group_id == group.id,
+                models.ManagerRequest.id != req2.id,
+                models.ManagerRequest.id != req1.id,
+            )
+            .all()
         )
-        .all()
-    )
-    req2_person = person_from_model(req2)
-    for sibling in siblings:
-        classification, _ = match_classification(req2_person, person_from_model(sibling))
-        if classification == "confirmed_duplicate":
-            cohort.append(sibling)
+        req2_person = person_from_model(req2)
+        for sibling in siblings:
+            classification, _ = match_classification(req2_person, person_from_model(sibling))
+            if classification == "confirmed_duplicate":
+                cohort.append(sibling)
 
     cohort_ids = {m.id for m in cohort}
 

@@ -737,6 +737,12 @@ def mark_request_handled(
         req.handled_by_admin_id = admin.id
     if payload.adminNote:
         req.admin_notes = payload.adminNote
+        
+    if payload.finalValues:
+        req.person_first_name = (payload.finalValues.firstName or "").strip()
+        req.person_last_name = (payload.finalValues.lastName or "").strip()
+        req.person_email = (payload.finalValues.email or "").strip()
+        req.person_location = (payload.finalValues.location or "").strip()
 
     if was_new:
         decrement_manager_pending_stat(db, req)
@@ -1446,7 +1452,7 @@ def unlink_duplicate_group_members_api(
     from app.duplicate_group_service import unlink_duplicate_members
     admin_id = str(admin.id) if getattr(admin, "id", None) else None
     result = unlink_duplicate_members(
-        db, group_id, payload.requestId1, payload.requestId2, admin_id=admin_id
+        db, group_id, payload.requestId1, payload.requestId2, admin_id=admin_id, strict_single=payload.strictSingle
     )
     if not result:
         raise HTTPException(status_code=404, detail="Could not unlink duplicate group members")

@@ -96,6 +96,15 @@ export default function GroupDetail() {
         case 'unlinked':
           toastMsg = 'Request unlinked. It stays here as a current request for this visit.';
           break;
+        case 'unlinked_added_directory':
+          toastMsg = 'Person added to Directory.';
+          break;
+        case 'unlinked_removed_directory':
+          toastMsg = 'Person marked as removed in Directory.';
+          break;
+        case 'unlinked_new_requests':
+          toastMsg = 'Request moved to New Requests.';
+          break;
         case 'unlinked_handled':
           toastMsg = name
             ? `${name} marked as handled.`

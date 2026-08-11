@@ -422,6 +422,7 @@ class NewRequestsPageOut(BaseModel):
 
 class MarkHandledIn(BaseModel):
     adminNote: Optional[str] = Field(default=None, max_length=5000)
+    finalValues: Optional[PersonInfo] = None
 
     @field_validator("adminNote", mode="before")
     @classmethod
@@ -621,6 +622,7 @@ class UnlinkDuplicateIn(BaseModel):
 
     requestId1: str
     requestId2: str
+    strictSingle: bool = False
 
 
 class DismissImpactOut(BaseModel):

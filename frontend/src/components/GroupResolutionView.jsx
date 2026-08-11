@@ -191,6 +191,12 @@ export default function GroupResolutionView({
   const [deleteImpact, setDeleteImpact] = useState(null);
   const [deleteImpactLoadingId, setDeleteImpactLoadingId] = useState(null);
 
+  const [unlinkStep, setUnlinkStep] = useState(null);
+  const [unlinkActionType, setUnlinkActionType] = useState(null);
+  const [unlinkForm, setUnlinkForm] = useState(null);
+  const [unlinkDraft, setUnlinkDraft] = useState(null);
+  const [unlinkEditing, setUnlinkEditing] = useState(false);
+
   const [adminNote, setAdminNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -208,6 +214,23 @@ export default function GroupResolutionView({
   const [markUnlinkedTarget, setMarkUnlinkedTarget] = useState(null);
   const [modalValues, setModalValues] = useState(null);
   const [mergeEditing, setMergeEditing] = useState(false);
+
+
+  const openUnlinkModal = (member) => {
+    setUnlinkTargetId(member.id);
+    setUnlinkStep('review');
+    setUnlinkActionType(null);
+    const info = member.person || {};
+    const initForm = {
+      firstName: info.firstName || '',
+      lastName: info.lastName || '',
+      email: info.email || '',
+      location: info.location || '',
+    };
+    setUnlinkForm(initForm);
+    setUnlinkDraft(initForm);
+    setUnlinkEditing(false);
+  };
 
   const updateDraftField = (field, value) => setDraftForm((f) => ({ ...f, [field]: value }));
 
@@ -402,9 +425,7 @@ export default function GroupResolutionView({
   };
 
   /* ── unlink member ── */
-  const handleUnlink = async (memberId) => {
-    // requestId2 is removed. Prefer current request as peer for older rows; when
-    // unlinking the current request, prefer a non-confirmed (potential) sibling.
+  const handleUnlink = async (memberId, actionType, finalValues) => {
     const active = members.filter((m) => !sessionUnlinkedIds.includes(m.id));
     const current = [...active].sort(
       (a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0),
@@ -429,30 +450,35 @@ export default function GroupResolutionView({
       onResolved('error', 'Need another request in the group to unlink against.');
       return;
     }
+    setSubmitting(true);
     try {
-      const result = await unlinkGroupMember(group.id, {
+      await unlinkGroupMember(group.id, {
         requestId1,
         requestId2: memberId,
+        strictSingle: true,
       });
-      const cohortIds = Array.isArray(result?.unlinkedIds) && result.unlinkedIds.length > 0
-        ? result.unlinkedIds
-        : [memberId];
-      const cohortSet = new Set(cohortIds);
 
-      // Backend also ungroups the last peer when a non-directory group drops to 1.
-      const remainingActive = members.filter(
-        (m) => !cohortSet.has(m.id) && !sessionUnlinkedIds.includes(m.id),
-      );
-      const groupDissolves = remainingActive.length <= 1 && !hasDirectory;
-      const newlyUnlinked = groupDissolves
-        ? [...cohortIds, ...remainingActive.map((m) => m.id)]
-        : cohortIds;
-
-      setSessionUnlinkedIds((prev) => [...new Set([...prev, ...newlyUnlinked])]);
-      // Stay on this page — unlinked rows become current requests for this visit.
-      onResolved('unlinked', null);
+      if (actionType === 'directory' || actionType === 'remove') {
+        await fetchJson(`/api/admin/requests/${encodeURIComponent(memberId)}/mark-handled`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ adminNote: null, finalValues }),
+        });
+        const nextMembers = members.filter((m) => m.id !== memberId);
+        setMembers(nextMembers);
+        onResolved(
+          actionType === 'directory' ? 'unlinked_added_directory' : 'unlinked_removed_directory',
+          personFullName(finalValues)
+        );
+      } else {
+        const nextMembers = members.filter((m) => m.id !== memberId);
+        setMembers(nextMembers);
+        onResolved('unlinked_new_requests', null);
+      }
     } catch (err) {
-      onResolved('error', err.message || 'Failed to unlink member.');
+      onResolved('error', err.message || 'Failed to unlink request.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -784,7 +810,7 @@ export default function GroupResolutionView({
                                 {showUnlink ? (
                                   <button
                                     type="button"
-                                    onClick={() => setUnlinkTargetId(member.id)}
+                                    onClick={() => openUnlinkModal(member)}
                                     className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] bg-white px-2.5 py-1.5 text-xs font-semibold text-[var(--color-text-secondary)] shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 cursor-pointer"
                                   >
                                     <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1201,59 +1227,200 @@ export default function GroupResolutionView({
         </p>
       </Modal>
 
-      {/* ── Unlink confirmation modal ── */}
+      {/* ── Unlink step-by-step modal ── */}
       <Modal
         isOpen={!!unlinkTargetId}
         onClose={() => setUnlinkTargetId(null)}
         confirm
-        title="Are you sure this is not the same person?"
+        title={unlinkStep === 'review' ? "Separate Request" : "Confirm Action"}
         footer={
-          <>
-            <button
-              type="button"
-              onClick={() => setUnlinkTargetId(null)}
-              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const target = unlinkTargetId;
-                setUnlinkTargetId(null);
-                handleUnlink(target);
-              }}
-              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
-            >
-              Confirm
-            </button>
-          </>
+          unlinkStep === 'review' ? (
+            <div className="flex w-full items-center justify-end gap-3">
+              {(() => {
+                const target = members.find((m) => m.id === unlinkTargetId);
+                const isRemove = target?.action === 'Remove';
+                return (
+                  <button
+                    type="button"
+                    disabled={unlinkEditing || (!unlinkForm?.firstName?.trim() || !unlinkForm?.lastName?.trim())}
+                    onClick={() => {
+                      setUnlinkActionType(isRemove ? 'remove' : 'directory');
+                      setUnlinkStep('confirm');
+                    }}
+                    className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-60"
+                  >
+                    {isRemove ? 'Mark as Removed' : 'Add to Directory'}
+                  </button>
+                );
+              })()}
+              <button
+                type="button"
+                disabled={unlinkEditing}
+                onClick={() => {
+                  setUnlinkActionType('new_requests');
+                  setUnlinkStep('confirm');
+                }}
+                className="px-4 py-2 border border-[var(--color-border-default)] bg-white text-sm font-semibold text-[var(--color-text-primary)] rounded-lg shadow-sm hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-60"
+              >
+                Add to New Requests
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setUnlinkStep('review')}
+                className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => {
+                  const target = unlinkTargetId;
+                  setUnlinkTargetId(null);
+                  handleUnlink(target, unlinkActionType, unlinkForm);
+                }}
+                className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-60"
+              >
+                {submitting ? 'Processing...' : (
+                  unlinkActionType === 'directory' ? 'Add to Directory' :
+                  unlinkActionType === 'remove' ? 'Mark as Removed' :
+                  'Add to New Requests'
+                )}
+              </button>
+            </>
+          )
         }
       >
         {(() => {
           const target = members.find((m) => m.id === unlinkTargetId);
-          const confirmedWithTarget = target
-            ? activeMembers.filter(
-              (m) =>
-                m.id !== target.id
-                && m.id !== currentRequest?.id
-                && matchClassification(target.person, m.person) === 'confirmed_duplicate',
-            )
-            : [];
-          return (
-            <div className="space-y-3 text-sm text-[var(--color-text-secondary)]">
-              <p>
-                This will unlink this request from the group. It stays on this page as a current request for this visit so you can mark it handled here.
-              </p>
-              {confirmedWithTarget.length > 0 ? (
-                <p>
-                  {confirmedWithTarget.length === 1
-                    ? 'Its confirmed duplicate will also be unlinked and kept together in a separate group.'
-                    : `Its ${confirmedWithTarget.length} confirmed duplicates will also be unlinked and kept together in a separate group.`}
+          if (!target) return null;
+
+          if (unlinkStep === 'review') {
+            return (
+              <div className="space-y-4">
+                <p className="text-sm text-[var(--color-text-secondary)]">
+                  This request will be separated from the current group because you indicated that this is a different person.
                 </p>
-              ) : null}
-            </div>
-          );
+
+                <div className="mt-4 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-bg)]/60 p-3.5">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                      Person Information
+                    </p>
+                    {!unlinkEditing ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUnlinkDraft(unlinkForm);
+                          setUnlinkEditing(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-default)] bg-white px-2.5 py-1 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] hover:text-[var(--color-brand-primary)] cursor-pointer"
+                      >
+                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                        Edit
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!unlinkDraft.firstName.trim() || !unlinkDraft.lastName.trim()) return;
+                          setUnlinkForm(unlinkDraft);
+                          setUnlinkEditing(false);
+                        }}
+                        disabled={!unlinkDraft.firstName.trim() || !unlinkDraft.lastName.trim()}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-brand-primary)] px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-surface-sidebar-hover)] disabled:opacity-60 cursor-pointer"
+                      >
+                        <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                        Save
+                      </button>
+                    )}
+                  </div>
+
+                  {!unlinkEditing ? (
+                    <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
+                      <MetaItem label="First Name" value={unlinkForm.firstName || '—'} />
+                      <MetaItem label="Last Name" value={unlinkForm.lastName || '—'} />
+                      <MetaItem label="Email" value={unlinkForm.email || '—'} />
+                      <MetaItem label="Location" value={unlinkForm.location || '—'} />
+                    </dl>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className={LABEL_CLASS}>First Name *</label>
+                        <input
+                          type="text"
+                          value={unlinkDraft.firstName}
+                          onChange={(e) => setUnlinkDraft((f) => ({ ...f, firstName: e.target.value }))}
+                          className={INPUT_CLASS}
+                          placeholder="First name"
+                        />
+                      </div>
+                      <div>
+                        <label className={LABEL_CLASS}>Last Name *</label>
+                        <input
+                          type="text"
+                          value={unlinkDraft.lastName}
+                          onChange={(e) => setUnlinkDraft((f) => ({ ...f, lastName: e.target.value }))}
+                          className={INPUT_CLASS}
+                          placeholder="Last name"
+                        />
+                      </div>
+                      <div>
+                        <label className={LABEL_CLASS}>Email</label>
+                        <input
+                          type="email"
+                          value={unlinkDraft.email}
+                          onChange={(e) => setUnlinkDraft((f) => ({ ...f, email: e.target.value }))}
+                          className={INPUT_CLASS}
+                          placeholder="Email address"
+                        />
+                      </div>
+                      <div>
+                        <label className={LABEL_CLASS}>Location</label>
+                        <input
+                          type="text"
+                          value={unlinkDraft.location}
+                          onChange={(e) => setUnlinkDraft((f) => ({ ...f, location: e.target.value }))}
+                          className={INPUT_CLASS}
+                          placeholder="Location"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
+          if (unlinkStep === 'confirm') {
+            return (
+              <div className="space-y-3 text-sm text-[var(--color-text-secondary)]">
+                {unlinkActionType === 'directory' && (
+                  <>
+                    <p className="font-semibold text-[var(--color-text-primary)]">Add this person to the Directory?</p>
+                    <p>This request will be separated from the current group and the reviewed information will be used for the Directory record.</p>
+                  </>
+                )}
+                {unlinkActionType === 'remove' && (
+                  <>
+                    <p className="font-semibold text-[var(--color-text-primary)]">Mark this person as removed?</p>
+                    <p>This request will be separated from the current group and the person will be marked as removed in the Directory.</p>
+                  </>
+                )}
+                {unlinkActionType === 'new_requests' && (
+                  <>
+                    <p className="font-semibold text-[var(--color-text-primary)]">Move this request to New Requests?</p>
+                    <p>This request will be separated from the current group and created as a standalone New Request.</p>
+                  </>
+                )}
+              </div>
+            );
+          }
+
+          return null;
         })()}
       </Modal>
 
