@@ -12,6 +12,7 @@ TAG_UNVERIFIED = "unverified"
 TAG_SENT_BY_ADMIN = "sent by admin"
 TAG_CONFIRMED_DUPLICATE = "confirmed duplicate"
 TAG_POTENTIAL_DUPLICATE = "potential duplicate"
+TAG_REMOVED = "Removed"
 
 # Backward-compatible aliases
 TAG_AUTO_EMAIL = TAG_AUTO_MAIL
@@ -43,6 +44,7 @@ TAG_DISPLAY_ORDER = [
     TAG_POTENTIAL_DUPLICATE,
     TAG_AUTO_MAIL,
     TAG_ALREADY_EXISTS,
+    TAG_REMOVED,
 ]
 
 

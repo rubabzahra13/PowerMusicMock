@@ -1321,12 +1321,18 @@ def resolve_group_delete_from_directory(
         .values(directory_person_id=None)
     )
     
-    # 2. Update and Archive the directory record (mark as Removed)
+    # 2. Update the directory record and set it to Removed
     directory_person.person_first_name = (final_values.firstName or "").strip()
     directory_person.person_last_name = (final_values.lastName or "").strip()
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
-    directory_person.archived_at = now
+    directory_person.outcome = "Removed"
+    directory_person.action = "Remove"
+    directory_person.archived_at = None
+    
+    from app.manager_request_tags import TAG_REMOVED
+    if TAG_REMOVED not in (directory_person.tags or []):
+        directory_person.tags = (directory_person.tags or []) + [TAG_REMOVED]
 
     count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
 
@@ -1368,7 +1374,7 @@ def resolve_group_mark_removed(
 
     # Allocate an id for the new Directory row.
     from app.request_display import allocate_request_ids
-    from app.manager_request_tags import TAG_VERIFIED, TAG_PARTNER_REQUEST
+    from app.manager_request_tags import TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED
     (new_id,) = allocate_request_ids(db, 1)
 
     # Create the Directory row marked as Removed (outcome="Removed", archived_at=now)
@@ -1391,9 +1397,9 @@ def resolve_group_mark_removed(
                 "location": (final_values.location or "").strip(),
             }
         },
-        tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST],
+        tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED],
         partner_id=partner_id or group.partner_id,
-        archived_at=now,
+        archived_at=None,
     )
     if admin_id and admin_id != "dev-bypass":
         try:
