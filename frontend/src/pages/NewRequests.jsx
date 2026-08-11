@@ -271,6 +271,7 @@ function NewRequestsMobileList({
   onOpenRequest,
   onMarkAs,
   onDismiss,
+  dismissLoadingId,
   getRowClassName,
 }) {
   if (loading) {
@@ -316,12 +317,13 @@ function NewRequestsMobileList({
               <HoverTip label="Delete" className="absolute top-2 right-2" placement="left">
                 <button
                   type="button"
+                  disabled={dismissLoadingId === row.id}
                   onClick={(e) => {
                     e.stopPropagation();
                     onDismiss(row);
                   }}
                   aria-label="Delete"
-                  className="inline-flex items-center justify-center p-1.5 text-[var(--color-text-muted)] hover:text-[#dc2626] hover:bg-red-50 rounded-md transition-colors"
+                  className="inline-flex items-center justify-center p-1.5 text-[var(--color-text-muted)] hover:text-[#dc2626] hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -691,6 +693,7 @@ export default function Requests() {
   // ── Drawer / Modal states ──
   const [confirmActionRequest, setConfirmActionRequest] = useState(null);
   const [confirmDismissRequest, setConfirmDismissRequest] = useState(null);
+  const [dismissImpactLoadingId, setDismissImpactLoadingId] = useState(null);
   const [showAddManualModal, setShowAddManualModal] = useState(false);
 
   // ── Manual form states ──
@@ -1027,15 +1030,31 @@ export default function Requests() {
     }
   };
 
-  const openDismissConfirm = (row) => {
-    setConfirmDismissRequest({ request: row, impact: null });
-    getDismissImpact(row.id)
-      .then((impact) => {
-        setConfirmDismissRequest((prev) => (
-          prev?.request?.id === row.id ? { request: row, impact } : prev
-        ));
-      })
-      .catch(() => {});
+  const openDismissConfirm = async (row) => {
+    if (!row || dismissImpactLoadingId) return;
+    if (!row.duplicateGroupId) {
+      setConfirmDismissRequest({
+        request: row,
+        impact: {
+          requestId: row.id,
+          confirmedSiblingIds: [],
+          potentialSiblingIds: [],
+          confirmedSiblingCount: 0,
+          potentialSiblingCount: 0,
+        },
+      });
+      return;
+    }
+    setDismissImpactLoadingId(row.id);
+    let impact = null;
+    try {
+      impact = await getDismissImpact(row.id);
+    } catch {
+      impact = null;
+    } finally {
+      setDismissImpactLoadingId(null);
+    }
+    setConfirmDismissRequest({ request: row, impact });
   };
 
   const handleDismissRequest = async (req, impact = null) => {
@@ -1328,12 +1347,13 @@ export default function Requests() {
           <HoverTip label="Delete">
             <button
               type="button"
+              disabled={dismissImpactLoadingId === row.id}
               onClick={(e) => {
                 e.stopPropagation();
                 openDismissConfirm(row);
               }}
               aria-label="Delete"
-              className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors"
+              className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors disabled:opacity-50"
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -1486,6 +1506,7 @@ export default function Requests() {
           }
         }}
         onDismiss={openDismissConfirm}
+        dismissLoadingId={dismissImpactLoadingId}
         getRowClassName={getRequestRowClassName}
       />
 

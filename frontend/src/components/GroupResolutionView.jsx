@@ -185,6 +185,7 @@ export default function GroupResolutionView({
   const [unlinkTargetId, setUnlinkTargetId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteImpact, setDeleteImpact] = useState(null);
+  const [deleteImpactLoadingId, setDeleteImpactLoadingId] = useState(null);
 
   const [adminNote, setAdminNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -378,12 +379,18 @@ export default function GroupResolutionView({
     }
   };
 
-  const openDeleteConfirm = (member) => {
+  const openDeleteConfirm = async (member) => {
+    if (!member || deleteImpactLoadingId) return;
+    setDeleteImpactLoadingId(member.id);
+    try {
+      const impact = await getDismissImpact(member.id);
+      setDeleteImpact(impact);
+    } catch {
+      setDeleteImpact(null);
+    } finally {
+      setDeleteImpactLoadingId(null);
+    }
     setDeleteTarget(member);
-    setDeleteImpact(null);
-    getDismissImpact(member.id)
-      .then((impact) => setDeleteImpact(impact))
-      .catch(() => setDeleteImpact(null));
   };
 
   /* ── delete member (same dismiss API as New Requests) ── */
@@ -683,11 +690,12 @@ export default function GroupResolutionView({
                                 ) : null}
                                 <button
                                   type="button"
+                                  disabled={deleteImpactLoadingId === member.id}
                                   onClick={() => openDeleteConfirm(member)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-600 shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-600 shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 cursor-pointer disabled:opacity-60"
                                 >
                                   <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                                  Delete
+                                  {deleteImpactLoadingId === member.id ? 'Loading…' : 'Delete'}
                                 </button>
                               </div>
                             ) : null}
