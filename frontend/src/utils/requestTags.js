@@ -105,7 +105,7 @@ export function matchesSentViaFilter(tags = [], filterValue) {
 }
 
 export function requestTagLabel(tag) {
-  if (tag === TAG_ALREADY_EXISTS) return 'Already Exists in Directory';
+  if (tag === TAG_ALREADY_EXISTS) return 'Exists in Directory';
   if (tag === TAG_PARTNER_REQUEST) return 'Manager Form';
   if (tag === TAG_SENT_BY_ADMIN) return ADMIN_FORM_LABEL;
   if (tag === TAG_CONFIRMED_DUPLICATE) return 'Duplicate';
@@ -117,7 +117,7 @@ export function requestTagLabel(tag) {
 const STATUS_TAGS = [
   {
     tag: TAG_ALREADY_EXISTS,
-    label: 'Already Exists in Directory',
+    label: 'Exists in Directory',
     variant: 'already-exists',
   },
   {
@@ -161,7 +161,7 @@ export function directoryStatusTag(request) {
   if (inDirectory) {
     return {
       variant: 'already-exists',
-      label: 'Already Exists in Directory',
+      label: 'Exists in Directory',
       prefix: '⚠ ',
       plain: false,
     };

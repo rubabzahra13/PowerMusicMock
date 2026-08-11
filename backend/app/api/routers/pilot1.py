@@ -109,9 +109,10 @@ _REASON_RANK = {
 
 
 def _handled_directory_query(db: Session):
+    from app.directory_person_match import DIRECTORY_LEDGER_OUTCOMES
     return db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
-        models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
     )
 
 
@@ -1439,14 +1440,18 @@ def unlink_duplicate_group_members_api(
     """
     from app.duplicate_group_service import unlink_duplicate_members
     admin_id = str(admin.id) if getattr(admin, "id", None) else None
-    success = unlink_duplicate_members(
+    result = unlink_duplicate_members(
         db, group_id, payload.requestId1, payload.requestId2, admin_id=admin_id
     )
-    if not success:
+    if not result:
         raise HTTPException(status_code=404, detail="Could not unlink duplicate group members")
 
     db.commit()
-    return {"status": "unlinked"}
+    return {
+        "status": "unlinked",
+        "unlinkedIds": result.get("unlinkedIds") or [payload.requestId2],
+        "newGroupId": result.get("newGroupId"),
+    }
 
 
 @router.post("/api/duplicate-groups/{group_id}/resolve")
@@ -1508,6 +1513,7 @@ def resolve_group_add_api(
             admin_id=admin_id,
             partner_id=group.partner_id,
             admin_note=payload.adminNote,
+            source_request_id=payload.sourceRequestId,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1622,6 +1628,7 @@ def resolve_group_update_api(
             final_values=payload.finalValues,
             admin_id=admin_id,
             admin_note=payload.adminNote,
+            source_request_id=payload.sourceRequestId,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

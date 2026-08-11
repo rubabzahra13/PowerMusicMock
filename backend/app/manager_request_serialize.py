@@ -484,6 +484,71 @@ def requests_to_api_dicts(db: Session, requests: List[models.ManagerRequest]) ->
     return results
 
 
+def _manager_source_for_directory_person(
+    req: models.ManagerRequest,
+    *,
+    db: Optional[Session],
+    related_rows: Optional[List[models.ManagerRequest]],
+    group_by_directory_id: Optional[Dict[str, models.DuplicateGroup]] = None,
+) -> Optional[models.ManagerRequest]:
+    """For merge-created Directory rows missing manager, recover from the source request.
+
+    Preference: linked group's representative / newest member, then related
+    GroupResolved rows that still carry manager attribution.
+    """
+    from app.intake_persons import get_admin_submitted_by, get_submitted_by_attribution
+
+    def _has_manager(row: models.ManagerRequest) -> bool:
+        if row.manager_id or getattr(row, "_manager_user", None):
+            return True
+        if any(get_submitted_by_attribution(row).values()):
+            return True
+        if any(get_admin_submitted_by(row).values()):
+            return True
+        return False
+
+    # 1) Linked duplicate group (set on merge resolve).
+    group = None
+    if group_by_directory_id is not None:
+        group = group_by_directory_id.get(req.id)
+    elif db is not None:
+        group = (
+            db.query(models.DuplicateGroup)
+            .filter(models.DuplicateGroup.directory_person_id == req.id)
+            .first()
+        )
+    if group is not None and db is not None:
+        from app.duplicate_group_service import _current_request_member, get_group_members
+
+        members = get_group_members(db, group.id)
+        if members:
+            hydrate_request_users(db, members)
+            source = _current_request_member(
+                members,
+                representative_request_id=group.representative_request_id,
+            )
+            if source is not None and _has_manager(source):
+                return source
+            for member in sorted(
+                members,
+                key=lambda m: m.received_at or datetime.min,
+                reverse=True,
+            ):
+                if _has_manager(member):
+                    return member
+
+    # 2) Related history rows (same email), prefer GroupResolved with manager.
+    candidates = [r for r in (related_rows or []) if r.id != req.id]
+    candidates.sort(key=lambda m: m.received_at or datetime.min, reverse=True)
+    for row in candidates:
+        if (row.outcome or "") == "GroupResolved" and _has_manager(row):
+            return row
+    for row in candidates:
+        if _has_manager(row):
+            return row
+    return None
+
+
 def directory_person_to_api_dict(
     req: models.ManagerRequest,
     *,
@@ -491,6 +556,7 @@ def directory_person_to_api_dict(
     admin_user: Optional[models.PowermusicUser] = None,
     db: Optional[Session] = None,
     related_rows: Optional[List[models.ManagerRequest]] = None,
+    group_by_directory_id: Optional[Dict[str, models.DuplicateGroup]] = None,
 ) -> Dict[str, Any]:
     if manager_user is None:
         manager_user = getattr(req, "_manager_user", None)
@@ -517,6 +583,37 @@ def directory_person_to_api_dict(
                 f"{manager_fields['firstName']} {manager_fields['lastName']}".strip()
                 or manager_name
             )
+
+    # Previously merged Directory rows often lack manager fields — recover from
+    # the current/representative request of the linked group.
+    if not (manager_name or "").strip() and not (manager_fields.get("email") or "").strip():
+        source = _manager_source_for_directory_person(
+            req,
+            db=db,
+            related_rows=related_rows,
+            group_by_directory_id=group_by_directory_id,
+        )
+        if source is not None:
+            source_user = getattr(source, "_manager_user", None)
+            manager_fields = resolve_manager_fields(source, manager_user=source_user)
+            manager_name = resolve_manager_name(source, manager_user=source_user)
+            if not source.manager_id:
+                from app.intake_persons import get_submitted_by_attribution
+
+                attributed = get_submitted_by_attribution(source)
+                if any(attributed.values()):
+                    manager_fields = {
+                        "firstName": attributed["firstName"] or manager_fields.get("firstName") or "",
+                        "lastName": attributed["lastName"] or manager_fields.get("lastName") or "",
+                        "email": attributed["email"] or manager_fields.get("email") or "",
+                        "club": attributed["club"] or manager_fields.get("club") or "",
+                    }
+                    manager_name = (
+                        f"{manager_fields['firstName']} {manager_fields['lastName']}".strip()
+                        or manager_name
+                    )
+            if not manager_notes and source.manager_notes:
+                manager_notes, _ = _split_manager_and_automated_notes(source.manager_notes)
 
     history_source = related_rows if related_rows is not None else [req]
     request_history = _build_directory_request_history(db, history_source)
@@ -745,6 +842,18 @@ def directory_rows_to_api_dicts(db: Session, rows: List[models.ManagerRequest]) 
             if key:
                 related_by_email[key].append(row)
 
+    directory_ids = [req.id for req in items]
+    group_by_directory_id: Dict[str, models.DuplicateGroup] = {}
+    if directory_ids:
+        groups = (
+            db.query(models.DuplicateGroup)
+            .filter(models.DuplicateGroup.directory_person_id.in_(directory_ids))
+            .all()
+        )
+        group_by_directory_id = {
+            g.directory_person_id: g for g in groups if g.directory_person_id
+        }
+
     return [
         directory_person_to_api_dict(
             req,
@@ -753,6 +862,7 @@ def directory_rows_to_api_dicts(db: Session, rows: List[models.ManagerRequest]) 
                 (req.person_email or "").strip().lower(),
                 [req],
             ),
+            group_by_directory_id=group_by_directory_id,
         )
         for req in items
     ]

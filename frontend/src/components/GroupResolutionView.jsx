@@ -16,6 +16,7 @@ import {
   resolveGroupKeepExisting,
   unlinkGroupMember,
 } from '../utils/duplicateGroupApi';
+import { matchClassification } from '../utils/duplicateMatch';
 
 /* ─── helpers ────────────────────────────────────────────────────────────── */
 
@@ -137,7 +138,7 @@ function SectionCard({
 function classificationTag(classification) {
   if (classification === 'confirmed_duplicate') return { variant: 'duplicate-confirmed', label: 'Duplicate' };
   if (classification === 'potential_duplicate') return { variant: 'duplicate-potential', label: 'Potential Duplicate' };
-  if (classification === 'already_exists' || classification === 'already_exists_conflict') return { variant: 'already-exists', label: 'Already Exists in Directory' };
+  if (classification === 'already_exists' || classification === 'already_exists_conflict') return { variant: 'already-exists', label: 'Exists in Directory' };
   return { variant: 'neutral', label: classification };
 }
 
@@ -278,6 +279,15 @@ export default function GroupResolutionView({
     }
   };
 
+  /* Current request = newest active member (the card Merge is clicked on). */
+  const currentSourceRequestId = (() => {
+    const active = members.filter((m) => !sessionUnlinkedIds.includes(m.id));
+    const current = [...active].sort(
+      (a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0),
+    )[0];
+    return current?.id || group.representativeRequestId || repMember?.id || null;
+  })();
+
   /* ── resolve & add (Case A) ── */
   const handleResolveAdd = async (values = form) => {
     if (!values.firstName.trim() || !values.lastName.trim() || submitting) return;
@@ -291,6 +301,7 @@ export default function GroupResolutionView({
           location: (values.location || '').trim(),
         },
         adminNote: adminNote.trim() || null,
+        sourceRequestId: currentSourceRequestId,
       });
       closeConfirmModal();
       closeMergePage();
@@ -317,6 +328,7 @@ export default function GroupResolutionView({
           location: (values.location || '').trim(),
         },
         adminNote: adminNote.trim() || null,
+        sourceRequestId: currentSourceRequestId,
       });
       closeConfirmModal();
       closeMergePage();
@@ -347,29 +359,50 @@ export default function GroupResolutionView({
 
   /* ── unlink member ── */
   const handleUnlink = async (memberId) => {
-    // requestId2 is the one removed; pick any other active member as the pair peer.
-    const peer =
-      members.find((m) => m.id !== memberId && !sessionUnlinkedIds.includes(m.id))
-      || members.find((m) => m.id !== memberId);
+    // requestId2 is removed. Prefer current request as peer for older rows; when
+    // unlinking the current request, prefer a non-confirmed (potential) sibling.
+    const active = members.filter((m) => !sessionUnlinkedIds.includes(m.id));
+    const current = [...active].sort(
+      (a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0),
+    )[0] || null;
+    let peer = null;
+    if (current && memberId === current.id) {
+      peer = active.find(
+        (m) =>
+          m.id !== memberId
+          && matchClassification(current.person, m.person) !== 'confirmed_duplicate',
+      );
+    } else if (current && current.id !== memberId) {
+      peer = current;
+    }
+    if (!peer) {
+      peer =
+        active.find((m) => m.id !== memberId)
+        || members.find((m) => m.id !== memberId);
+    }
     const requestId1 = peer?.id || group.representativeRequestId || repMember?.id;
     if (!requestId1 || requestId1 === memberId) {
       onResolved('error', 'Need another request in the group to unlink against.');
       return;
     }
     try {
-      await unlinkGroupMember(group.id, {
+      const result = await unlinkGroupMember(group.id, {
         requestId1,
         requestId2: memberId,
       });
+      const cohortIds = Array.isArray(result?.unlinkedIds) && result.unlinkedIds.length > 0
+        ? result.unlinkedIds
+        : [memberId];
+      const cohortSet = new Set(cohortIds);
 
       // Backend also ungroups the last peer when a non-directory group drops to 1.
       const remainingActive = members.filter(
-        (m) => m.id !== memberId && !sessionUnlinkedIds.includes(m.id),
+        (m) => !cohortSet.has(m.id) && !sessionUnlinkedIds.includes(m.id),
       );
       const groupDissolves = remainingActive.length <= 1 && !hasDirectory;
       const newlyUnlinked = groupDissolves
-        ? [memberId, ...remainingActive.map((m) => m.id)]
-        : [memberId];
+        ? [...cohortIds, ...remainingActive.map((m) => m.id)]
+        : cohortIds;
 
       setSessionUnlinkedIds((prev) => [...new Set([...prev, ...newlyUnlinked])]);
       // Stay on this page — unlinked rows become current requests for this visit.
@@ -651,6 +684,16 @@ export default function GroupResolutionView({
                     const role = isLatest
                       ? { variant: 'new-person', label: 'Current request' }
                       : { variant: 'neutral', label: 'Older' };
+                    // Unlink only on older rows that are potential matches vs current.
+                    const vsCurrent = currentRequest && member.id !== currentRequest.id
+                      ? matchClassification(currentRequest.person, member.person)
+                      : null;
+                    const showUnlink = (
+                      !unlinked
+                      && !isLatest
+                      && activeMembers.length > 1
+                      && vsCurrent === 'potential_duplicate'
+                    );
                     const {
                       managerName,
                       managerEmail,
@@ -678,7 +721,7 @@ export default function GroupResolutionView({
                             </div>
                             {!unlinked ? (
                               <div className="flex shrink-0 items-center gap-2">
-                                {activeMembers.length > 1 && group.classification !== 'confirmed_duplicate' ? (
+                                {showUnlink ? (
                                   <button
                                     type="button"
                                     onClick={() => setUnlinkTargetId(member.id)}
@@ -1115,9 +1158,31 @@ export default function GroupResolutionView({
           </>
         }
       >
-        <p className="text-sm text-[var(--color-text-secondary)]">
-          This will unlink this request from the group. It stays on this page as a current request for this visit so you can mark it handled here.
-        </p>
+        {(() => {
+          const target = members.find((m) => m.id === unlinkTargetId);
+          const confirmedWithTarget = target
+            ? activeMembers.filter(
+              (m) =>
+                m.id !== target.id
+                && m.id !== currentRequest?.id
+                && matchClassification(target.person, m.person) === 'confirmed_duplicate',
+            )
+            : [];
+          return (
+            <div className="space-y-3 text-sm text-[var(--color-text-secondary)]">
+              <p>
+                This will unlink this request from the group. It stays on this page as a current request for this visit so you can mark it handled here.
+              </p>
+              {confirmedWithTarget.length > 0 ? (
+                <p>
+                  {confirmedWithTarget.length === 1
+                    ? 'Its confirmed duplicate will also be unlinked and kept together in a separate group.'
+                    : `Its ${confirmedWithTarget.length} confirmed duplicates will also be unlinked and kept together in a separate group.`}
+                </p>
+              ) : null}
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* ── Delete request confirmation (same as New Requests) ── */}

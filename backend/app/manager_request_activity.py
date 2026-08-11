@@ -44,7 +44,7 @@ def events_for_request(req: models.ManagerRequest) -> List[dict]:
                 "id": f"{req.id}:duplicate",
                 "timestamp": req.received_at,
                 "type": "tag_applied",
-                "description": "Already Exists in Directory tag applied",
+                "description": "Exists in Directory tag applied",
                 "linkedRequestId": req.id,
             }
         )

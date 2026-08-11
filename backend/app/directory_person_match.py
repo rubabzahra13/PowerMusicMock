@@ -13,6 +13,10 @@ from app.intake_persons import bootstrap_intake_persons, get_auto_mail_snapshot,
 from app.manager_request_tags import TAG_ALREADY_EXISTS
 from app.person_match import person_from_model, same_person
 
+# Only true Directory ledger outcomes. GroupResolved (and similar) are
+# historical merge inputs and must never appear as Directory people.
+DIRECTORY_LEDGER_OUTCOMES = ("Added", "Removed")
+
 
 def handled_directory_rows(
     db: Session,
@@ -22,7 +26,7 @@ def handled_directory_rows(
 ) -> List[models.ManagerRequest]:
     query = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
-        models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
     )
     if not include_archived:
         query = query.filter(models.ManagerRequest.archived_at.is_(None))
@@ -109,7 +113,7 @@ def _roster_sql_candidates(
 
     query = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
-        models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
         models.ManagerRequest.archived_at.is_(None),
         or_(*clauses),
     )
@@ -141,7 +145,7 @@ def _probe_handled_rows(
     if email:
         query = db.query(models.ManagerRequest).filter(
             models.ManagerRequest.status == "handled",
-            models.ManagerRequest.outcome.isnot(None),
+            models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
             models.ManagerRequest.archived_at.is_(None),
             func.lower(models.ManagerRequest.person_email) == email,
         )
@@ -270,7 +274,7 @@ def directory_ledger_rows(
     """Active Directory ledger: latest non-archived handled state per person (Added or Removed)."""
     query = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
-        models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
         models.ManagerRequest.archived_at.is_(None),
     )
     if partner_id:
@@ -288,7 +292,7 @@ def removed_snapshot_rows(
     """People currently off the roster (latest handled state is Removed)."""
     query = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
-        models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
         models.ManagerRequest.archived_at.is_(None),
     )
     if partner_id:
@@ -306,7 +310,7 @@ def archived_snapshot_rows(
     """People currently archived from the directory."""
     query = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
-        models.ManagerRequest.outcome.isnot(None),
+        models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
         models.ManagerRequest.archived_at.isnot(None),
     )
     if partner_id:

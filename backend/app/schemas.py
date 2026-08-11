@@ -640,10 +640,14 @@ class ResolveAndAddIn(BaseModel):
     finalValues must contain all four identity fields; the backend validates them
     before creating the Directory record. The frontend pre-fills from the latest
     request but the admin may have edited any field — never assume "latest wins".
+
+    sourceRequestId is the current request the admin clicked Merge on — its manager
+    attribution is copied onto the Directory record.
     """
 
     finalValues: PersonInfo
     adminNote: Optional[str] = Field(default=None, max_length=5000)
+    sourceRequestId: Optional[str] = None
 
 
 class ResolveAndUpdateIn(BaseModel):
@@ -651,11 +655,15 @@ class ResolveAndUpdateIn(BaseModel):
 
     directoryPersonId must match group.directory_person_id. The endpoint rejects the
     request if the group has no linked Directory person rather than silently creating one.
+
+    sourceRequestId is the current request the admin clicked Merge on — its manager
+    attribution is copied onto the Directory record.
     """
 
     directoryPersonId: str
     finalValues: PersonInfo
     adminNote: Optional[str] = Field(default=None, max_length=5000)
+    sourceRequestId: Optional[str] = None
 
 
 class ResolveAndUpdatePreviewIn(BaseModel):

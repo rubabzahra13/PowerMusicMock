@@ -565,14 +565,15 @@ export default function Requests() {
       && statusDeepLink !== 'Not removed'
       && statusDeepLink !== 'Already exists'
       && statusDeepLink !== 'Already Exists in Directory'
+      && statusDeepLink !== 'Exists in Directory'
       && statusDeepLink !== 'Confirmed Duplicate'
       && statusDeepLink !== 'Potential Duplicate'
     ) return;
     setFilterStatus(
       statusDeepLink === 'New' || statusDeepLink === 'Not added/removed'
         ? 'Not added'
-        : statusDeepLink === 'Already exists'
-          ? 'Already Exists in Directory'
+        : statusDeepLink === 'Already exists' || statusDeepLink === 'Already Exists in Directory'
+          ? 'Exists in Directory'
           : statusDeepLink,
     );
     setFilterOpen(true);
@@ -1282,7 +1283,7 @@ export default function Requests() {
         const status = statusTags.length > 0 ? null : requestStatusTag(row);
         if (statusTags.length > 0) {
           return (
-            <span className="flex max-w-full flex-col items-center justify-center gap-1">
+            <span className="flex max-w-full flex-col items-center justify-center gap-1 text-center">
               {statusTags.map((tag) => (
                 <Tag
                   key={tag.label}
@@ -1304,7 +1305,7 @@ export default function Requests() {
           );
         }
         return (
-          <div className="flex max-w-full justify-center">
+          <div className="flex max-w-full justify-center text-center">
             <Tag
               variant={status.variant}
               label={status.label}
@@ -1483,7 +1484,7 @@ export default function Requests() {
               { value: 'All', label: 'All' },
               { value: 'Not added', label: 'Not added' },
               { value: 'Not removed', label: 'Not removed' },
-              { value: 'Already Exists in Directory', label: 'Already Exists in Directory' },
+              { value: 'Exists in Directory', label: 'Exists in Directory' },
               { value: 'Confirmed Duplicate', label: 'Confirmed Duplicate' },
               { value: 'Potential Duplicate', label: 'Potential Duplicate' },
             ]

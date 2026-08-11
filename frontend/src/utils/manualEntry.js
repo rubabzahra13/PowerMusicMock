@@ -130,23 +130,24 @@ export function getManagerColumnContent(request) {
   };
 }
 
-/** Directory ledger rows — empty manager looks like auto-mail with no partner. */
+/** Directory ledger rows — empty manager is not an auto-email request. */
 export function getDirectoryManagerColumnContent(row) {
   const name = (row?.managerName || '').trim();
   const email = (row?.managerEmail || '').trim();
   const club = (row?.club || '').trim();
   if (!name && !email) {
     return {
-      primary: AWAITING_MANAGER_LABEL,
-      secondary: AWAITING_MANAGER_HINT,
+      primary: 'No manager details',
+      secondary: '',
       tertiary: '',
       muted: true,
+      placeholder: true,
     };
   }
   return {
-    primary: name || AWAITING_MANAGER_LABEL,
-    secondary: email || 'No email',
-    tertiary: club || 'No club',
+    primary: name || NO_MANAGER_NAME,
+    secondary: email || NO_MANAGER_EMAIL,
+    tertiary: club || NO_MANAGER_LOCATION,
     muted: !name,
   };
 }

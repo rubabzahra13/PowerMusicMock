@@ -256,3 +256,31 @@ class TestActiveRoster:
         assert removed.id in ledger_by_id
         assert ledger_by_id[removed.id].outcome == "Removed"
         assert prior_added.id not in ledger_by_id
+
+    def test_directory_ledger_excludes_group_resolved_merge_history(self, db: Session):
+        """Merged historical snapshots must not become Directory people."""
+        suffix = uuid.uuid4().hex[:8]
+        hist_a = _handled_row(
+            db,
+            _person(firstName="John", lastName="Smith", email=f"a-{suffix}@gmail.com", location="Manchester"),
+            outcome="GroupResolved",
+            action="Add",
+        )
+        hist_b = _handled_row(
+            db,
+            _person(firstName="John", lastName="Smith", email=f"b-{suffix}@gmail.com", location="London"),
+            outcome="GroupResolved",
+            action="Add",
+        )
+        final = _handled_row(
+            db,
+            _person(firstName="John", lastName="Smith", email=f"final-{suffix}@gmail.com", location="Manchester"),
+            outcome="Added",
+            action="Add",
+        )
+        db.flush()
+
+        ledger_by_id = {row.id: row for row in directory_ledger_rows(db, limit=500)}
+        assert final.id in ledger_by_id
+        assert hist_a.id not in ledger_by_id
+        assert hist_b.id not in ledger_by_id

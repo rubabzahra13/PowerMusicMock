@@ -28,12 +28,13 @@ export const fetchGroupDetail = (groupId) =>
  * POST /api/duplicate-groups/{groupId}/resolve-add
  * Case A — no existing Directory match. Creates a new Directory row.
  */
-export const resolveGroupAdd = (groupId, { finalValues, adminNote }) =>
+export const resolveGroupAdd = (groupId, { finalValues, adminNote, sourceRequestId }) =>
   groupRequest(`/api/duplicate-groups/${groupId}/resolve-add`, {
     method: 'POST',
     body: JSON.stringify({
       finalValues,
       adminNote: adminNote || null,
+      sourceRequestId: sourceRequestId || null,
     }),
   });
 
@@ -51,13 +52,14 @@ export const resolveGroupUpdatePreview = (groupId, { directoryPersonId, finalVal
  * POST /api/duplicate-groups/{groupId}/resolve-update
  * Case B — updates existing Directory record in-place.
  */
-export const resolveGroupUpdate = (groupId, { directoryPersonId, finalValues, adminNote }) =>
+export const resolveGroupUpdate = (groupId, { directoryPersonId, finalValues, adminNote, sourceRequestId }) =>
   groupRequest(`/api/duplicate-groups/${groupId}/resolve-update`, {
     method: 'POST',
     body: JSON.stringify({
       directoryPersonId,
       finalValues,
       adminNote: adminNote || null,
+      sourceRequestId: sourceRequestId || null,
     }),
   });
 

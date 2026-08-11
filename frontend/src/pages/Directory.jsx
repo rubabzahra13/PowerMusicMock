@@ -1219,7 +1219,7 @@ export default function UserLedger() {
       render: (_, row) => {
         const { email } = formatPersonFields(row);
         return (
-          <TruncateCell className="text-sm font-mono text-[var(--color-text-secondary)]" title={email}>
+          <TruncateCell className="text-sm font-semibold leading-5 text-[var(--color-text-primary)]" title={email}>
             {email}
           </TruncateCell>
         );
@@ -1234,7 +1234,7 @@ export default function UserLedger() {
       render: (_, row) => {
         const { location } = formatPersonFields(row);
         return (
-          <TruncateCell className="text-sm text-[var(--color-text-muted)]" title={location}>
+          <TruncateCell className="text-sm font-normal leading-5 text-[var(--color-text-primary)]" title={location}>
             {location}
           </TruncateCell>
         );

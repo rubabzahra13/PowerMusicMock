@@ -5,6 +5,7 @@ export default function Tag({
   prefix: prefixOverride,
   wide = false,
   fit = false,
+  wrap = false,
 }) {
   let bgClass = '';
   let textClass = '';
@@ -99,17 +100,27 @@ export default function Tag({
       ? 'min-w-0 max-w-full justify-center px-2'
       : '';
 
+  const sizeClass = wrap
+    ? 'min-h-5 h-auto w-[8.75rem] max-w-full justify-center rounded-lg px-2.5 py-1.5 text-[11px] leading-snug whitespace-normal text-center'
+    : fit
+      ? 'h-5 max-w-full min-w-0 rounded-full px-1.5 text-[11px] leading-none whitespace-nowrap'
+      : `h-5 shrink-0 rounded-full px-2 py-0 text-xs leading-none ${equalSentViaWidth}`;
+
   return (
     <span
-      title={`${prefix || ''}${label}`}
-      className={`inline-flex items-center rounded-full font-semibold select-none ${
-        fit
-          ? 'h-5 max-w-full min-w-0 px-1.5 text-[11px] leading-none whitespace-nowrap'
-          : `h-5 shrink-0 px-2 py-0 text-xs leading-none ${equalSentViaWidth}`
-      } ${bgClass} ${textClass} ${extraClass}`}
-      style={fit ? undefined : { fontSize: 'var(--font-size-xs)' }}
+      title={`${prefix || ''}${String(label).replace(/\n/g, ' ')}`}
+      className={`inline-flex items-center font-semibold select-none ${sizeClass} ${bgClass} ${textClass} ${extraClass}`}
+      style={fit || wrap ? undefined : { fontSize: 'var(--font-size-xs)' }}
     >
-      <span className={fit ? 'truncate' : undefined}>
+      <span
+        className={
+          wrap
+            ? 'whitespace-pre-line text-center'
+            : fit
+              ? 'truncate'
+              : undefined
+        }
+      >
         {prefix}
         {label}
       </span>

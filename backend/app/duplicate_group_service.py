@@ -459,11 +459,14 @@ def unlink_duplicate_members(
     request_id_1: str,
     request_id_2: str,
     admin_id: Optional[str] = None,
-) -> bool:
-    """Persist admin decision to unlink request_id_2 from its group.
+) -> Optional[dict]:
+    """Unlink request_id_2 from its group (false-positive vs request_id_1).
 
-    Stores the dismissed pair in dismissed_duplicate_matches so the engine
-    never re-groups these two requests again.
+    Confirmed-duplicate siblings of request_id_2 leave with it and are placed
+    in a new active group together. Potential-only siblings stay in the original
+    group. Persists dismissed pairs / group dismissals so they do not rejoin.
+
+    Returns ``{"unlinkedIds": [...], "newGroupId": str|None}`` or None on failure.
 
     NOTE: Does NOT call db.commit() — the calling router is responsible for
     committing so this function is consistent with all other service functions.
@@ -474,7 +477,7 @@ def unlink_duplicate_members(
         .first()
     )
     if not group:
-        return False
+        return None
 
     req1 = (
         db.query(models.ManagerRequest)
@@ -488,43 +491,75 @@ def unlink_duplicate_members(
     )
 
     if not req1 or not req2:
-        return False
+        return None
 
-    # Persist the dismissed pair (bidirectional guard in are_requests_dismissed).
     now = datetime.now(timezone.utc)
-    dismissed = models.DismissedDuplicateMatch(
-        id=f"dism-{uuid.uuid4().hex[:12]}",
-        request_id_1=request_id_1,
-        request_id_2=request_id_2,
-        dismissed_by_admin_id=(
-            admin_id if admin_id and admin_id != "dev-bypass" else None
-        ),
-        created_at=now,
-    )
-    db.add(dismissed)
-    
-    # NEW: Persist the explicit group-level dismissal so it never rejoins this group.
-    group_dismissed = models.DismissedGroupMatch(
-        id=f"dism-grp-{uuid.uuid4().hex[:12]}",
-        request_id=request_id_2,
-        group_id=group_id,
-        dismissed_by_admin_id=(
-            admin_id if admin_id and admin_id != "dev-bypass" else None
-        ),
-        created_at=now,
-    )
-    db.add(group_dismissed)
+    admin_uuid = admin_id if admin_id and admin_id != "dev-bypass" else None
 
-    # Remove req2 from the group and scrub its tags.
-    req2.duplicate_group_id = None
-    _clear_duplicate_tags(req2)
-    
-    # Critical fix: flush the unlinked state and the new dismissed rule
-    # so that subsequent database queries in the recalculation phase
-    # accurately recognize that the relationship is dissolved!
+    # Cohort = target + any confirmed-duplicate siblings still in this group.
+    # Those leave together as their own duplicate cluster.
+    cohort: List[models.ManagerRequest] = [req2]
+    siblings = (
+        db.query(models.ManagerRequest)
+        .filter(
+            models.ManagerRequest.duplicate_group_id == group.id,
+            models.ManagerRequest.id != req2.id,
+            models.ManagerRequest.id != req1.id,
+        )
+        .all()
+    )
+    req2_person = person_from_model(req2)
+    for sibling in siblings:
+        classification, _ = match_classification(req2_person, person_from_model(sibling))
+        if classification == "confirmed_duplicate":
+            cohort.append(sibling)
+
+    cohort_ids = {m.id for m in cohort}
+
+    for member in cohort:
+        if not are_requests_dismissed(db, request_id_1, member.id):
+            db.add(
+                models.DismissedDuplicateMatch(
+                    id=f"dism-{uuid.uuid4().hex[:12]}",
+                    request_id_1=request_id_1,
+                    request_id_2=member.id,
+                    dismissed_by_admin_id=admin_uuid,
+                    created_at=now,
+                )
+            )
+        db.add(
+            models.DismissedGroupMatch(
+                id=f"dism-grp-{uuid.uuid4().hex[:12]}",
+                request_id=member.id,
+                group_id=group_id,
+                dismissed_by_admin_id=admin_uuid,
+                created_at=now,
+            )
+        )
+        member.duplicate_group_id = None
+        _clear_duplicate_tags(member)
+
     db.flush()
 
-    # Re-evaluate remaining members.
+    new_group_id = None
+    if len(cohort) >= 2:
+        new_group = models.DuplicateGroup(
+            id=_new_group_id(),
+            partner_id=group.partner_id,
+            classification="confirmed_duplicate",
+            status="active",
+            created_at=now,
+            directory_person_id=None,
+            representative_request_id=None,
+        )
+        db.add(new_group)
+        db.flush()
+        for member in cohort:
+            member.duplicate_group_id = new_group.id
+        _sync_group_representative_and_tags(db, new_group, member_requests=cohort)
+        new_group_id = new_group.id
+
+    # Re-evaluate remaining members of the original group.
     remaining = (
         db.query(models.ManagerRequest)
         .filter(models.ManagerRequest.duplicate_group_id == group.id)
@@ -540,24 +575,32 @@ def unlink_duplicate_members(
         group.status = "dismissed"
         group.resolved_at = now
     else:
-        # Recalculate group classification
         dir_match = False
         peer_match_class = None
 
         if group.directory_person_id:
-            dir_person = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == group.directory_person_id).first()
+            dir_person = (
+                db.query(models.ManagerRequest)
+                .filter(models.ManagerRequest.id == group.directory_person_id)
+                .first()
+            )
             if dir_person:
                 for m in remaining:
                     if not are_requests_dismissed(db, m.id, dir_person.id):
-                        c, _ = match_classification(person_from_model(m), person_from_model(dir_person))
+                        c, _ = match_classification(
+                            person_from_model(m), person_from_model(dir_person)
+                        )
                         if c:
                             dir_match = True
                             break
-        
+
         for i in range(len(remaining)):
-            for j in range(i+1, len(remaining)):
+            for j in range(i + 1, len(remaining)):
                 if not are_requests_dismissed(db, remaining[i].id, remaining[j].id):
-                    c, _ = match_classification(person_from_model(remaining[i]), person_from_model(remaining[j]))
+                    c, _ = match_classification(
+                        person_from_model(remaining[i]),
+                        person_from_model(remaining[j]),
+                    )
                     if c:
                         peer_match_class = _best_classification(peer_match_class, c)
 
@@ -571,7 +614,6 @@ def unlink_duplicate_members(
             new_class = None
 
         if not new_class:
-            # Dissolve group! No match remains.
             for m in remaining:
                 m.duplicate_group_id = None
                 _clear_duplicate_tags(m)
@@ -584,7 +626,10 @@ def unlink_duplicate_members(
             _sync_group_representative_and_tags(db, group, member_requests=remaining)
 
     db.flush()
-    return True
+    return {
+        "unlinkedIds": list(cohort_ids),
+        "newGroupId": new_group_id,
+    }
 
 
 def get_dismiss_impact(
@@ -802,8 +847,8 @@ def get_active_groups(
 # ---------------------------------------------------------------------------
 
 # Outcome written to original group member requests when a group is resolved.
-# Using "GroupResolved" (not "Added") so these rows are excluded from all
-# Directory views (which filter outcome == "Added" or "Removed").
+# Must NOT be "Added"/"Removed" — Directory ledger only surfaces those outcomes.
+# Historical merge inputs stay GroupResolved so they never become Directory people.
 OUTCOME_GROUP_RESOLVED = "GroupResolved"
 
 
@@ -816,6 +861,81 @@ def _validate_final_values(final_values: schemas.PersonInfo) -> None:
         errors.append("lastName")
     if errors:
         raise ValueError(f"finalValues missing required field(s): {', '.join(errors)}")
+
+
+def _current_request_member(
+    members: List[models.ManagerRequest],
+    *,
+    source_request_id: Optional[str] = None,
+    representative_request_id: Optional[str] = None,
+) -> Optional[models.ManagerRequest]:
+    """The current request Merge was clicked on (explicit id → rep → newest)."""
+    if not members:
+        return None
+    by_id = {m.id: m for m in members}
+    if source_request_id and source_request_id in by_id:
+        return by_id[source_request_id]
+    if representative_request_id and representative_request_id in by_id:
+        return by_id[representative_request_id]
+    return max(
+        members,
+        key=lambda m: m.received_at or datetime.min.replace(tzinfo=timezone.utc),
+    )
+
+
+def _apply_merge_manager_provenance(
+    dir_row: models.ManagerRequest,
+    source: Optional[models.ManagerRequest],
+    *,
+    final_values: schemas.PersonInfo,
+) -> None:
+    """Copy manager attribution onto the single Directory row created by merge.
+
+    Without this, Directory falls back to "Auto Email Request" because the merge
+    row has no manager_id / submittedBy.
+    """
+    from app.intake_persons import get_admin_submitted_by, get_submitted_by_attribution
+    from app.manager_request_tags import (
+        TAG_PARTNER_REQUEST,
+        TAG_SENT_BY_ADMIN,
+        TAG_VERIFIED,
+        has_tag,
+    )
+    from app.person_compare import person_to_mapping
+
+    intake: dict = {
+        "admin": person_to_mapping(final_values),
+    }
+    tags = [TAG_VERIFIED]
+
+    if source is not None:
+        dir_row.manager_id = source.manager_id
+        # Keep manager notes from the source request (historical inputs stay on members).
+        if source.manager_notes:
+            dir_row.manager_notes = source.manager_notes
+
+        attributed = get_submitted_by_attribution(source)
+        if any(attributed.values()):
+            intake["submittedBy"] = attributed
+
+        admin_submitted = get_admin_submitted_by(source)
+        if any(admin_submitted.values()):
+            intake["adminSubmittedBy"] = admin_submitted
+
+        source_tags = source.tags or []
+        if has_tag(source_tags, TAG_PARTNER_REQUEST) or source.manager_id:
+            tags.append(TAG_PARTNER_REQUEST)
+        if has_tag(source_tags, TAG_SENT_BY_ADMIN) or (
+            not source.manager_id and any(attributed.values())
+        ):
+            if TAG_SENT_BY_ADMIN not in tags:
+                tags.append(TAG_SENT_BY_ADMIN)
+    else:
+        # Admin merge with no manager on any member — treat as admin form entry.
+        tags.extend([TAG_PARTNER_REQUEST, TAG_SENT_BY_ADMIN])
+
+    dir_row.intake_persons = intake
+    dir_row.tags = tags
 
 
 def _mark_group_members_resolved(
@@ -911,6 +1031,7 @@ def resolve_group_add(
     admin_id: Optional[str],
     partner_id: Optional[str] = None,
     admin_note: Optional[str] = None,
+    source_request_id: Optional[str] = None,
 ) -> models.ManagerRequest:
     """Create ONE new Directory record from final_values, resolve the group.
 
@@ -930,8 +1051,15 @@ def resolve_group_add(
 
     # Allocate an id for the new Directory row.
     from app.request_display import allocate_request_ids
-    from app.manager_request_tags import TAG_VERIFIED, TAG_PARTNER_REQUEST
     (new_id,) = allocate_request_ids(db, 1)
+
+    members = get_group_members(db, group.id)
+    # Manager on Directory = manager of the current request Merge was clicked on.
+    manager_source = _current_request_member(
+        members,
+        source_request_id=source_request_id,
+        representative_request_id=group.representative_request_id,
+    )
 
     # Create the Directory row.  We set status="handled" and outcome="Added"
     # directly so it appears as a Directory entry.  This is a fresh row —
@@ -947,17 +1075,11 @@ def resolve_group_add(
         person_last_name=(final_values.lastName or "").strip(),
         person_email=(final_values.email or "").strip(),
         person_location=(final_values.location or "").strip(),
-        intake_persons={
-            "admin": {
-                "firstName": (final_values.firstName or "").strip(),
-                "lastName": (final_values.lastName or "").strip(),
-                "email": (final_values.email or "").strip(),
-                "location": (final_values.location or "").strip(),
-            }
-        },
-        tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST],
+        intake_persons={},
+        tags=[],
         partner_id=partner_id or group.partner_id,
     )
+    _apply_merge_manager_provenance(dir_row, manager_source, final_values=final_values)
     if admin_id and admin_id != "dev-bypass":
         try:
             from uuid import UUID
@@ -1000,6 +1122,7 @@ def resolve_group_update(
     final_values: schemas.PersonInfo,
     admin_id: Optional[str],
     admin_note: Optional[str] = None,
+    source_request_id: Optional[str] = None,
 ) -> models.ManagerRequest:
     """Update the existing Directory record in-place with final_values; resolve group.
 
@@ -1029,19 +1152,16 @@ def resolve_group_update(
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
 
-    # Also keep the intake_persons JSONB snapshot in sync.
-    if directory_person.intake_persons and isinstance(directory_person.intake_persons, dict):
-        updated = dict(directory_person.intake_persons)
-        new_snap = {
-            "firstName": directory_person.person_first_name,
-            "lastName": directory_person.person_last_name,
-            "email": directory_person.person_email,
-            "location": directory_person.person_location,
-        }
-        for key in ("partner", "autoMail", "admin"):
-            if key in updated and isinstance(updated[key], dict):
-                updated[key] = {**updated[key], **new_snap}
-        directory_person.intake_persons = updated
+    # Manager on Directory = manager of the current request Merge was clicked on.
+    members = get_group_members(db, group.id)
+    manager_source = _current_request_member(
+        members,
+        source_request_id=source_request_id,
+        representative_request_id=group.representative_request_id,
+    )
+    _apply_merge_manager_provenance(
+        directory_person, manager_source, final_values=final_values
+    )
 
     if admin_note:
         directory_person.admin_notes = admin_note
