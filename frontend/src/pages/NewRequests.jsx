@@ -7,7 +7,7 @@ import { formatTimestampSplit, isTodayInTimeZone, isYesterdayInTimeZone } from '
 import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, HoverTip } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerColumnContent, getManagerDisplayName, isManualEntry, isAdminEntry } from '../utils/manualEntry';
-import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, dismissRequest, bulkDismissRequests, applyNewRequestsSuppressions, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
+import { loadWithCache, patchCache, writeCache, refreshCache, bumpCacheEpoch, getNewRequestsPage, dismissRequest, getDismissImpact, bulkDismissRequests, applyNewRequestsSuppressions, REQUESTS_PAGE_CACHE_KEY } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
 import { useRealtimeBroadcast } from '../hooks/useRealtimeBroadcast';
 import { useClientPagination } from '../hooks/useClientPagination';
@@ -54,6 +54,28 @@ const SORT_PRESETS = [
 ];
 
 const DEFAULT_SORT = 'displayId-desc';
+
+function dismissCascadeCopy(impact) {
+  const confirmed = impact?.confirmedSiblingCount || 0;
+  const potential = impact?.potentialSiblingCount || 0;
+  if (!confirmed && !potential) return null;
+  const parts = [];
+  if (confirmed > 0) {
+    parts.push(
+      confirmed === 1
+        ? 'This will also delete 1 confirmed duplicate request.'
+        : `This will also delete ${confirmed} confirmed duplicate requests.`,
+    );
+  }
+  if (potential > 0) {
+    parts.push(
+      potential === 1
+        ? 'The related potential duplicate will be kept for review.'
+        : `The related potential duplicates (${potential}) will be kept for review.`,
+    );
+  }
+  return parts.join(' ');
+}
 
 function parseSortPreset(preset) {
   const match = preset.match(/^(.+)-(asc|desc)$/);
@@ -540,13 +562,16 @@ export default function Requests() {
       && statusDeepLink !== 'Not added'
       && statusDeepLink !== 'Not removed'
       && statusDeepLink !== 'Already exists'
+      && statusDeepLink !== 'Already Exists in Directory'
       && statusDeepLink !== 'Confirmed Duplicate'
       && statusDeepLink !== 'Potential Duplicate'
     ) return;
     setFilterStatus(
       statusDeepLink === 'New' || statusDeepLink === 'Not added/removed'
         ? 'Not added'
-        : statusDeepLink,
+        : statusDeepLink === 'Already exists'
+          ? 'Already Exists in Directory'
+          : statusDeepLink,
     );
     setFilterOpen(true);
     setSearchParams((prev) => {
@@ -1002,21 +1027,54 @@ export default function Requests() {
     }
   };
 
-  const handleDismissRequest = async (req) => {
+  const openDismissConfirm = (row) => {
+    setConfirmDismissRequest({ request: row, impact: null });
+    getDismissImpact(row.id)
+      .then((impact) => {
+        setConfirmDismissRequest((prev) => (
+          prev?.request?.id === row.id ? { request: row, impact } : prev
+        ));
+      })
+      .catch(() => {});
+  };
+
+  const handleDismissRequest = async (req, impact = null) => {
     setConfirmDismissRequest(null);
     removeRequestHighlight(req.id);
     pendingCreatedIdsRef.current.delete(req.id);
+    const alsoIds = new Set(impact?.confirmedSiblingIds || []);
+    for (const id of alsoIds) {
+      removeRequestHighlight(id);
+      pendingCreatedIdsRef.current.delete(id);
+    }
     bumpHighlights();
 
-    const nextRequests = newRequests.filter((r) => r.id !== req.id);
-    
+    const removeIds = new Set([req.id, ...alsoIds]);
+    const nextRequests = newRequests.filter((r) => !removeIds.has(r.id));
+
     bumpCacheEpoch(requestsCacheKey);
     setNewRequests(nextRequests);
     patchCache(requestsCacheKey, { requests: nextRequests });
-    showToast('Request deleted.', 'success');
+    const confirmedCount = impact?.confirmedSiblingCount || 0;
+    showToast(
+      confirmedCount > 0
+        ? `Request deleted${confirmedCount === 1 ? ' (and 1 confirmed duplicate)' : ` (and ${confirmedCount} confirmed duplicates)`}.`
+        : 'Request deleted.',
+      'success',
+    );
 
     try {
       await dismissRequest(req.id);
+      // Survivors (potential duplicates) may reappear as their own group/card.
+      if ((impact?.potentialSiblingCount || 0) > 0 || req.duplicateGroupId) {
+        loadWithCache(requestsCacheKey, () => getNewRequestsPage(selectedPartnerId || ''), (data, isStale) => {
+          if (!isStale && Array.isArray(data.requests)) {
+            syncAdminNewRequestHighlights(data.requests, { isManualEntry });
+            setNewRequests(data.requests);
+            setLiveDirectory(data.persons);
+          }
+        }).catch(() => {});
+      }
     } catch (err) {
       console.error(err);
       showToast(err.message || 'Failed to delete. Refreshing list.', 'error');
@@ -1272,7 +1330,7 @@ export default function Requests() {
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setConfirmDismissRequest({ request: row });
+                openDismissConfirm(row);
               }}
               aria-label="Delete"
               className="inline-flex items-center justify-center rounded-md border border-[var(--color-border-default)] bg-white p-1.5 text-xs font-semibold text-[var(--color-text-secondary)] hover:border-red-300 hover:bg-red-50 hover:text-red-700 transition-colors"
@@ -1405,7 +1463,7 @@ export default function Requests() {
               { value: 'All', label: 'All' },
               { value: 'Not added', label: 'Not added' },
               { value: 'Not removed', label: 'Not removed' },
-              { value: 'Already exists', label: 'Already exists' },
+              { value: 'Already Exists in Directory', label: 'Already Exists in Directory' },
               { value: 'Confirmed Duplicate', label: 'Confirmed Duplicate' },
               { value: 'Potential Duplicate', label: 'Potential Duplicate' },
             ]
@@ -1427,7 +1485,7 @@ export default function Requests() {
             setConfirmActionRequest({ request: row, adminNote: '' });
           }
         }}
-        onDismiss={(row) => setConfirmDismissRequest({ request: row })}
+        onDismiss={openDismissConfirm}
         getRowClassName={getRequestRowClassName}
       />
 
@@ -1725,7 +1783,10 @@ export default function Requests() {
               className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer"
               onClick={() => {
                 if (confirmDismissRequest) {
-                  handleDismissRequest(confirmDismissRequest.request);
+                  handleDismissRequest(
+                    confirmDismissRequest.request,
+                    confirmDismissRequest.impact,
+                  );
                 }
               }}
             >
@@ -1739,6 +1800,9 @@ export default function Requests() {
             <p>
               Are you sure you want to delete the request for {formatPersonName(confirmDismissRequest.request.person)}?
             </p>
+            {dismissCascadeCopy(confirmDismissRequest.impact) ? (
+              <p>{dismissCascadeCopy(confirmDismissRequest.impact)}</p>
+            ) : null}
             <p>
               This action cannot be undone.
             </p>
@@ -1773,7 +1837,7 @@ export default function Requests() {
           Are you sure you want to delete <strong>{selectedIds.size}</strong> selected request{selectedIds.size === 1 ? '' : 's'}?
         </p>
         <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-          This action will remove them from the incoming queue. If any selected request belongs to a duplicate group, the entire group will be resolved.
+          This removes them from the incoming queue. Confirmed duplicates of a selected request are deleted with it; potential duplicates are kept for review.
         </p>
       </Modal>
 

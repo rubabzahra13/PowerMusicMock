@@ -618,6 +618,19 @@ class UnlinkDuplicateIn(BaseModel):
     requestId2: str
 
 
+class DismissImpactOut(BaseModel):
+    """Preview for deleting a request that may sit in a duplicate group.
+
+    Confirmed-match siblings are deleted with the target. Potential-only siblings stay.
+    """
+
+    requestId: str
+    confirmedSiblingIds: List[str] = []
+    potentialSiblingIds: List[str] = []
+    confirmedSiblingCount: int = 0
+    potentialSiblingCount: int = 0
+
+
 # ── Resolution action schemas (Task 2) ───────────────────────────────────────
 
 

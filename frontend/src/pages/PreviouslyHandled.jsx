@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Search, Download, Info, SortAsc, SortDesc, ChevronDown, Filter } from 'lucide-react';
 import { formatTimestampSplit, formatShortDateAndTime, formatTimeOnly } from '../utils/dateTime';
 import { handledRequests } from '../data/mockData';
-import { TAG_ALREADY_EXISTS, TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_UNVERIFIED, TAG_VERIFIED, requestTagVariant, sortRequestTags } from '../utils/requestTags';
+import { TAG_ALREADY_EXISTS, TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_UNVERIFIED, TAG_VERIFIED, requestTagVariant, requestTagLabel, sortRequestTags } from '../utils/requestTags';
 import { DataTable, Tag, Drawer, EMPTY_CELL, HoverTip } from '../components/ui';
 
 // ─── Shared Controls Bar (same pattern as NewRequests) ────────────────────────
@@ -316,7 +316,7 @@ export default function PreviouslyHandled() {
       render: (tagsList) => (
         <div className="flex flex-wrap gap-1.5">
           {sortRequestTags(tagsList).map((t) => (
-            <Tag key={t} variant={requestTagVariant(t)} label={t} />
+            <Tag key={t} variant={requestTagVariant(t)} label={requestTagLabel(t)} />
           ))}
         </div>
       )
@@ -361,7 +361,7 @@ export default function PreviouslyHandled() {
             label: 'Tag', value: filterTag, onChange: setFilterTag,
             options: [
               { value: 'All', label: 'All Tags' },
-              { value: TAG_ALREADY_EXISTS, label: TAG_ALREADY_EXISTS },
+              { value: TAG_ALREADY_EXISTS, label: requestTagLabel(TAG_ALREADY_EXISTS) },
               { value: TAG_VERIFIED, label: TAG_VERIFIED },
               { value: TAG_UNVERIFIED, label: TAG_UNVERIFIED },
               { value: TAG_PARTNER_REQUEST, label: TAG_PARTNER_REQUEST },
@@ -410,7 +410,7 @@ export default function PreviouslyHandled() {
               </div>
               <div className="flex flex-wrap gap-1.5 shrink-0 max-w-[200px] justify-end">
                 {sortRequestTags(selectedRequest.tags).map((t) => (
-                  <Tag key={t} variant={requestTagVariant(t)} label={t} />
+                  <Tag key={t} variant={requestTagVariant(t)} label={requestTagLabel(t)} />
                 ))}
               </div>
             </div>

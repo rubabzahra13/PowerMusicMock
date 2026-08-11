@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, ChevronRight, ChevronDown, Check, Database, Clock, Pencil,
-  X, Users, Inbox, Trash2,
+  X, Users, Inbox, Trash2, AlertTriangle,
 } from 'lucide-react';
 import { Tag, Modal, HoverTip } from './ui';
 import { formatAdminDateTime, formatRequestDisplayId } from '../utils/requestDisplayId';
 import { getManagerDisplayName, isManualEntry, MANUAL_ENTRY_CLUB } from '../utils/manualEntry';
 import { readManagerNotes } from '../utils/managerNotes';
 import { fetchJson } from '../utils/api';
+import { dismissRequest, getDismissImpact } from '../utils/pilot2Api';
 import {
   resolveGroupAdd,
   resolveGroupUpdate,
@@ -17,6 +18,29 @@ import {
 } from '../utils/duplicateGroupApi';
 
 /* ─── helpers ────────────────────────────────────────────────────────────── */
+
+function dismissCascadeCopy(impact) {
+  const confirmed = impact?.confirmedSiblingCount || 0;
+  const potential = impact?.potentialSiblingCount || 0;
+  if (!confirmed && !potential) return null;
+  const parts = [];
+  if (confirmed > 0) {
+    parts.push(
+      confirmed === 1
+        ? 'This will also delete 1 confirmed duplicate request.'
+        : `This will also delete ${confirmed} confirmed duplicate requests.`,
+    );
+  }
+  if (potential > 0) {
+    parts.push(
+      potential === 1
+        ? 'The related potential duplicate will be kept for review.'
+        : `The related potential duplicates (${potential}) will be kept for review.`,
+    );
+  }
+  return parts.join(' ');
+}
+
 
 function initials(person) {
   const parts = [person?.firstName, person?.lastName].filter(Boolean);
@@ -113,7 +137,7 @@ function SectionCard({
 function classificationTag(classification) {
   if (classification === 'confirmed_duplicate') return { variant: 'duplicate-confirmed', label: 'Duplicate' };
   if (classification === 'potential_duplicate') return { variant: 'duplicate-potential', label: 'Potential Duplicate' };
-  if (classification === 'already_exists' || classification === 'already_exists_conflict') return { variant: 'already-exists', label: 'Already Exists' };
+  if (classification === 'already_exists' || classification === 'already_exists_conflict') return { variant: 'already-exists', label: 'Already Exists in Directory' };
   return { variant: 'neutral', label: classification };
 }
 
@@ -159,6 +183,8 @@ export default function GroupResolutionView({
   const [isEditing, setIsEditing] = useState(false);
   const [draftForm, setDraftForm] = useState(form);
   const [unlinkTargetId, setUnlinkTargetId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteImpact, setDeleteImpact] = useState(null);
 
   const [adminNote, setAdminNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -320,10 +346,18 @@ export default function GroupResolutionView({
 
   /* ── unlink member ── */
   const handleUnlink = async (memberId) => {
-    const repId = group.representativeRequestId || repMember?.id;
+    // requestId2 is the one removed; pick any other active member as the pair peer.
+    const peer =
+      members.find((m) => m.id !== memberId && !sessionUnlinkedIds.includes(m.id))
+      || members.find((m) => m.id !== memberId);
+    const requestId1 = peer?.id || group.representativeRequestId || repMember?.id;
+    if (!requestId1 || requestId1 === memberId) {
+      onResolved('error', 'Need another request in the group to unlink against.');
+      return;
+    }
     try {
       await unlinkGroupMember(group.id, {
-        requestId1: repId,
+        requestId1,
         requestId2: memberId,
       });
 
@@ -341,6 +375,44 @@ export default function GroupResolutionView({
       onResolved('unlinked', null);
     } catch (err) {
       onResolved('error', err.message || 'Failed to unlink member.');
+    }
+  };
+
+  const openDeleteConfirm = (member) => {
+    setDeleteTarget(member);
+    setDeleteImpact(null);
+    getDismissImpact(member.id)
+      .then((impact) => setDeleteImpact(impact))
+      .catch(() => setDeleteImpact(null));
+  };
+
+  /* ── delete member (same dismiss API as New Requests) ── */
+  const handleDeleteMember = async () => {
+    const member = deleteTarget;
+    if (!member || submitting) return;
+    setSubmitting(true);
+    const alsoIds = new Set(deleteImpact?.confirmedSiblingIds || []);
+    try {
+      await dismissRequest(member.id);
+      const nextMembers = members.filter(
+        (m) => m.id !== member.id && !alsoIds.has(m.id),
+      );
+      const nextUnlinked = sessionUnlinkedIds.filter(
+        (id) => id !== member.id && !alsoIds.has(id),
+      );
+      setMembers(nextMembers);
+      setSessionUnlinkedIds(nextUnlinked);
+      setDeleteTarget(null);
+      setDeleteImpact(null);
+      if (nextMembers.length === 0) {
+        onResolved('member_deleted_done', personFullName(member.person));
+      } else {
+        onResolved('member_deleted', personFullName(member.person));
+      }
+    } catch (err) {
+      onResolved('error', err.message || 'Failed to delete request.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -389,6 +461,20 @@ export default function GroupResolutionView({
     (a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0),
   )[0] || null;
   const currentManager = managerFieldsFromMember(currentRequest);
+
+  const renderUnlinkedOneVisitNotice = () => (
+    <div
+      className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-800"
+      role="note"
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
+      <p className="leading-relaxed">
+        This separate request is a <span className="font-semibold">one-visit view only</span>.
+        If you go back to New Requests, it will move to its own separate request and can be
+        handled by opening it separately.
+      </p>
+    </div>
+  );
 
   const renderUnlinkedCurrentActions = (member) => {
     const isAdd = member.action === 'Add';
@@ -515,6 +601,11 @@ export default function GroupResolutionView({
         </div>
       </header>
 
+      {unlinkedMembers.length > 0 ? (
+        <div className="mt-4">
+          {renderUnlinkedOneVisitNotice()}
+        </div>
+      ) : null}
 
       {mergePageOpen ? (
         <SectionCard
@@ -578,9 +669,9 @@ export default function GroupResolutionView({
                               />
                               <Tag variant={role.variant} label={role.label} />
                             </div>
-                            {!unlinked && !isLatest && activeMembers.length > 1 ? (
+                            {!unlinked ? (
                               <div className="flex shrink-0 items-center gap-2">
-                                {group.classification !== 'confirmed_duplicate' ? (
+                                {activeMembers.length > 1 && group.classification !== 'confirmed_duplicate' ? (
                                   <button
                                     type="button"
                                     onClick={() => setUnlinkTargetId(member.id)}
@@ -592,7 +683,7 @@ export default function GroupResolutionView({
                                 ) : null}
                                 <button
                                   type="button"
-                                  onClick={() => setUnlinkTargetId(member.id)}
+                                  onClick={() => openDeleteConfirm(member)}
                                   className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-600 shadow-[0_1px_0_rgba(26,26,46,0.04)] transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 cursor-pointer"
                                 >
                                   <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -618,6 +709,12 @@ export default function GroupResolutionView({
                               Received {formatAdminDateTime(member.receivedAt)}
                             </p>
                           )}
+
+                          {unlinked ? (
+                            <div className="mt-3">
+                              {renderUnlinkedOneVisitNotice()}
+                            </div>
+                          ) : null}
 
                           {unlinked ? renderUnlinkedCurrentActions(member) : null}
                         </div>
@@ -797,6 +894,10 @@ export default function GroupResolutionView({
                 Received {formatAdminDateTime(member.receivedAt)}
               </p>
             )}
+
+            <div className="mt-3">
+              {renderUnlinkedOneVisitNotice()}
+            </div>
 
             {!currentRequest ? (
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border-default)] pt-4">
@@ -1009,6 +1110,52 @@ export default function GroupResolutionView({
         <p className="text-sm text-[var(--color-text-secondary)]">
           This will unlink this request from the group. It stays on this page as a current request for this visit so you can mark it handled here.
         </p>
+      </Modal>
+
+      {/* ── Delete request confirmation (same as New Requests) ── */}
+      <Modal
+        isOpen={!!deleteTarget}
+        onClose={() => {
+          setDeleteTarget(null);
+          setDeleteImpact(null);
+        }}
+        title="Delete request"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteTarget(null);
+                setDeleteImpact(null);
+              }}
+              className="px-4 py-2 border border-[var(--color-border-default)] rounded-lg text-sm font-medium text-[var(--color-text-primary)] hover:bg-white transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={handleDeleteMember}
+              className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-60"
+            >
+              {submitting ? 'Deleting…' : 'Confirm'}
+            </button>
+          </>
+        }
+      >
+        {deleteTarget ? (
+          <div className="space-y-4">
+            <p>
+              Are you sure you want to delete the request for {personFullName(deleteTarget.person)}?
+            </p>
+            {dismissCascadeCopy(deleteImpact) ? (
+              <p>{dismissCascadeCopy(deleteImpact)}</p>
+            ) : null}
+            <p>
+              This action cannot be undone.
+            </p>
+          </div>
+        ) : null}
       </Modal>
 
       {/* ── Mark unlinked request handled ── */}

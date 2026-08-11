@@ -261,6 +261,7 @@ export const getNewRequestsPage = (partnerId = '') => {
 };
 export const getPilot2Workspace = () => request('/api/pilot2/workspace');
 export const dismissRequest = (id) => request(`/api/admin/requests/${id}/dismiss`, { method: 'POST' });
+export const getDismissImpact = (id) => request(`/api/admin/requests/${id}/dismiss-impact`);
 export const bulkDismissRequests = (ids) => request('/api/admin/requests/bulk-dismiss', { method: 'POST', body: JSON.stringify({ ids }) });
 
 // Directory persons

@@ -587,6 +587,183 @@ def unlink_duplicate_members(
     return True
 
 
+def get_dismiss_impact(
+    db: Session,
+    request_id: str,
+) -> dict:
+    """Preview which group siblings would also be deleted with this request.
+
+    Confirmed-match siblings are deleted with the target. Potential-only siblings
+    are left for separate review.
+    """
+    req = (
+        db.query(models.ManagerRequest)
+        .filter(models.ManagerRequest.id == request_id)
+        .first()
+    )
+    if not req:
+        return {
+            "requestId": request_id,
+            "confirmedSiblingIds": [],
+            "potentialSiblingIds": [],
+            "confirmedSiblingCount": 0,
+            "potentialSiblingCount": 0,
+        }
+
+    confirmed_ids: List[str] = []
+    potential_ids: List[str] = []
+    if req.duplicate_group_id and req.status == "new":
+        members = (
+            db.query(models.ManagerRequest)
+            .filter(
+                models.ManagerRequest.duplicate_group_id == req.duplicate_group_id,
+                models.ManagerRequest.status == "new",
+                models.ManagerRequest.id != req.id,
+            )
+            .all()
+        )
+        target_person = person_from_model(req)
+        for member in members:
+            classification, _ = match_classification(target_person, person_from_model(member))
+            if classification == "confirmed_duplicate":
+                confirmed_ids.append(member.id)
+            elif classification == "potential_duplicate":
+                potential_ids.append(member.id)
+
+    return {
+        "requestId": request_id,
+        "confirmedSiblingIds": confirmed_ids,
+        "potentialSiblingCount": len(potential_ids),
+        "confirmedSiblingCount": len(confirmed_ids),
+        "potentialSiblingIds": potential_ids,
+    }
+
+
+def collect_selective_dismiss_targets(
+    db: Session,
+    req: models.ManagerRequest,
+) -> Tuple[List[models.ManagerRequest], List[models.ManagerRequest]]:
+    """Return (requests_to_dismiss, survivors_to_keep).
+
+    Always includes ``req``. Also includes active group siblings that are a
+    confirmed duplicate of ``req``. Potential-only siblings are survivors.
+    """
+    to_dismiss = [req]
+    survivors: List[models.ManagerRequest] = []
+    if not req.duplicate_group_id or req.status != "new":
+        return to_dismiss, survivors
+
+    members = (
+        db.query(models.ManagerRequest)
+        .filter(
+            models.ManagerRequest.duplicate_group_id == req.duplicate_group_id,
+            models.ManagerRequest.status == "new",
+            models.ManagerRequest.id != req.id,
+        )
+        .all()
+    )
+    target_person = person_from_model(req)
+    for member in members:
+        classification, _ = match_classification(target_person, person_from_model(member))
+        if classification == "confirmed_duplicate":
+            to_dismiss.append(member)
+        else:
+            survivors.append(member)
+    return to_dismiss, survivors
+
+
+def finalize_group_after_selective_dismiss(
+    db: Session,
+    group: models.DuplicateGroup,
+    survivor_ids: Set[str],
+    admin_id: Optional[str] = None,
+) -> None:
+    """Reclassify or dissolve the group after confirmed siblings were dismissed."""
+    now = datetime.now(timezone.utc)
+    remaining = (
+        db.query(models.ManagerRequest)
+        .filter(
+            models.ManagerRequest.duplicate_group_id == group.id,
+            models.ManagerRequest.status == "new",
+            models.ManagerRequest.id.in_(list(survivor_ids)),
+        )
+        .all()
+        if survivor_ids
+        else []
+    )
+
+    def _mark_group_dismissed() -> None:
+        group.status = "dismissed"
+        group.resolved_at = now
+        if admin_id and admin_id != "dev-bypass":
+            try:
+                group.resolved_by_admin_id = uuid.UUID(admin_id)
+            except ValueError:
+                pass
+
+    if len(remaining) == 0:
+        _mark_group_dismissed()
+        db.flush()
+        return
+
+    if len(remaining) == 1 and not group.directory_person_id:
+        remaining[0].duplicate_group_id = None
+        _clear_duplicate_tags(remaining[0])
+        _mark_group_dismissed()
+        db.flush()
+        return
+
+    # Recalculate classification among survivors (same rules as unlink).
+    dir_match = False
+    peer_match_class = None
+
+    if group.directory_person_id:
+        dir_person = (
+            db.query(models.ManagerRequest)
+            .filter(models.ManagerRequest.id == group.directory_person_id)
+            .first()
+        )
+        if dir_person:
+            for m in remaining:
+                if not are_requests_dismissed(db, m.id, dir_person.id):
+                    c, _ = match_classification(person_from_model(m), person_from_model(dir_person))
+                    if c:
+                        dir_match = True
+                        break
+
+    for i in range(len(remaining)):
+        for j in range(i + 1, len(remaining)):
+            if not are_requests_dismissed(db, remaining[i].id, remaining[j].id):
+                c, _ = match_classification(
+                    person_from_model(remaining[i]),
+                    person_from_model(remaining[j]),
+                )
+                if c:
+                    peer_match_class = _best_classification(peer_match_class, c)
+
+    if dir_match and peer_match_class:
+        new_class = "already_exists_conflict"
+    elif dir_match:
+        new_class = "already_exists"
+    elif peer_match_class:
+        new_class = peer_match_class
+    else:
+        new_class = None
+
+    if not new_class:
+        for m in remaining:
+            m.duplicate_group_id = None
+            _clear_duplicate_tags(m)
+        _mark_group_dismissed()
+    else:
+        group.classification = new_class
+        for m in remaining:
+            _clear_duplicate_tags(m)
+        _sync_group_representative_and_tags(db, group, member_requests=remaining)
+
+    db.flush()
+
+
 # ---------------------------------------------------------------------------
 # Convenience read helpers (no writes)
 # ---------------------------------------------------------------------------

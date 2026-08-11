@@ -404,8 +404,19 @@ export default function Sidebar({
           </div>
         </div>
 
-        <div className={`shrink-0 border-t border-white/[0.06] ${showExpanded ? 'p-3' : 'p-2'}`} ref={accountRef}>
-          <div className={`border-b border-white/[0.06] ${showExpanded ? 'mb-3 pb-3' : 'mb-2 pb-2'}`}>
+        <div
+          className={`shrink-0 border-t border-white/[0.06] ${
+            showExpanded ? 'p-3' : 'flex flex-col items-center p-2'
+          }`}
+          ref={accountRef}
+        >
+          <div
+            className={`border-b border-white/[0.06] ${
+              showExpanded
+                ? 'mb-3 pb-3'
+                : 'mb-2 flex w-full justify-center pb-2'
+            }`}
+          >
             <HoverTip
               label={showExpanded ? '' : 'Add New Partner'}
               placement="right"
@@ -416,7 +427,9 @@ export default function Sidebar({
                 onClick={() => setPartnerCreateOpen(true)}
                 aria-label="Add New Partner"
                 className={`flex items-center rounded-lg text-left transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
-                  showExpanded ? 'w-full gap-2.5 px-2.5 py-1.5' : 'mx-auto justify-center px-0 py-1.5'
+                  showExpanded
+                    ? 'w-full gap-2.5 px-2.5 py-1.5'
+                    : 'h-9 w-9 justify-center px-0'
                 }`}
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-white">
@@ -431,7 +444,7 @@ export default function Sidebar({
             </HoverTip>
           </div>
 
-          <div className="relative">
+          <div className={`relative ${showExpanded ? '' : 'flex w-full justify-center'}`}>
             <HoverTip
               label={showExpanded ? '' : 'Expand sidebar for account'}
               placement="right"
@@ -450,7 +463,7 @@ export default function Sidebar({
                 aria-haspopup="menu"
                 aria-label={showExpanded ? 'Account menu' : 'Expand sidebar for account'}
                 className={`flex items-center rounded-lg text-left transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 ${
-                  showExpanded ? 'h-11 w-full gap-3 px-3' : 'mx-auto h-11 w-11 justify-center px-0'
+                  showExpanded ? 'h-11 w-full gap-3 px-3' : 'h-9 w-9 justify-center px-0'
                 }`}
               >
                 <div

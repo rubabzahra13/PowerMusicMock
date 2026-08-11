@@ -76,16 +76,16 @@ export default function GroupDetail() {
       let toastMsg = '';
       switch (type) {
         case 'add':
-          toastMsg = 'Resolved and added to Directory.';
+          toastMsg = 'Merged and added to Directory.';
           break;
         case 'mark_removed':
           toastMsg = 'Request resolved and person marked as removed.';
           break;
         case 'update':
-          toastMsg = 'Request resolved and Directory record updated.';
+          toastMsg = 'Merged and Directory record updated.';
           break;
         case 'keep':
-          toastMsg = 'Request resolved and existing Directory record kept unchanged.';
+          toastMsg = 'Kept existing Directory record. New request closed.';
           break;
         case 'delete':
           toastMsg = 'Resolved and Directory record permanently deleted.';
@@ -103,6 +103,12 @@ export default function GroupDetail() {
             ? `${name} marked as handled.`
             : 'Request marked as handled.';
           break;
+        case 'member_deleted':
+          toastMsg = name ? `Deleted request for ${name}.` : 'Request deleted.';
+          break;
+        case 'member_deleted_done':
+          toastMsg = name ? `Deleted request for ${name}.` : 'Request deleted.';
+          break;
         case 'unlinked_dissolved':
           toastMsg = 'Group dissolved successfully.';
           break;
@@ -113,9 +119,9 @@ export default function GroupDetail() {
 
       showToast(toastMsg, 'success');
 
-      // Stay on this page after unlink / partial handle so the admin can keep
-      // working here for this visit. Leaving + returning reloads normal UI.
-      if (type === 'unlinked' || type === 'unlinked_handled') {
+      // Stay on this page after unlink / partial handle / partial delete so the
+      // admin can keep working here for this visit.
+      if (type === 'unlinked' || type === 'unlinked_handled' || type === 'member_deleted') {
         return;
       }
 

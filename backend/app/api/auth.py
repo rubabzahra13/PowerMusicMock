@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import functools
+import json
 import os
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from threading import Lock
+from urllib.parse import urlparse
 
 import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException
 from jwt import PyJWKClient
+from jwt.exceptions import PyJWKClientConnectionError
 from sqlalchemy.orm import Session
 
 from app import models
@@ -29,6 +34,43 @@ _AUTH_CACHE: dict[str, tuple[float, AuthenticatedUser]] = {}
 _AUTH_CACHE_TTL_SECONDS = 300
 _AUTH_CACHE_LOCK = Lock()
 _AUTH_CACHE_MAX = 5000
+
+
+def _ensure_supabase_bypasses_proxy() -> None:
+    """Local Cursor/sandbox proxies often block HTTPS CONNECT to Supabase.
+
+    JWKS verification needs a direct fetch; keep localhost + Supabase hosts in
+    NO_PROXY so urllib/httpx don't send them through a dying local proxy.
+    """
+    host = urlparse(SUPABASE_URL).hostname if SUPABASE_URL else None
+    extras = ["127.0.0.1", "localhost", "::1"]
+    if host:
+        extras.extend([host, ".supabase.co"])
+    for key in ("NO_PROXY", "no_proxy"):
+        existing = [p.strip() for p in os.environ.get(key, "").split(",") if p.strip()]
+        merged = list(dict.fromkeys([*existing, *extras]))
+        os.environ[key] = ",".join(merged)
+
+
+_ensure_supabase_bypasses_proxy()
+
+
+class _DirectPyJWKClient(PyJWKClient):
+    """Fetch JWKS without inheriting HTTP(S)_PROXY from the process env."""
+
+    def fetch_data(self):  # type: ignore[override]
+        request = urllib.request.Request(self.uri, headers=self.headers)
+        handlers: list[urllib.request.BaseHandler] = [urllib.request.ProxyHandler({})]
+        if self.ssl_context is not None:
+            handlers.append(urllib.request.HTTPSHandler(context=self.ssl_context))
+        opener = urllib.request.build_opener(*handlers)
+        try:
+            with opener.open(request, timeout=self.timeout) as response:
+                return json.load(response)
+        except (OSError, TimeoutError, urllib.error.HTTPError) as exc:
+            raise PyJWKClientConnectionError(
+                f'Fail to fetch data from the url, err: "{exc}"'
+            ) from exc
 
 
 @dataclass(frozen=True)
@@ -55,7 +97,7 @@ def auth_is_required() -> bool:
 def _jwks_client() -> PyJWKClient | None:
     if not SUPABASE_URL:
         return None
-    return PyJWKClient(
+    return _DirectPyJWKClient(
         f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json",
         cache_keys=True,
     )

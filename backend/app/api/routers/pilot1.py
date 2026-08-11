@@ -79,7 +79,13 @@ from app.directory_person_match import (
     roster_snapshot_rows,
     search_roster_rows,
 )
-from app.duplicate_group_service import get_active_groups, get_group_members
+from app.duplicate_group_service import (
+    collect_selective_dismiss_targets,
+    finalize_group_after_selective_dismiss,
+    get_active_groups,
+    get_dismiss_impact,
+    get_group_members,
+)
 
 router = APIRouter()
 
@@ -743,6 +749,22 @@ def mark_request_handled(
         notify_admin_requests_changed("mark_handled")
     return request_to_api_dict(req)
 
+@router.get(
+    "/api/admin/requests/{request_id}/dismiss-impact",
+    response_model=schemas.DismissImpactOut,
+)
+def request_dismiss_impact(
+    request_id: str,
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(require_admin),
+):
+    """Preview cascade: confirmed duplicate siblings are deleted with the request; potentials stay."""
+    req = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return get_dismiss_impact(db, request_id)
+
+
 @router.post("/api/admin/requests/{request_id}/dismiss", response_model=schemas.RequestOut)
 def dismiss_request(
     request_id: str,
@@ -752,34 +774,18 @@ def dismiss_request(
     req = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
-        
+
     if req.status == "dismissed":
         hydrate_request_users(db, [req])
         return request_to_api_dict(req)
-        
+
     was_new = req.status == "new"
-    
-    requests_to_dismiss = [req]
-    
-    if req.duplicate_group_id:
-        group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == req.duplicate_group_id).first()
-        if group and group.representative_request_id == req.id and group.status == "active":
-            group.status = "dismissed"
-            group.resolved_at = datetime.now(timezone.utc)
-            if admin.id != "dev-bypass":
-                try:
-                    import uuid
-                    group.resolved_by_admin_id = uuid.UUID(admin.id)
-                except ValueError:
-                    pass
-            
-            members = db.query(models.ManagerRequest).filter(
-                models.ManagerRequest.duplicate_group_id == group.id,
-                models.ManagerRequest.status == "new"
-            ).all()
-            requests_to_dismiss = members
+    group_id = req.duplicate_group_id
+    requests_to_dismiss, survivors = collect_selective_dismiss_targets(db, req)
 
     for r in requests_to_dismiss:
+        if r.status == "dismissed":
+            continue
         if r.status == "new":
             decrement_manager_pending_stat(db, r)
             if r.manager_id:
@@ -792,6 +798,20 @@ def dismiss_request(
                 r.handled_by_admin_id = uuid.UUID(admin.id)
             except ValueError:
                 pass
+
+    if group_id:
+        group = (
+            db.query(models.DuplicateGroup)
+            .filter(models.DuplicateGroup.id == group_id)
+            .first()
+        )
+        if group and group.status == "active":
+            finalize_group_after_selective_dismiss(
+                db,
+                group,
+                {s.id for s in survivors},
+                admin.id,
+            )
 
     db.commit()
     db.refresh(req)
@@ -814,37 +834,26 @@ def bulk_dismiss_requests(
     reqs = db.query(models.ManagerRequest).filter(models.ManagerRequest.id.in_(payload.ids)).all()
     all_dismissed = []
     any_was_new = False
-    
+    processed_ids = set()
+
     for req in reqs:
+        if req.id in processed_ids:
+            continue
         if req.status == "dismissed":
             all_dismissed.append(req)
+            processed_ids.add(req.id)
             continue
-            
+
         was_new = req.status == "new"
         if was_new:
             any_was_new = True
-            
-        requests_to_dismiss = [req]
-        
-        if req.duplicate_group_id:
-            group = db.query(models.DuplicateGroup).filter(models.DuplicateGroup.id == req.duplicate_group_id).first()
-            if group and group.representative_request_id == req.id and group.status == "active":
-                group.status = "dismissed"
-                group.resolved_at = datetime.now(timezone.utc)
-                if admin.id != "dev-bypass":
-                    try:
-                        import uuid
-                        group.resolved_by_admin_id = uuid.UUID(admin.id)
-                    except ValueError:
-                        pass
-                
-                members = db.query(models.ManagerRequest).filter(
-                    models.ManagerRequest.duplicate_group_id == group.id,
-                    models.ManagerRequest.status == "new"
-                ).all()
-                requests_to_dismiss = members
+
+        group_id = req.duplicate_group_id
+        requests_to_dismiss, survivors = collect_selective_dismiss_targets(db, req)
 
         for r in requests_to_dismiss:
+            if r.id in processed_ids or r.status == "dismissed":
+                continue
             if r.status == "new":
                 decrement_manager_pending_stat(db, r)
                 if r.manager_id:
@@ -858,16 +867,31 @@ def bulk_dismiss_requests(
                 except ValueError:
                     pass
             all_dismissed.append(r)
+            processed_ids.add(r.id)
+
+        if group_id:
+            group = (
+                db.query(models.DuplicateGroup)
+                .filter(models.DuplicateGroup.id == group_id)
+                .first()
+            )
+            if group and group.status == "active":
+                finalize_group_after_selective_dismiss(
+                    db,
+                    group,
+                    {s.id for s in survivors if s.id not in processed_ids},
+                    admin.id,
+                )
 
     db.commit()
     for req in all_dismissed:
         db.refresh(req)
-        
+
     hydrate_request_display(all_dismissed)
     hydrate_request_users(db, all_dismissed)
     if any_was_new:
         notify_admin_requests_changed("dismiss_request_bulk")
-        
+
     unique_dismissed = {r.id: r for r in all_dismissed}.values()
     return requests_to_api_dicts(db, list(unique_dismissed))
 
