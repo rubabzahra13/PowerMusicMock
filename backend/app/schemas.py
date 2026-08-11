@@ -215,6 +215,9 @@ class RequestOut(BaseModel):
     duplicateGroupId: Optional[str] = None
     needsReview: bool = False
     groupMemberCount: int = 0
+    # Aggregated classification counts for grouped representative requests.
+    # { alreadyExists: bool, duplicateCount: int, potentialCount: int }
+    groupClassificationSummary: Optional[Any] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -595,6 +598,8 @@ class DuplicateGroupDetailOut(BaseModel):
     directoryPersonId: Optional[str] = None
     representativeRequestId: Optional[str] = None
     members: List[DuplicateGroupMemberOut] = []
+    # Aggregated classification counts: { alreadyExists, duplicateCount, potentialCount }
+    classificationSummary: Optional[Any] = None
 
 
 class DuplicateGroupSummaryOut(BaseModel):

@@ -17,6 +17,7 @@ import {
   unlinkGroupMember,
 } from '../utils/duplicateGroupApi';
 import { matchClassification } from '../utils/duplicateMatch';
+import { groupClassificationPills } from '../utils/requestTags';
 
 /* ─── helpers ────────────────────────────────────────────────────────────── */
 
@@ -589,7 +590,23 @@ export default function GroupResolutionView({
         </ol>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           <span className="mr-1.5 hidden h-4 w-px shrink-0 self-center bg-[var(--color-border-default)] sm:block" aria-hidden="true" />
-          <Tag variant={tag.variant} label={tag.label} />
+          {/* Aggregated classification pills — prefer classificationSummary, fall back to single tag */}
+          {(() => {
+            const summary = group.classificationSummary;
+            const pills = groupClassificationPills(summary);
+            if (pills.length > 0) {
+              return pills.map((pill) => (
+                <Tag
+                  key={pill.label}
+                  variant={pill.variant}
+                  label={pill.count != null ? `${pill.label} × ${pill.count}` : pill.label}
+                  prefix={pill.prefix}
+                />
+              ));
+            }
+            // Fallback for older API responses without classificationSummary
+            return <Tag variant={tag.variant} label={tag.label} />;
+          })()}
           {members.length > 1 && (
             <Tag variant="neutral" label={`${members.length} requests`} />
           )}

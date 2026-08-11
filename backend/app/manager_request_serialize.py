@@ -13,6 +13,7 @@ from app.directory_person_match import (
     find_directory_conflict,
     request_person_for_match,
 )
+from app.duplicate_group_service import compute_group_classification_summary
 from app.manager_request_views import is_request_unread
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
@@ -365,6 +366,7 @@ def request_to_api_dict(
     email_row: Optional[models.Email] = None,
     connected_inbox: Optional[str] = None,
     persist_auto_mail_side_effects: bool = True,
+    group_classification_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if manager_user is None:
         manager_user = getattr(req, "_manager_user", None)
@@ -424,6 +426,8 @@ def request_to_api_dict(
         "duplicateGroupId": getattr(req, "duplicate_group_id", None),
         "needsReview": _needs_review(tags, getattr(req, "duplicate_group_id", None)),
         "groupMemberCount": _group_member_count(db, req),
+        # Aggregated classification summary (only present for group representatives)
+        "groupClassificationSummary": group_classification_summary,
     }
     if intake_match:
         payload["intakeMatch"] = intake_match
@@ -459,10 +463,44 @@ def requests_to_api_dicts(db: Session, requests: List[models.ManagerRequest]) ->
     # One directory load for the whole page — per-row probes were ~0.4s each over
     # the remote DB and made /admin/requests/page exceed the frontend timeout.
     from app.directory_person_match import handled_directory_rows
+    from app import models as _models
 
     directory_rows = handled_directory_rows(db) if rows else []
     email_by_req = _prefetch_source_emails(db, rows) if rows else {}
     connected_inbox = _connected_inbox_email(db) if rows else ""
+
+    # ── Batch-compute classification summaries for all grouped rows ──────────
+    # Each row that appears in this list is the representative (latest) for its
+    # group (guaranteed by _visible_new_requests_query). We load all group
+    # members in ONE query then compute summaries in Python.
+    group_ids = list({req.duplicate_group_id for req in rows if req.duplicate_group_id})
+    group_summaries: Dict[str, Dict[str, Any]] = {}
+    if group_ids:
+        # Fetch the DuplicateGroup objects
+        groups_by_id = {
+            g.id: g
+            for g in db.query(_models.DuplicateGroup)
+            .filter(_models.DuplicateGroup.id.in_(group_ids))
+            .all()
+        }
+        # Fetch ALL members for those groups in one query
+        all_members_raw = (
+            db.query(_models.ManagerRequest)
+            .filter(_models.ManagerRequest.duplicate_group_id.in_(group_ids))
+            .all()
+        )
+        # Group members by group_id
+        from collections import defaultdict
+        members_by_group: Dict[str, List[_models.ManagerRequest]] = defaultdict(list)
+        for m in all_members_raw:
+            if m.duplicate_group_id:
+                members_by_group[m.duplicate_group_id].append(m)
+        # Compute each group's summary
+        for gid, group in groups_by_id.items():
+            group_summaries[gid] = compute_group_classification_summary(
+                db, group, members=members_by_group.get(gid, [])
+            )
+
     results: List[Dict[str, Any]] = []
     for req in rows:
         person = request_person_for_match(req)
@@ -471,6 +509,7 @@ def requests_to_api_dicts(db: Session, requests: List[models.ManagerRequest]) ->
             action=req.action or "",
             directory_rows=[row for row in directory_rows if not req.partner_id or row.partner_id == req.partner_id],
         )
+        summary = group_summaries.get(req.duplicate_group_id) if req.duplicate_group_id else None
         results.append(
             request_to_api_dict(
                 req,
@@ -479,6 +518,7 @@ def requests_to_api_dicts(db: Session, requests: List[models.ManagerRequest]) ->
                 email_row=email_by_req.get(req.id),
                 connected_inbox=connected_inbox,
                 persist_auto_mail_side_effects=False,
+                group_classification_summary=summary,
             ),
         )
     return results

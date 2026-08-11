@@ -173,3 +173,47 @@ export function directoryStatusTag(request) {
     plain: true,
   };
 }
+
+/**
+ * Convert a groupClassificationSummary object into an ordered array of pill
+ * descriptors for display.
+ *
+ * Rules:
+ * - Exists in Directory is rendered once (no count badge) when alreadyExists=true
+ * - Duplicate × N is rendered when duplicateCount > 0
+ * - Potential Duplicate × N is rendered when potentialCount > 0
+ * - Uses existing variant names so no new CSS is needed
+ *
+ * @param {{ alreadyExists: boolean, duplicateCount: number, potentialCount: number } | null | undefined} summary
+ * @returns {Array<{ variant: string, label: string, count: number|null, prefix: string }>}
+ */
+export function groupClassificationPills(summary) {
+  if (!summary) return [];
+  const pills = [];
+  if (summary.alreadyExists) {
+    pills.push({
+      variant: 'already-exists',
+      label: 'Exists in Directory',
+      count: null,
+      prefix: '',
+    });
+  }
+  if (summary.duplicateCount > 0) {
+    pills.push({
+      variant: 'duplicate-confirmed',
+      label: 'Duplicate',
+      count: summary.duplicateCount,
+      prefix: '',
+    });
+  }
+  if (summary.potentialCount > 0) {
+    pills.push({
+      variant: 'duplicate-potential',
+      label: 'Potential Duplicate',
+      count: summary.potentialCount,
+      prefix: '',
+    });
+  }
+  return pills;
+}
+
