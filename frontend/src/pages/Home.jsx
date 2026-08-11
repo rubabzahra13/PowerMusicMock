@@ -504,7 +504,7 @@ export default function Home() {
       <PageHeader
         section="Overview"
         title="Hello Andrea."
-        description={`A live view of ${partnerLabel} requests, ledger health, and what needs your attention.`}
+        description={`A live view of ${partnerLabel} requests, Users Directory, and what needs your attention.`}
         borderless
         className="shrink-0"
       />
