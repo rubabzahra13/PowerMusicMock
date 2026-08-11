@@ -397,7 +397,14 @@ def _sync_group_representative_and_tags(
 ) -> None:
     """Set representative to latest member; apply correct duplicate tags to it.
 
-    Tags are only written to the REPRESENTATIVE request. Older non-representative
+    The representative's peer-duplicate tag is determined by comparing it against
+    its IMMEDIATE PREDECESSOR (second-latest member), NOT by the group's
+    historical worst-case classification.  This ensures that a request whose
+    first name differs from the prior representative (e.g. "stevenson" vs
+    "steve") is correctly tagged as potential_duplicate even when the group's
+    classification field is confirmed_duplicate due to an earlier pair.
+
+    Tags are only written to the REPRESENTATIVE request.  Older non-representative
     group members keep their original tags for audit fidelity.
     """
     # Always fetch flushed DB members to guarantee we don't miss any older ones
@@ -428,24 +435,38 @@ def _sync_group_representative_and_tags(
     latest_req = members[0]
     group.representative_request_id = latest_req.id
 
-    # Determine which tags to apply based on the group classification.
+    # ── Determine which peer-duplicate tag to apply to the representative ──────
+    # Compare the representative against its immediate predecessor so we tag it
+    # with its ACTUAL relationship, not the group's historical worst-case.
     tags_to_add: List[str] = []
-    cls = group.classification or ""
 
-    if cls == "confirmed_duplicate":
-        tags_to_add.append(TAG_CONFIRMED_DUPLICATE)
-    elif cls == "potential_duplicate":
-        tags_to_add.append(TAG_POTENTIAL_DUPLICATE)
-    elif cls == "already_exists_conflict":
-        # Both tags — there's a directory person AND conflicting pending peers.
-        tags_to_add.append(TAG_ALREADY_EXISTS)
-        tags_to_add.append(TAG_CONFIRMED_DUPLICATE)
-    elif cls == "already_exists":
+    if len(members) >= 2:
+        predecessor = members[1]
+        result = match_classification(
+            person_from_model(latest_req),
+            person_from_model(predecessor),
+        )
+        # match_classification returns bare None when last names are missing,
+        # or (classification, score) otherwise.
+        if isinstance(result, tuple):
+            rep_classification, _ = result
+            if rep_classification == "confirmed_duplicate":
+                tags_to_add.append(TAG_CONFIRMED_DUPLICATE)
+            elif rep_classification == "potential_duplicate":
+                tags_to_add.append(TAG_POTENTIAL_DUPLICATE)
+        # else: no last name on one side — no peer tag
+
+    # ── Directory tag is orthogonal to the peer relationship ───────────────────
+    if group.directory_person_id:
         tags_to_add.append(TAG_ALREADY_EXISTS)
 
+    # Strip any stale peer-duplicate tags before applying the freshly computed one
+    # so we never accumulate both confirmed duplicate and potential duplicate.
+    stale_peer_tags = {TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE}
+    latest_req.tags = [t for t in (latest_req.tags or []) if t not in stale_peer_tags]
     if tags_to_add:
         latest_req.tags = merge_tags(latest_req.tags, tags_to_add)
-        flag_modified(latest_req, "tags")
+    flag_modified(latest_req, "tags")
 
 
 # ---------------------------------------------------------------------------
