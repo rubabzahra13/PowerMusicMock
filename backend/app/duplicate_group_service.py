@@ -797,6 +797,55 @@ def get_active_groups(
     return q.order_by(models.DuplicateGroup.created_at.desc()).limit(limit).all()
 
 
+def compute_group_classification_summary(
+    db: Session,
+    group: models.DuplicateGroup,
+    members: Optional[List[models.ManagerRequest]] = None,
+) -> dict:
+    """Compute per-request classification counts for a group (read-only).
+
+    Reads the existing tags stored on each member request — these are set
+    authoritatively at group-join time and reflect the actual classification
+    of each request relative to the group at the moment it joined.
+
+    Returns:
+        {
+            "alreadyExists": bool,      # True if group has a directory_person_id
+            "duplicateCount": int,       # number of members tagged confirmed_duplicate
+            "potentialCount": int,       # number of members tagged potential_duplicate
+        }
+
+    Design notes:
+    - The initial request (R1) has no duplicate tag — it is simply the anchor.
+      It does not contribute to either count.
+    - Already Exists is a single flag derived from directory_person_id.
+      It is never multiplied by the number of members.
+    - Counts are read from stored tags rather than recomputed on-the-fly so
+      that they always match what was calculated at join-time (e.g., for
+      requests with typos that would score differently on a fresh comparison).
+    """
+    if members is None:
+        members = get_group_members(db, group.id)
+
+    duplicate_count = 0
+    potential_count = 0
+
+    for member in members:
+        tags = set(member.tags or [])
+        if TAG_CONFIRMED_DUPLICATE in tags:
+            duplicate_count += 1
+        elif TAG_POTENTIAL_DUPLICATE in tags:
+            # elif: avoid double-counting if somehow both are present
+            potential_count += 1
+
+    return {
+        "alreadyExists": bool(group.directory_person_id),
+        "duplicateCount": duplicate_count,
+        "potentialCount": potential_count,
+    }
+
+
+
 # ---------------------------------------------------------------------------
 # Task 2 — Resolution actions
 # ---------------------------------------------------------------------------

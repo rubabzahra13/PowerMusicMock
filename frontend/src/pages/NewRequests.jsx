@@ -27,7 +27,7 @@ import { usePartners } from '../context/PartnerContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 import { formatPersonFields, formatPersonName, formatPersonEmail, formatPersonLocation } from '../utils/personDisplay';
-import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, requestStatusTag, requestStatusTags, matchesSentViaFilter, SENT_VIA_BOTH } from '../utils/requestTags';
+import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, requestStatusTag, requestStatusTags, matchesSentViaFilter, SENT_VIA_BOTH, groupClassificationPills } from '../utils/requestTags';
 import { hasAnyDataDiffs } from '../utils/requestComparison';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
 import { writeDirectoryCache } from '../utils/managerDirectoryCache';
@@ -308,8 +308,11 @@ function NewRequestsMobileList({
           isAdminEntry: isAdminEntry(row),
           includeAdminForm: false,
         });
-        const statusTags = requestStatusTags(row);
-        const directoryStatus = statusTags.length > 0 ? null : requestStatusTag(row);
+
+        // Grouped rows: aggregated summary pills
+        const mobileGroupPills = groupClassificationPills(row.groupClassificationSummary);
+        const statusTags = mobileGroupPills.length > 0 ? [] : requestStatusTags(row);
+        const directoryStatus = (mobileGroupPills.length > 0 || statusTags.length > 0) ? null : requestStatusTag(row);
 
         return (
           <li key={row.id} className="border-b border-[var(--color-border-default)] last:border-b-0">
@@ -340,7 +343,20 @@ function NewRequestsMobileList({
                         {formatRequestDisplayId(row.displayId)}
                       </span>
                       <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={row.action} compact />
-                      {statusTags.length > 0 ? (
+                      {mobileGroupPills.length > 0 ? (
+                        <span className="flex flex-wrap items-center justify-start gap-1.5">
+                          {mobileGroupPills.map((pill) => (
+                            <Tag
+                              key={pill.label}
+                              variant={pill.variant}
+                              label={pill.count != null ? `${pill.label} × ${pill.count}` : pill.label}
+                              prefix={pill.prefix}
+                              compact
+                              wide
+                            />
+                          ))}
+                        </span>
+                      ) : statusTags.length > 0 ? (
                         <span className="flex flex-wrap items-center justify-start gap-1.5">
                           {statusTags.map((tag) => (
                             <Tag
@@ -1278,6 +1294,26 @@ export default function Requests() {
       headerClassName: 'text-center',
       cellClassName: 'align-middle overflow-hidden text-center px-1',
       render: (_, row) => {
+        // --- Grouped row: use aggregated classification summary pills ---
+        const groupPills = groupClassificationPills(row.groupClassificationSummary);
+        if (groupPills.length > 0) {
+          return (
+            <span className="flex max-w-full flex-col items-center justify-center gap-1">
+              {groupPills.map((pill) => (
+                <Tag
+                  key={pill.label}
+                  variant={pill.variant}
+                  label={pill.count != null ? `${pill.label} × ${pill.count}` : pill.label}
+                  prefix={pill.prefix}
+                  compact
+                  fit
+                />
+              ))}
+            </span>
+          );
+        }
+
+        // --- Fallback: existing per-tag logic for non-grouped rows ---
         const statusTags = requestStatusTags(row);
         const status = statusTags.length > 0 ? null : requestStatusTag(row);
         if (statusTags.length > 0) {

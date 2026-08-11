@@ -81,6 +81,7 @@ from app.directory_person_match import (
 )
 from app.duplicate_group_service import (
     collect_selective_dismiss_targets,
+    compute_group_classification_summary,
     finalize_group_after_selective_dismiss,
     get_active_groups,
     get_dismiss_impact,
@@ -1412,6 +1413,9 @@ def get_duplicate_group_details(
             "createdBy": api.get("createdBy"),
         })
 
+    # Compute aggregated classification summary for this group
+    classification_summary = compute_group_classification_summary(db, group, members=members)
+
     return {
         "id": group.id,
         "partnerId": group.partner_id,
@@ -1422,6 +1426,7 @@ def get_duplicate_group_details(
         "directoryPersonId": group.directory_person_id,
         "representativeRequestId": group.representative_request_id,
         "members": member_out,
+        "classificationSummary": classification_summary,
     }
 
 
