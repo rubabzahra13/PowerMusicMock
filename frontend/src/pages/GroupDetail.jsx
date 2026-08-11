@@ -81,6 +81,9 @@ export default function GroupDetail() {
         case 'mark_removed':
           toastMsg = 'Request resolved and person marked as removed.';
           break;
+        case 'remove_group':
+          toastMsg = 'User marked as removed in Directory.';
+          break;
         case 'update':
           toastMsg = 'Merged and Directory record updated.';
           break;

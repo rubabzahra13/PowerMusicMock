@@ -1728,7 +1728,7 @@ def resolve_group_delete_directory_api(
     admin_id = str(admin.id) if getattr(admin, "id", None) else None
 
     count = resolve_group_delete_from_directory(
-        db, group, directory_person=dir_person, admin_id=admin_id, admin_note=payload.adminNote
+        db, group, directory_person=dir_person, final_values=payload.finalValues, admin_id=admin_id, admin_note=payload.adminNote
     )
 
     db.commit()
@@ -1751,7 +1751,7 @@ def resolve_group_delete_directory_api(
 )
 def resolve_group_mark_removed_api(
     group_id: str,
-    payload: schemas.ResolveMarkRemovedIn = schemas.ResolveMarkRemovedIn(),
+    payload: schemas.ResolveMarkRemovedIn,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
@@ -1766,7 +1766,7 @@ def resolve_group_mark_removed_api(
     admin_id = str(admin.id) if getattr(admin, "id", None) else None
 
     count = resolve_group_mark_removed(
-        db, group, admin_id=admin_id, admin_note=payload.adminNote
+        db, group, final_values=payload.finalValues, admin_id=admin_id, admin_note=payload.adminNote
     )
     dir_person_id = group.directory_person_id
     db.commit()

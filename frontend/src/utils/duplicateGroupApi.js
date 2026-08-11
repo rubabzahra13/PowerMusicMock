@@ -87,11 +87,12 @@ export const unlinkGroupMember = (groupId, { requestId1, requestId2 }) =>
  * POST /api/duplicate-groups/{groupId}/resolve-delete-directory
  * Case D — Remove request with existing Directory match. Permanently deletes Directory record.
  */
-export const resolveGroupDeleteFromDirectory = (groupId, { directoryPersonId, adminNote }) =>
+export const resolveGroupDeleteFromDirectory = (groupId, { directoryPersonId, finalValues, adminNote }) =>
   groupRequest(`/api/duplicate-groups/${groupId}/resolve-delete-directory`, {
     method: 'POST',
     body: JSON.stringify({
       directoryPersonId,
+      finalValues,
       adminNote: adminNote || null,
     }),
   });
@@ -100,10 +101,11 @@ export const resolveGroupDeleteFromDirectory = (groupId, { directoryPersonId, ad
  * POST /api/duplicate-groups/{groupId}/resolve-mark-removed
  * Case E — Remove request without existing Directory match.
  */
-export const resolveGroupMarkRemoved = (groupId, { adminNote }) =>
+export const resolveGroupMarkRemoved = (groupId, { finalValues, adminNote }) =>
   groupRequest(`/api/duplicate-groups/${groupId}/resolve-mark-removed`, {
     method: 'POST',
     body: JSON.stringify({
+      finalValues,
       adminNote: adminNote || null,
     }),
   });

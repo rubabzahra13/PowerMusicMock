@@ -15,6 +15,8 @@ import {
   resolveGroupUpdate,
   resolveGroupKeepExisting,
   unlinkGroupMember,
+  resolveGroupDeleteFromDirectory,
+  resolveGroupMarkRemoved,
 } from '../utils/duplicateGroupApi';
 import { matchClassification } from '../utils/duplicateMatch';
 import { groupClassificationPills } from '../utils/requestTags';
@@ -273,6 +275,10 @@ export default function GroupResolutionView({
 
   const handleConfirmMerge = async () => {
     const values = isEditing ? draftForm : (modalValues || form);
+    if (repMember?.action === 'Remove') {
+      await handleResolveRemove(values);
+      return;
+    }
     if (hasDirectory) {
       await handleConfirmUpdate(values);
     } else {
@@ -288,6 +294,43 @@ export default function GroupResolutionView({
     )[0];
     return current?.id || group.representativeRequestId || repMember?.id || null;
   })();
+
+  /* ── resolve & remove (Grouped Remove) ── */
+  const handleResolveRemove = async (values = form) => {
+    if (!values.firstName.trim() || !values.lastName.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      if (hasDirectory) {
+        await resolveGroupDeleteFromDirectory(group.id, {
+          directoryPersonId: group.directoryPersonId,
+          finalValues: {
+            firstName: values.firstName.trim(),
+            lastName: values.lastName.trim(),
+            email: (values.email || '').trim(),
+            location: (values.location || '').trim(),
+          },
+          adminNote: adminNote.trim() || null,
+        });
+      } else {
+        await resolveGroupMarkRemoved(group.id, {
+          finalValues: {
+            firstName: values.firstName.trim(),
+            lastName: values.lastName.trim(),
+            email: (values.email || '').trim(),
+            location: (values.location || '').trim(),
+          },
+          adminNote: adminNote.trim() || null,
+        });
+      }
+      closeConfirmModal();
+      closeMergePage();
+      onResolved('remove_group', personFullName(values));
+    } catch (err) {
+      onResolved('error', err.message || 'Failed to remove group.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   /* ── resolve & add (Case A) ── */
   const handleResolveAdd = async (values = form) => {
@@ -912,7 +955,7 @@ export default function GroupResolutionView({
                   className={BTN_PRIMARY}
                 >
                   <Check className="h-4 w-4" aria-hidden="true" />
-                  Merge & Update Request in Directory
+                  {repMember?.action === 'Remove' ? 'Merge and Remove' : 'Merge & Update Request in Directory'}
                 </button>
               </div>
             ) : null}
@@ -992,7 +1035,13 @@ export default function GroupResolutionView({
       <Modal
         isOpen={confirmAction === 'merge'}
         onClose={closeConfirmModal}
-        title={hasDirectory ? 'Merge and update Directory record?' : 'Merge and add to Directory?'}
+        title={
+          repMember?.action === 'Remove'
+            ? 'Merge and Remove?'
+            : hasDirectory
+            ? 'Merge and update Directory record?'
+            : 'Merge and add to Directory?'
+        }
         footer={
           <>
             <button
@@ -1008,13 +1057,19 @@ export default function GroupResolutionView({
               onClick={handleConfirmMerge}
               className="px-4 py-2 text-white text-sm font-semibold rounded-lg bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] shadow-sm cursor-pointer disabled:opacity-60"
             >
-              {submitting ? 'Merging…' : 'Merge & Add to Directory'}
+              {submitting
+                ? 'Merging…'
+                : repMember?.action === 'Remove'
+                ? 'Merge and Remove'
+                : 'Merge & Add to Directory'}
             </button>
           </>
         }
       >
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {hasDirectory
+          {repMember?.action === 'Remove'
+            ? 'The final resolved values will be used, and the person will be marked as removed in the Directory. The requests in this group will be closed.'
+            : hasDirectory
             ? 'The final resolved values will overwrite the existing Directory record, and the requests in this group will be closed.'
             : 'A new Directory record will be created from the final resolved values, and the requests in this group will be closed.'}
         </p>

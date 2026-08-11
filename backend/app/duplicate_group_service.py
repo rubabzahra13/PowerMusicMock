@@ -1297,13 +1297,15 @@ def resolve_group_delete_from_directory(
     group: models.DuplicateGroup,
     directory_person: models.ManagerRequest,
     *,
+    final_values: schemas.PersonInfo,
     admin_id: Optional[str],
     admin_note: Optional[str] = None,
 ) -> int:
-    """Resolve group by permanently deleting the Directory person.
+    """Resolve group by archiving (marking as Removed) the Directory person.
 
     Invariants:
-    - Permanently deletes the directory_person from the database.
+    - Updates the directory_person with final_values.
+    - Sets archived_at to now() to mark the person as Removed in the Directory.
     - Nullifies directory_person_id in any other DuplicateGroups pointing to it.
     - Does NOT call db.commit() — router commits.
 
@@ -1319,15 +1321,19 @@ def resolve_group_delete_from_directory(
         .values(directory_person_id=None)
     )
     
-    # 2. Permanently delete the directory record
-    db.delete(directory_person)
+    # 2. Update and Archive the directory record (mark as Removed)
+    directory_person.person_first_name = (final_values.firstName or "").strip()
+    directory_person.person_last_name = (final_values.lastName or "").strip()
+    directory_person.person_email = (final_values.email or "").strip()
+    directory_person.person_location = (final_values.location or "").strip()
+    directory_person.archived_at = now
 
     count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
 
     _finalize_group(
         db, group,
         resolution_type="delete",
-        final_values=None,
+        final_values=final_values,
         previous_values=None,
         admin_id=admin_id,
         admin_note=admin_note,
@@ -1344,13 +1350,15 @@ def resolve_group_mark_removed(
     db: Session,
     group: models.DuplicateGroup,
     *,
+    final_values: schemas.PersonInfo,
     admin_id: Optional[str],
+    partner_id: Optional[str] = None,
     admin_note: Optional[str] = None,
 ) -> int:
-    """Resolve group without modifying/creating the Directory (for Remove requests).
+    """Resolve group and create a Removed Directory record (Case E).
 
     Invariants:
-    - Directory record is left completely unchanged (or none is created).
+    - Creates a new Directory record with outcome='Removed' and archived_at=now.
     - Original group member rows are left immutable.
     - Does NOT call db.commit() — router commits.
 
@@ -1358,12 +1366,51 @@ def resolve_group_mark_removed(
     """
     now = datetime.now(timezone.utc)
 
+    # Allocate an id for the new Directory row.
+    from app.request_display import allocate_request_ids
+    from app.manager_request_tags import TAG_VERIFIED, TAG_PARTNER_REQUEST
+    (new_id,) = allocate_request_ids(db, 1)
+
+    # Create the Directory row marked as Removed (outcome="Removed", archived_at=now)
+    dir_row = models.ManagerRequest(
+        id=new_id,
+        received_at=now,
+        handled_at=now,
+        status="handled",
+        outcome="Removed",
+        action="Remove",
+        person_first_name=(final_values.firstName or "").strip(),
+        person_last_name=(final_values.lastName or "").strip(),
+        person_email=(final_values.email or "").strip(),
+        person_location=(final_values.location or "").strip(),
+        intake_persons={
+            "admin": {
+                "firstName": (final_values.firstName or "").strip(),
+                "lastName": (final_values.lastName or "").strip(),
+                "email": (final_values.email or "").strip(),
+                "location": (final_values.location or "").strip(),
+            }
+        },
+        tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST],
+        partner_id=partner_id or group.partner_id,
+        archived_at=now,
+    )
+    if admin_id and admin_id != "dev-bypass":
+        try:
+            from uuid import UUID
+            dir_row.handled_by_admin_id = UUID(admin_id)
+        except ValueError:
+            pass
+    if admin_note:
+        dir_row.admin_notes = admin_note
+    db.add(dir_row)
+
     count = _mark_group_members_resolved(db, group, admin_id=admin_id, now=now)
 
     _finalize_group(
         db, group,
         resolution_type="mark_removed",
-        final_values=None,
+        final_values=final_values,
         previous_values=None,
         admin_id=admin_id,
         admin_note=admin_note,

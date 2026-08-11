@@ -698,12 +698,14 @@ class ResolveDeleteIn(BaseModel):
     """
 
     directoryPersonId: str
+    finalValues: PersonInfo
     adminNote: Optional[str] = Field(default=None, max_length=5000)
 
 
 class ResolveMarkRemovedIn(BaseModel):
     """POST /api/duplicate-groups/{id}/resolve-mark-removed (Case E)."""
 
+    finalValues: PersonInfo
     adminNote: Optional[str] = Field(default=None, max_length=5000)
 
 
