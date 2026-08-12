@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   AtSign,
+  Check,
+  Copy,
+  Eye,
+  LayoutTemplate,
   Loader2,
   Mail,
   Plus,
   Shield,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { AdminPageScroll, Toast, useToast, CardListSkeleton, Modal, HoverTip } from '../components/ui';
@@ -27,6 +33,8 @@ import {
   loadWithCache,
   updateInbox,
   writeCache,
+  getPartnerCustomForm,
+  updatePartnerCustomForm,
 } from '../utils/pilot2Api';
 
 const MAX_CONNECTED_INBOXES = 7;
@@ -43,6 +51,12 @@ const SETTINGS_TABS = [
     label: 'Email automation settings',
     descriptionFor: () => 'Inbox connection and auto sources',
     Icon: Mail,
+  },
+  {
+    id: 'form-builder',
+    label: 'Custom Manager Form',
+    descriptionFor: () => 'Build a branded form for managers',
+    Icon: LayoutTemplate,
   },
 ];
 
@@ -253,6 +267,15 @@ export default function PartnerSettings() {
   const [partnerNameEditing, setPartnerNameEditing] = useState(false);
   const [settingsTab, setSettingsTab] = useState('access');
 
+  // ── Form builder state ───────────────────────────────────────────────────
+  const [formFields, setFormFields] = useState([]);
+  const [logoDataUrl, setLogoDataUrl] = useState(null);  // base64 data URL — survives cross-tab
+  const [builtForm, setBuiltForm] = useState(null);
+  const [formErrors, setFormErrors] = useState({});
+  const [formAttempted, setFormAttempted] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
+  const logoInputRef = useRef(null);
+
   const connectedAccounts = useMemo(
     () => accounts.filter((account) => account.status === 'Connected'),
     [accounts],
@@ -309,6 +332,32 @@ export default function PartnerSettings() {
   useEffect(() => {
     setPartnerNameDraft(selectedPartner?.name || '');
     setPartnerNameEditing(false);
+    
+    // Fetch custom form for partner
+    if (selectedPartnerId) {
+      getPartnerCustomForm(selectedPartnerId).then(res => {
+        if (res && res.fields && res.fields.length > 0) {
+          const config = {
+            partnerName: selectedPartner?.name || 'Partner',
+            logoDataUrl: res.logo_data_url,
+            fields: res.fields
+          };
+          setBuiltForm(config);
+          setLogoDataUrl(res.logo_data_url);
+          setFormFields(res.fields);
+        } else {
+          setBuiltForm(null);
+          setLogoDataUrl(null);
+          setFormFields([]);
+        }
+      }).catch(err => {
+        console.error("Could not load custom form", err);
+      });
+    } else {
+      setBuiltForm(null);
+      setLogoDataUrl(null);
+      setFormFields([]);
+    }
   }, [selectedPartner?.name, selectedPartnerId]);
 
   const startPartnerRename = () => {
@@ -534,6 +583,75 @@ export default function PartnerSettings() {
     && partnerNameDraft.trim() !== (selectedPartner?.name || '')
     && partnerNameDraft.trim().length > 0;
 
+  // ── Form builder helpers ─────────────────────────────────────────────────
+  const handleLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setLogoDataUrl(ev.target.result);
+      setFormErrors((prev) => ({ ...prev, logo: null }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveLogo = () => {
+    setLogoDataUrl(null);
+    if (logoInputRef.current) logoInputRef.current.value = '';
+  };
+
+  const handleAddField = () => {
+    setFormFields((prev) => [...prev, { id: `f_${Date.now()}`, name: '', type: 'Text' }]);
+  };
+
+  const handleRemoveField = (id) => {
+    setFormFields((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const handleFieldChange = (id, key, value) => {
+    setFormFields((prev) => prev.map((f) => f.id === id ? { ...f, [key]: value } : f));
+  };
+
+  const handleCreateForm = async () => {
+    setFormAttempted(true);
+    const errors = {};
+    if (!logoDataUrl) errors.logo = 'Please upload a partner logo.';
+    if (formFields.length === 0) errors.fields = 'Add at least one field to the form.';
+    const fieldErrors = {};
+    formFields.forEach((f) => { if (!f.name.trim()) fieldErrors[f.id] = 'Field name is required.'; });
+    if (Object.keys(fieldErrors).length > 0) errors.fieldErrors = fieldErrors;
+    if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
+    setFormErrors({});
+    
+    const partnerName = selectedPartner?.name || 'Partner';
+    const config = { partnerName, logoDataUrl, fields: formFields.map((f) => ({ ...f })) };
+    
+    try {
+      await updatePartnerCustomForm(selectedPartnerId, {
+        logo_data_url: logoDataUrl,
+        fields: config.fields
+      });
+      setBuiltForm(config);
+      showToast('Custom form saved to database.', 'success');
+    } catch (err) {
+      showToast(`Could not save custom form: ${err.message}`, 'error');
+    }
+  };
+
+  const handleEditForm = () => setBuiltForm(null);
+
+  const builtFormSlug = builtForm
+    ? (builtForm.partnerName || 'partner').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    : '';
+  const builtFormUrl = builtForm ? `${window.location.origin}/${builtFormSlug}/submit` : '';
+
+  const handleCopyUrl = () => {
+    navigator.clipboard.writeText(builtFormUrl).then(() => {
+      setUrlCopied(true);
+      setTimeout(() => setUrlCopied(false), 2000);
+    });
+  };
+
   return (
     <AdminPageScroll dataPage="partner-settings" contentClassName="min-w-0 select-none pb-16">
       <Toast />
@@ -551,7 +669,7 @@ export default function PartnerSettings() {
         <div
           role="tablist"
           aria-label={`${partnerLabel} settings sections`}
-          className="mb-5 grid grid-cols-1 gap-1 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] p-1 sm:grid-cols-2"
+          className="mb-5 grid grid-cols-1 gap-1 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] p-1 sm:grid-cols-3"
         >
           {SETTINGS_TABS.map((tab) => {
             const selected = settingsTab === tab.id;
@@ -710,7 +828,7 @@ export default function PartnerSettings() {
             )}
           </SettingsSection>
             </SettingsPage>
-          ) : (
+          ) : settingsTab === 'automation' ? (
             <SettingsPage>
           <SettingsSection
             id="connected-inbox"
@@ -854,6 +972,188 @@ export default function PartnerSettings() {
             )}
           </SettingsSection>
             </SettingsPage>
+          ) : (
+            // ── Custom Manager Form Builder ──────────────────────────────────
+            <>
+              {builtForm ? (
+                // Preview
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3 py-1">
+                    <TextButton onClick={handleEditForm}>
+                      <ArrowLeft className="h-4 w-4" /> Edit form
+                    </TextButton>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Form Preview</span>
+                  </div>
+
+                  {/* URL card */}
+                  <div className="overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white shadow-sm">
+                    <div className="border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-5 py-4">
+                      <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Manager Form URL</h2>
+                      <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Share this link with managers. (Prototype, not yet active.)</p>
+                    </div>
+                    <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
+                      <code className="min-w-0 flex-1 break-all rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+                        {builtFormUrl}
+                      </code>
+                      <FilledButton onClick={handleCopyUrl}>
+                        {urlCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        {urlCopied ? 'Copied!' : 'Copy URL'}
+                      </FilledButton>
+                    </div>
+                  </div>
+
+                  {/* Form preview card */}
+                  <div className="overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white shadow-sm">
+                    <div className="flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-5 py-3">
+                      <Eye className="h-4 w-4 text-[var(--color-text-muted)]" />
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Preview: how managers will see this form</span>
+                    </div>
+                    <div className="mx-auto max-w-md space-y-6 px-6 py-8">
+                      <div className="flex flex-col items-center gap-3 text-center">
+                        <img src={builtForm.logoDataUrl} alt={builtForm.partnerName} className="h-16 w-16 rounded-xl border border-[var(--color-border-default)] bg-white object-contain p-1.5" />
+                        <div>
+                          <h2 className="text-lg font-bold text-[var(--color-text-primary)]">{builtForm.partnerName}</h2>
+                          <p className="mt-1 text-base font-bold text-[var(--color-text-primary)]">Submission Form</p>
+                          <p className="mt-1.5 text-sm text-[var(--color-text-secondary)]">Power Music admin has invited you to fill out this form.</p>
+                          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Please provide the requested information below.</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        {builtForm.fields.map((field) => (
+                          <div key={field.id}>
+                            <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-primary)]">{field.name}</label>
+                            {field.type === 'Date' ? (
+                              <input type="date" className={fieldStandaloneClass} readOnly />
+                            ) : field.type === 'Number' ? (
+                              <input type="number" placeholder="0" className={fieldStandaloneClass} readOnly />
+                            ) : field.type === 'Email' ? (
+                              <input type="email" placeholder="name@example.com" className={fieldStandaloneClass} readOnly />
+                            ) : (
+                              <input type="text" className={fieldStandaloneClass} readOnly />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <FilledButton
+                        onClick={() => showToast('Form submission is not available in this prototype.', 'success')}
+                      >
+                        Submit
+                      </FilledButton>
+
+                      <p className="text-center text-[10px] text-[var(--color-text-muted)]">
+                        Prototype preview only. Submission is not functional.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                // Builder
+                <SettingsPage>
+                  <SettingsSection id="form-partner" title="Partner" hint="The custom manager form will be created for this partner.">
+                    <div className="flex items-center gap-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3">
+                      <p className="text-sm font-medium text-[var(--color-text-primary)]">{selectedPartner?.name || 'No partner selected'}</p>
+                    </div>
+                  </SettingsSection>
+
+                  <SettingsSection id="form-logo" title="Partner Logo" hint="Required. Shown at the top of the manager form.">
+                    {logoDataUrl ? (
+                      <div className="flex items-center gap-4">
+                        <img src={logoDataUrl} alt="Partner logo" className="h-16 w-16 rounded-lg border border-[var(--color-border-default)] bg-white object-contain p-1.5" />
+                        <div className="space-y-1">
+                          <TextButton onClick={() => logoInputRef.current?.click()}>Replace logo</TextButton>
+                          <div>
+                            <button type="button" onClick={handleRemoveLogo} className="block rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50">
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => logoInputRef.current?.click()}
+                        className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-8 text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand-primary)]/40 hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
+                      >
+                        <Upload className="h-5 w-5" />
+                        <span className="font-medium">Upload Logo</span>
+                        <span className="text-xs text-[var(--color-text-muted)]">PNG, JPG, SVG, or WEBP</span>
+                      </button>
+                    )}
+                    <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+                    {formAttempted && formErrors.logo && (
+                      <p className="mt-2 text-[11px] text-red-600">{formErrors.logo}</p>
+                    )}
+                  </SettingsSection>
+
+                  <SettingsSection
+                    id="form-fields"
+                    title="Form Fields"
+                    hint="Add the fields you want managers to fill in when submitting a request."
+                    action={<TextButton onClick={handleAddField}><Plus className="h-4 w-4" /> Add Field</TextButton>}
+                  >
+                    {formFields.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-8 text-center">
+                        <p className="text-sm font-medium text-[var(--color-text-secondary)]">No fields added yet.</p>
+                        <p className="mt-1 text-xs text-[var(--color-text-muted)]">Add fields to build your manager form.</p>
+                      </div>
+                    ) : (
+                      <ul className="space-y-3">
+                        {formFields.map((field, index) => (
+                          <li key={field.id} className="space-y-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Field {index + 1}</p>
+                              <IconButton label="Remove field" onClick={() => handleRemoveField(field.id)} danger>
+                                <Trash2 className="h-4 w-4" />
+                              </IconButton>
+                            </div>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <div>
+                                <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-primary)]">Field name</label>
+                                <input
+                                  type="text"
+                                  placeholder="e.g. First Name"
+                                  value={field.name}
+                                  onChange={(e) => handleFieldChange(field.id, 'name', e.target.value)}
+                                  className={fieldStandaloneClass + (formAttempted && formErrors.fieldErrors?.[field.id] ? ' !border-red-300 focus:!border-red-400' : '')}
+                                />
+                                {formAttempted && formErrors.fieldErrors?.[field.id] && (
+                                  <p className="mt-1 text-[11px] text-red-600">{formErrors.fieldErrors[field.id]}</p>
+                                )}
+                              </div>
+                              <div>
+                                <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-primary)]">Data type</label>
+                                <select
+                                  value={field.type}
+                                  onChange={(e) => handleFieldChange(field.id, 'type', e.target.value)}
+                                  className={fieldStandaloneClass}
+                                >
+                                  <option value="Text">Text</option>
+                                  <option value="Number">Number</option>
+                                  <option value="Email">Email</option>
+                                  <option value="Date">Date</option>
+                                  <option value="Text and Number">Text and Number</option>
+                                </select>
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {formAttempted && formErrors.fields && (
+                      <p className="mt-2 text-[11px] text-red-600">{formErrors.fields}</p>
+                    )}
+                  </SettingsSection>
+
+                  <section className="px-5 py-5 sm:px-6">
+                    <FilledButton onClick={handleCreateForm}>
+                      Create Custom Manager Form
+                    </FilledButton>
+                  </section>
+                </SettingsPage>
+              )}
+            </>
           )}
         </div>
       </div>

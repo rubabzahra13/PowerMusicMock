@@ -739,3 +739,15 @@ class ResolveGroupResultOut(BaseModel):
     resolutionType: str  # "add" | "update" | "keep_existing"
     directoryPersonId: Optional[str] = None  # new or existing dir row id
     resolvedRequestCount: int = 0
+
+
+class PartnerCustomFormOut(BaseModel):
+    partner_id: str
+    logo_data_url: Optional[str] = None
+    fields: list = Field(default_factory=list)
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PartnerCustomFormIn(BaseModel):
+    logo_data_url: Optional[str] = None
+    fields: list = Field(default_factory=list)

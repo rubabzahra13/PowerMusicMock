@@ -321,6 +321,20 @@ export const createPartner = ({ name, allowedDomains = [], automatedSources = []
 export const updatePartner = (id, name) =>
   request(`/api/partners/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
 
+// --- Custom Manager Form API ---
+
+export const getPartnerCustomForm = (partnerId) =>
+  request(`/api/partners/${partnerId}/custom-form`);
+
+export const updatePartnerCustomForm = (partnerId, payload) =>
+  request(`/api/partners/${partnerId}/custom-form`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+
+export const getPublicCustomForm = (partnerSlug) =>
+  request(`/api/public/custom-form/${partnerSlug}`);
+
 // Inboxes
 export const getInboxes = (partnerId = '') => {
   const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';

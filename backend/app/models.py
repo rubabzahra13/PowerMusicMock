@@ -450,3 +450,13 @@ class AutomatedRosterSource(Base):
     kind = Column(String, nullable=False)  # email | domain
     pattern = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class PartnerCustomForm(Base):
+    """Custom manager submission form configuration per partner."""
+
+    __tablename__ = "partner_custom_forms"
+
+    partner_id = Column(String, ForeignKey("partners.id", ondelete="CASCADE"), primary_key=True)
+    logo_data_url = Column(Text, nullable=True)
+    fields = Column(JSONB, nullable=False, server_default="[]")

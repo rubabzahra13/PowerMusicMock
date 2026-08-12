@@ -1767,3 +1767,59 @@ def resolve_group_mark_removed_api(
         "directoryPersonId": dir_person_id,
         "resolvedRequestCount": count,
     }
+
+
+# ── Custom Manager Form Builder ───────────────────────────────────────────
+
+@router.get("/api/partners/{partner_id}/custom-form", response_model=schemas.PartnerCustomFormOut)
+def get_partner_custom_form(partner_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
+    form = db.query(models.PartnerCustomForm).filter(models.PartnerCustomForm.partner_id == partner_id).first()
+    if not form:
+        return {"partner_id": partner_id, "logo_data_url": None, "fields": []}
+    return form
+
+
+@router.put("/api/partners/{partner_id}/custom-form", response_model=schemas.PartnerCustomFormOut)
+def update_partner_custom_form(
+    partner_id: str,
+    payload: schemas.PartnerCustomFormIn,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin)
+):
+    partner = db.query(models.Partner).filter(models.Partner.id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+        
+    form = db.query(models.PartnerCustomForm).filter(models.PartnerCustomForm.partner_id == partner_id).first()
+    if not form:
+        form = models.PartnerCustomForm(partner_id=partner_id)
+        db.add(form)
+        
+    form.logo_data_url = payload.logo_data_url
+    form.fields = payload.fields
+    db.commit()
+    db.refresh(form)
+    return form
+
+
+@router.get("/api/public/custom-form/{partner_slug}")
+def get_public_custom_form(partner_slug: str, db: Session = Depends(get_db)):
+    import re
+    partners = db.query(models.Partner).all()
+    
+    target_partner = None
+    for p in partners:
+        slug = re.sub(r'[^a-z0-9-]', '', re.sub(r'\s+', '-', p.name.lower()))
+        if slug == partner_slug:
+            target_partner = p
+            break
+            
+    if not target_partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+        
+    form = db.query(models.PartnerCustomForm).filter(models.PartnerCustomForm.partner_id == target_partner.id).first()
+    return {
+        "partnerName": target_partner.name,
+        "logoDataUrl": form.logo_data_url if form else None,
+        "fields": form.fields if form else []
+    }
