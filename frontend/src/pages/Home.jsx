@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache, getDashboard } from '../utils/pilot2Api';
-import { AdminPageScroll, DottedScroll, PanelListSkeleton } from '../components/ui';
+import { AdminPageScroll, DottedScroll, PanelListSkeleton, DateFilter } from '../components/ui';
+import { calculateDateBounds } from '../utils/dateFilters';
 import { TAG_ALREADY_EXISTS, TAG_PARTNER_REQUEST, TAG_AUTO_MAIL } from '../utils/requestTags';
 import { usePartners } from '../context/PartnerContext';
 
@@ -419,30 +420,41 @@ export default function Home() {
   const [insights, setInsights] = useState(EMPTY_INSIGHTS);
   const [activity, setActivity] = useState([]);
   const [ready, setReady] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [dateFilter, setDateFilter] = useState({ type: 'all', value: null });
+
+  const hasDateFilter = dateFilter.type !== 'all';
 
   useEffect(() => {
+    const bounds = calculateDateBounds(dateFilter.type, dateFilter.value);
+    const startIso = bounds.start ? bounds.start.toISOString() : '';
+    const endIso = bounds.end ? bounds.end.toISOString() : '';
+
     const applyDashboard = (data) => {
       setPendingRequests(data.pendingRequests || []);
       setKpis(data.kpis || { pendingRequests: 0, usersInLedger: 0 });
       setInsights(data.insights || EMPTY_INSIGHTS);
       setActivity(data.activity || []);
       setReady(true);
+      setFetching(false);
     };
     const load = () => {
+      setFetching(true);
       loadWithCache(
-        `home_dashboard_v2:${selectedPartnerId || ''}`, 
-        () => getDashboard(selectedPartnerId), 
+        `home_dashboard_v2:${selectedPartnerId || ''}:${startIso}:${endIso}`, 
+        () => getDashboard(selectedPartnerId, startIso, endIso), 
         applyDashboard
       ).catch((err) => {
         console.error(err);
         setReady(true);
+        setFetching(false);
       });
     };
     load();
     const refresh = () => { if (!document.hidden) load(); };
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
-  }, [location.key, selectedPartnerId]);
+  }, [location.key, selectedPartnerId, dateFilter]);
 
   const duplicateAlerts = useMemo(
     () => (Array.isArray(pendingRequests) ? pendingRequests : [])
@@ -507,6 +519,11 @@ export default function Home() {
         description={`A live view of ${partnerLabel} requests, Users Directory, and what needs your attention.`}
         borderless
         className="shrink-0"
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <DateFilter value={dateFilter} onChange={setDateFilter} loading={fetching} />
+          </div>
+        }
       />
 
       {!ready ? (
@@ -538,7 +555,7 @@ export default function Home() {
               onClick={() => navigate('/directory')}
             />
             <InsightCard
-              label="Handled this week"
+              label={hasDateFilter ? "Handled in period" : "Handled this week"}
               value={insights.handledThisWeek}
               hint={`${insights.receivedThisWeek} New Requests received`}
               icon={CheckCircle2}
@@ -550,7 +567,7 @@ export default function Home() {
           <div className="grid shrink-0 grid-cols-1 gap-3 xl:grid-cols-5">
             <div className="h-[14rem] xl:col-span-3 xl:h-[16rem]">
               <ChartCard
-                title="This week’s flow"
+                title={hasDateFilter ? "Period flow" : "This week’s flow"}
                 subtitle="Requests received vs requests you handled"
                 legend={(
                   <div className="flex items-center gap-3">

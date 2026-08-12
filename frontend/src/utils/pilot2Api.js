@@ -252,8 +252,14 @@ export function applyNewRequestsSuppressions(requests) {
 }
 
 // Combined page payloads (one round trip per view)
-export const getDashboard = (partnerId) =>
-  request(`/api/dashboard${partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : ''}`);
+export const getDashboard = (partnerId, startDate, endDate) => {
+  const params = new URLSearchParams();
+  if (partnerId) params.append('partner_id', partnerId);
+  if (startDate) params.append('start_date', startDate);
+  if (endDate) params.append('end_date', endDate);
+  const qs = params.toString();
+  return request(`/api/dashboard${qs ? `?${qs}` : ''}`);
+};
 export const getPilot2Overview = () => request('/api/pilot2/overview');
 export const getNewRequestsPage = (partnerId = '') => {
   const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';

@@ -3,7 +3,7 @@ import { useLocation, useSearchParams, Link } from 'react-router-dom';
 import { Search, Download, Info, SortAsc, ChevronDown, Filter, ArrowRight, Mail, UserRound, CheckCircle2, Pencil, Loader2, Archive, RotateCcw, Trash2 } from 'lucide-react';
 
 import { formatTimestampSplit } from '../utils/dateTime';
-import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, Modal, Toast, useToast, HoverTip } from '../components/ui';
+import { DataTable, Tag, Drawer, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, Modal, Toast, useToast, HoverTip, DateFilter } from '../components/ui';
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache, updatePerson, archivePerson, restorePerson, fetchArchivedPeople, bulkArchivePersons, bulkRestorePersons, bulkDeletePersons } from '../utils/pilot2Api';
 import { fetchJson } from '../utils/api';
@@ -15,6 +15,7 @@ import {
   ADMIN_NEW_ROW_HIGHLIGHT_CLASS,
 } from '../utils/adminUiHighlights';
 import { formatRequestDisplayId, formatAdminDateTime, formatAdminDate } from '../utils/requestDisplayId';
+import { calculateDateBounds, filterByDateRange } from '../utils/dateFilters';
 import { formatManagerNotes, readManagerNotes, MANAGER_NOTES_EMPTY_LABEL } from '../utils/managerNotes';
 import { csvCell } from '../utils/csvSafe';
 import { getDirectoryManagerColumnContent } from '../utils/manualEntry';
@@ -152,7 +153,8 @@ function ControlsBar({
   filterOpen, setFilterOpen,
   filterSlots,
   sortPreset, setSortPreset,
-  activeFilterCount
+  activeFilterCount,
+  dateFilter, setDateFilter
 }) {
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef(null);
@@ -210,7 +212,8 @@ function ControlsBar({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+            <DateFilter value={dateFilter} onChange={setDateFilter} />
             <button
               onClick={() => { setFilterOpen((o) => !o); setSortOpen(false); }}
               className={toolbarBtnClass(filterOpen || activeFilterCount > 0)}
@@ -903,6 +906,7 @@ export default function UserLedger() {
   selectedUserRef.current = selectedUser;
   const [sortPreset, setSortPreset] = useState(DEFAULT_SORT);
   const [filterOpen, setFilterOpen] = useState(true);
+  const [dateFilter, setDateFilter] = useState({ type: 'all', value: null });
 
   const handleSaveEditUser = (updatedUser) => {
     setLiveUserLedger((prev) =>
@@ -1040,7 +1044,10 @@ export default function UserLedger() {
       return matchesSearch && matchesFirstName && matchesLastName && matchesEmail && matchesLocation;
     });
 
-    return [...filtered].sort((a, b) => {
+    const bounds = calculateDateBounds(dateFilter.type, dateFilter.value);
+    const timeFiltered = filterByDateRange(filtered, (user) => directoryView === 'archived' && user.archivedAt ? user.archivedAt : user.dateAdded, bounds);
+
+    return [...timeFiltered].sort((a, b) => {
       if (field === 'managerName') return personManagerName(a).localeCompare(personManagerName(b)) * sortDir;
       if (field === 'firstName') {
         const nA = (a.firstName || '').toLowerCase();
@@ -1061,7 +1068,7 @@ export default function UserLedger() {
       if (field === 'dateAdded') return (new Date(a.dateAdded) - new Date(b.dateAdded)) * sortDir;
       return (a.displayId - b.displayId) * sortDir;
     });
-  }, [currentLedger, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset]);
+  }, [currentLedger, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset, dateFilter.type, dateFilter.value, directoryView]);
 
   const activeFilterCount = [
     filterFirstName !== 'All',
@@ -1370,7 +1377,7 @@ export default function UserLedger() {
     }
   ];
 
-  const listResetKey = [directoryView, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset].join('|');
+  const listResetKey = [directoryView, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset, dateFilter.type, dateFilter.value].join('|');
   const {
     pageItems,
     page,
@@ -1501,6 +1508,8 @@ export default function UserLedger() {
         filterOpen={filterOpen}
         setFilterOpen={setFilterOpen}
         activeFilterCount={activeFilterCount}
+        dateFilter={dateFilter}
+        setDateFilter={setDateFilter}
         filterSlots={[
           {
             label: 'Person First Name',

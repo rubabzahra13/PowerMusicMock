@@ -31,6 +31,8 @@ def build_dashboard_insights(
     pending: List[models.ManagerRequest],
     pending_payloads: Optional[List[dict]] = None,
     partner_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> dict:
     pending_add = sum(1 for row in pending if (row.action or "").lower() == "add")
     pending_remove = sum(1 for row in pending if (row.action or "").lower() == "remove")
@@ -56,17 +58,30 @@ def build_dashboard_insights(
     users_removed = len(removed_snapshot_rows(db, limit=10_000, partner_id=partner_id))
 
     now = datetime.now(timezone.utc)
-    week_start = _day_start(now) - timedelta(days=6)
+    if start_date and end_date:
+        filter_start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+        filter_end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+    else:
+        filter_start = _day_start(now) - timedelta(days=6)
+        filter_end = now
 
-    received_query = db.query(func.count(models.ManagerRequest.id)).filter(models.ManagerRequest.received_at >= week_start)
+    received_query = db.query(func.count(models.ManagerRequest.id)).filter(
+        models.ManagerRequest.received_at >= filter_start,
+        models.ManagerRequest.received_at <= filter_end
+    )
     handled_query = db.query(func.count(models.ManagerRequest.id)).filter(
         models.ManagerRequest.status == "handled",
-        models.ManagerRequest.handled_at >= week_start,
+        models.ManagerRequest.handled_at >= filter_start,
+        models.ManagerRequest.handled_at <= filter_end,
     )
-    received_rows_query = db.query(models.ManagerRequest.received_at).filter(models.ManagerRequest.received_at >= week_start)
+    received_rows_query = db.query(models.ManagerRequest.received_at).filter(
+        models.ManagerRequest.received_at >= filter_start,
+        models.ManagerRequest.received_at <= filter_end
+    )
     handled_rows_query = db.query(models.ManagerRequest.handled_at).filter(
         models.ManagerRequest.status == "handled",
-        models.ManagerRequest.handled_at >= week_start,
+        models.ManagerRequest.handled_at >= filter_start,
+        models.ManagerRequest.handled_at <= filter_end,
     )
 
     if partner_id:
@@ -94,13 +109,15 @@ def build_dashboard_insights(
         handled_by_day[key] = handled_by_day.get(key, 0) + 1
 
     weekly_trend = []
-    for offset in range(7):
-        day = week_start + timedelta(days=offset)
+    days_delta = max((filter_end - filter_start).days + 1, 1)
+    
+    for offset in range(days_delta):
+        day = filter_start + timedelta(days=offset)
         key = day.date().isoformat()
         weekly_trend.append(
             {
                 "date": key,
-                "label": day.strftime("%a"),
+                "label": day.strftime("%a") if days_delta <= 14 else day.strftime("%d %b"),
                 "received": received_by_day.get(key, 0),
                 "handled": handled_by_day.get(key, 0),
             }

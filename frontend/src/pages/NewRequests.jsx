@@ -4,7 +4,7 @@ import {
   Search, Plus, SortAsc, ChevronDown, Filter, ArrowRight, X, Trash2
 } from 'lucide-react';
 import { formatTimestampSplit, isTodayInTimeZone, isYesterdayInTimeZone } from '../utils/dateTime';
-import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, HoverTip } from '../components/ui';
+import { DataTable, Tag, Modal, Toast, useToast, SelectDropdown, StackedTextCell, TruncateCell, EMPTY_CELL, CountTabs, AdminPageScroll, TablePagination, HoverTip, DateFilter } from '../components/ui';
 import DuplicateStatusHint, { StatusColumnPlainLabel } from '../components/ui/DuplicateStatusHint';
 import PageHeader from '../components/layout/PageHeader';
 import { getManagerColumnContent, getManagerDisplayName, isManualEntry, isAdminEntry } from '../utils/manualEntry';
@@ -28,6 +28,7 @@ import { usePartners } from '../context/PartnerContext';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
 import { formatPersonFields, formatPersonName, formatPersonEmail, formatPersonLocation } from '../utils/personDisplay';
+import { calculateDateBounds, filterByDateRange } from '../utils/dateFilters';
 import { TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, requestTagVariant, sentViaTableRequestTags, requestTagLabel, isAwaitingManagerSubmission, requestStatusTag, requestStatusTags, matchesSentViaFilter, SENT_VIA_BOTH, groupDirectoryStatusPills, groupDuplicateStatusIndicator, requestDirectoryStatusTags, requestDuplicateStatusIndicator } from '../utils/requestTags';
 import { hasAnyDataDiffs } from '../utils/requestComparison';
 import { MAX_MANAGER_PERSON_ROWS } from '../utils/managerFormDraft';
@@ -90,7 +91,8 @@ function ControlsBar({
   filterOpen, setFilterOpen,
   filterSlots,
   sortPreset, setSortPreset,
-  activeFilterCount
+  activeFilterCount,
+  dateFilter, setDateFilter
 }) {
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef(null);
@@ -148,7 +150,8 @@ function ControlsBar({
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+          <DateFilter value={dateFilter} onChange={setDateFilter} />
           <button
             onClick={() => { setFilterOpen((o) => !o); setSortOpen(false); }}
             className={toolbarBtnClass(filterOpen || activeFilterCount > 0)}
@@ -706,6 +709,7 @@ export default function Requests() {
   const [filterStatus, setFilterStatus] = useState('All');
   const [sortPreset, setSortPreset] = useState(DEFAULT_SORT);
   const [filterOpen, setFilterOpen] = useState(true);
+  const [dateFilter, setDateFilter] = useState({ type: 'all', value: null });
 
   // ── Drawer / Modal states ──
   const [confirmActionRequest, setConfirmActionRequest] = useState(null);
@@ -801,7 +805,7 @@ export default function Requests() {
   // ── Generic filter + sort function ──
   const applyFilterSort = (rows, timestampKey) => {
     const query = searchQuery.trim().toLowerCase();
-    const filtered = rows.filter((req) => {
+    let filtered = rows.filter((req) => {
       const personName = formatPersonName(req.person, { empty: '' }).toLowerCase();
 
       const matchesSearch =
@@ -843,6 +847,9 @@ export default function Requests() {
       );
     });
 
+    const bounds = calculateDateBounds(dateFilter.type, dateFilter.value);
+    filtered = filterByDateRange(filtered, (req) => req[timestampKey], bounds);
+
     const { field: sortField, dir: sortDir } = parseSortPreset(sortPreset);
     const dir = sortDir === 'asc' ? 1 : -1;
     return [...filtered].sort((a, b) => {
@@ -880,7 +887,7 @@ export default function Requests() {
 
   const filteredRequests = useMemo(
     () => applyFilterSort(actionTabRows, 'receivedAt'),
-    [actionTabRows, searchQuery, actionTab, filterDate, filterLocation, filterSentVia, filterNeedsReview, filterStatus, sortPreset]
+    [actionTabRows, searchQuery, actionTab, filterDate, filterLocation, filterSentVia, filterNeedsReview, filterStatus, sortPreset, dateFilter]
   );
 
   const allCount = newRequests.length;
@@ -893,6 +900,7 @@ export default function Requests() {
     filterSentVia !== 'All',
     filterNeedsReview !== 'All',
     filterStatus !== 'All',
+    dateFilter.type !== 'all',
   ].filter(Boolean).length;
 
   // ── Manual form submit ──
@@ -1412,6 +1420,8 @@ export default function Requests() {
     filterNeedsReview,
     filterStatus,
     sortPreset,
+    dateFilter.type,
+    dateFilter.value,
   ].join('|');
   const {
     pageItems,
@@ -1486,6 +1496,7 @@ export default function Requests() {
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
         filterOpen={filterOpen} setFilterOpen={setFilterOpen}
         activeFilterCount={activeFilterCount}
+        dateFilter={dateFilter} setDateFilter={setDateFilter}
         filterSlots={[
           {
             label: 'Received',

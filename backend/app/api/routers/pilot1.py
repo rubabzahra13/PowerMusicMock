@@ -486,7 +486,13 @@ def get_kpis(partner_id: Optional[str] = None, db: Session = Depends(get_db), _a
 
 
 @router.get("/api/dashboard", response_model=schemas.DashboardOut)
-def get_dashboard(partner_id: Optional[str] = None, db: Session = Depends(get_db), _admin=Depends(require_admin)):
+def get_dashboard(
+    partner_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin)
+):
     pending = (
         _visible_new_requests_query(db, partner_id=partner_id)
         .order_by(request_id_numeric_desc())
@@ -494,7 +500,7 @@ def get_dashboard(partner_id: Optional[str] = None, db: Session = Depends(get_db
     )
     hydrate_request_display(pending)
     pending_payloads = requests_to_api_dicts(db, pending)
-    insights = build_dashboard_insights(db, pending=pending, pending_payloads=pending_payloads, partner_id=partner_id)
+    insights = build_dashboard_insights(db, pending=pending, pending_payloads=pending_payloads, partner_id=partner_id, start_date=start_date, end_date=end_date)
     return {
         "kpis": {
             "pendingRequests": len(pending),
