@@ -42,6 +42,10 @@ function directoryStatusLabel(row) {
   return 'Added';
 }
 
+function displayStatus(user) {
+  return directoryStatusLabel(user) === 'Added' ? 'Active' : 'Removed';
+}
+
 function buildFallbackHistory(user) {
   const events = [];
   if (user?.dateAdded) {
@@ -49,7 +53,7 @@ function buildFallbackHistory(user) {
       id: `${user.id}-handled`,
       type: 'handled',
       at: user.dateAdded,
-      title: `Marked as ${directoryStatusLabel(user)}`,
+      title: `Marked as ${displayStatus(user)}`,
       detail: `By ${personHandledBy(user)}`,
       displayId: user.displayId,
     });
@@ -567,7 +571,7 @@ function DirectoryMobileList({
                     </span>
                     <Tag
                       variant={directoryStatusLabel(row) === 'Added' ? 'added' : 'removed'}
-                      label={directoryStatusLabel(row)}
+                      label={displayStatus(row)}
                       compact
                     />
                     <div className="ml-auto flex items-center gap-1.5">
@@ -781,10 +785,15 @@ export default function UserLedger() {
     
     try {
       const restoredRecords = await bulkRestorePersons(ids, selectedPartnerId);
-      setArchivedUserLedger((prev) => prev.filter((r) => !selectedArchivedIds.has(r.id)));
-      setLiveUserLedger((prev) => {
+      const newlyActive = restoredRecords.filter(r => directoryStatusLabel(r) === 'Added');
+      const stillRemoved = restoredRecords.filter(r => directoryStatusLabel(r) === 'Removed');
+      
+      setArchivedUserLedger((prev) => {
         const remaining = prev.filter((r) => !selectedArchivedIds.has(r.id));
-        return [...restoredRecords, ...remaining];
+        return [...stillRemoved, ...remaining];
+      });
+      setLiveUserLedger((prev) => {
+        return [...newlyActive, ...prev];
       });
       
       setSelectedArchivedIds(new Set());
@@ -844,21 +853,37 @@ export default function UserLedger() {
     const query = selectedPartnerId ? `?partner_id=${encodeURIComponent(selectedPartnerId)}` : '';
 
     const applyPersons = (data) => {
-      setLiveUserLedger(Array.isArray(data) ? data : []);
+      const activeData = Array.isArray(data) ? data : [];
+      setLiveUserLedger(activeData.filter(r => directoryStatusLabel(r) === 'Added'));
+      setArchivedUserLedger(prev => {
+        const removed = activeData.filter(r => directoryStatusLabel(r) === 'Removed');
+        const prevArchived = prev.filter(r => r.archivedAt != null);
+        const map = new Map();
+        for (const r of prevArchived) map.set(r.id, r);
+        for (const r of removed) map.set(r.id, r);
+        return Array.from(map.values()).sort((a, b) => new Date(b.dateAdded || 0) - new Date(a.dateAdded || 0));
+      });
       setTableLoading(false);
     };
 
     const applyArchived = (data) => {
-      setArchivedUserLedger(Array.isArray(data) ? data : []);
+      const archivedData = Array.isArray(data) ? data : [];
+      setArchivedUserLedger(prev => {
+        const removed = prev.filter(r => r.archivedAt == null);
+        const map = new Map();
+        for (const r of archivedData) map.set(r.id, r);
+        for (const r of removed) map.set(r.id, r);
+        return Array.from(map.values()).sort((a, b) => new Date(b.dateAdded || 0) - new Date(a.dateAdded || 0));
+      });
     };
 
     const load = () => {
-      loadWithCache(cacheKey, () => fetchJson(`/api/persons${query}`), applyPersons).catch((err) => {
+      Promise.all([
+        loadWithCache(cacheKey, () => fetchJson(`/api/persons${query}`), applyPersons),
+        loadWithCache(archivedCacheKey, () => fetchJson(`/api/persons/archived${query}`), applyArchived)
+      ]).catch((err) => {
         console.error(err);
         setTableLoading(false);
-      });
-      loadWithCache(archivedCacheKey, () => fetchJson(`/api/persons/archived${query}`), applyArchived).catch((err) => {
-        console.error(err);
       });
     };
     load();
@@ -868,14 +893,6 @@ export default function UserLedger() {
   }, [selectedPartnerId]);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusTab, setStatusTab] = useState(() => {
-    const pending = sessionStorage.getItem('pm_directory_pending_tab');
-    if (pending === 'Added' || pending === 'Removed' || pending === 'All') {
-      sessionStorage.removeItem('pm_directory_pending_tab');
-      return pending;
-    }
-    return 'All';
-  });
   const [filterFirstName, setFilterFirstName] = useState('All');
   const [filterLastName, setFilterLastName] = useState('All');
   const [filterEmail, setFilterEmail] = useState('All');
@@ -924,13 +941,21 @@ export default function UserLedger() {
     setRestoringUserId(user.id);
     try {
       const restored = await restorePerson(user.id, selectedPartnerId);
-      setArchivedUserLedger((prev) => prev.filter((r) => r.id !== user.id));
-      setLiveUserLedger((prev) => [restored, ...prev.filter((r) => r.id !== user.id)]);
-      if (selectedUser?.id === user.id) {
-        setSelectedUser(restored);
+      if (directoryStatusLabel(restored) === 'Added') {
+        setArchivedUserLedger((prev) => prev.filter((r) => r.id !== user.id));
+        setLiveUserLedger((prev) => [restored, ...prev.filter((r) => r.id !== user.id)]);
+        if (selectedUser?.id === user.id) {
+          setSelectedUser(restored);
+        }
+        toast.show('Record restored to active Directory', 'success');
+      } else {
+        setArchivedUserLedger((prev) => prev.map((r) => (r.id === user.id ? restored : r)));
+        if (selectedUser?.id === user.id) {
+          setSelectedUser(restored);
+        }
+        toast.show('Record unarchived, but remains in Archive because its status is Removed', 'success');
       }
       setRestoringUser(null);
-      toast.show('Record restored to active Directory', 'success');
     } catch (err) {
       console.error(err);
       toast.show(err.message || 'Failed to restore record', 'error');
@@ -954,7 +979,6 @@ export default function UserLedger() {
   useEffect(() => {
     if (prevDirectoryViewRef.current === directoryView) return;
     prevDirectoryViewRef.current = directoryView;
-    setStatusTab('All');
     setSearchQuery('');
     setFilterFirstName('All');
     setFilterLastName('All');
@@ -967,41 +991,32 @@ export default function UserLedger() {
 
   const currentLedger = directoryView === 'archived' ? archivedUserLedger : liveUserLedger;
 
-  const addedCount = currentLedger.filter((u) => directoryStatusLabel(u) === 'Added').length;
-  const removedCount = currentLedger.filter((u) => directoryStatusLabel(u) === 'Removed').length;
-  const allCount = currentLedger.length;
-
-  const statusTabRows = useMemo(
-    () => (statusTab === 'All' ? currentLedger : currentLedger.filter((u) => directoryStatusLabel(u) === statusTab)),
-    [statusTab, currentLedger]
-  );
-
   const firstNameOptions = useMemo(
     () => buildFilterOptions(
-      [...new Set(statusTabRows.map((u) => u.firstName).filter(Boolean))].sort()
+      [...new Set(currentLedger.map((u) => u.firstName).filter(Boolean))].sort()
     ),
-    [statusTabRows]
+    [currentLedger]
   );
 
   const lastNameOptions = useMemo(
     () => buildFilterOptions(
-      [...new Set(statusTabRows.map((u) => u.lastName).filter(Boolean))].sort()
+      [...new Set(currentLedger.map((u) => u.lastName).filter(Boolean))].sort()
     ),
-    [statusTabRows]
+    [currentLedger]
   );
 
   const emailOptions = useMemo(
     () => buildFilterOptions(
-      [...new Set(statusTabRows.map((u) => u.email).filter(Boolean))].sort()
+      [...new Set(currentLedger.map((u) => u.email).filter(Boolean))].sort()
     ),
-    [statusTabRows]
+    [currentLedger]
   );
 
   const locationOptions = useMemo(
     () => buildFilterOptions(
-      [...new Set(statusTabRows.map((u) => u.location).filter(Boolean))].sort()
+      [...new Set(currentLedger.map((u) => u.location).filter(Boolean))].sort()
     ),
-    [statusTabRows]
+    [currentLedger]
   );
 
   const filteredLedger = useMemo(() => {
@@ -1009,7 +1024,7 @@ export default function UserLedger() {
     const { field, dir } = parseSortPreset(sortPreset);
     const sortDir = dir === 'asc' ? 1 : -1;
 
-    const filtered = statusTabRows.filter((user) => {
+    const filtered = currentLedger.filter((user) => {
       const fullName = `${user.firstName} ${user.lastName}`.toLowerCase();
       const matchesSearch =
         query === '' ||
@@ -1046,7 +1061,7 @@ export default function UserLedger() {
       if (field === 'dateAdded') return (new Date(a.dateAdded) - new Date(b.dateAdded)) * sortDir;
       return (a.displayId - b.displayId) * sortDir;
     });
-  }, [statusTabRows, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset]);
+  }, [currentLedger, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset]);
 
   const activeFilterCount = [
     filterFirstName !== 'All',
@@ -1080,7 +1095,6 @@ export default function UserLedger() {
     }
 
     consumedDirectoryDeepLinkRef.current = requestIdFromUrl;
-    setStatusTab(directoryStatusLabel(row));
     clearDirectoryPersonHighlight(row.email);
     setHighlightVersion((v) => v + 1);
     setSelectedUser(row);
@@ -1094,7 +1108,7 @@ export default function UserLedger() {
         `${user.firstName} ${user.lastName}`,
         user.email,
         user.location,
-        directoryStatusLabel(user),
+        displayStatus(user),
         formatAdminDate(user.dateAdded),
         personManagerName(user),
         user.managerEmail || '',
@@ -1108,8 +1122,7 @@ export default function UserLedger() {
     const link = document.createElement('a');
     link.setAttribute('href', url);
     const scope = directoryView === 'archived' ? 'archived' : 'directory';
-    const statusPart = statusTab === 'All' ? 'all' : statusTab.toLowerCase();
-    link.setAttribute('download', `${scope}-${statusPart}-export.csv`);
+    link.setAttribute('download', `${scope}-export.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -1132,13 +1145,11 @@ export default function UserLedger() {
     if (filterLocation !== 'All') filters.push({ label: 'Location', value: filterLocation });
     return {
       scope: directoryView === 'archived' ? 'Archived users' : 'Active Directory',
-      status: statusTab === 'All' ? 'All statuses' : statusTab,
       sortLabel,
       filters,
       count: filteredLedger.length,
       isFiltered:
-        statusTab !== 'All'
-        || searchQuery.trim() !== ''
+        searchQuery.trim() !== ''
         || filterFirstName !== 'All'
         || filterLastName !== 'All'
         || filterEmail !== 'All'
@@ -1147,7 +1158,6 @@ export default function UserLedger() {
     };
   }, [
     directoryView,
-    statusTab,
     searchQuery,
     filterFirstName,
     filterLastName,
@@ -1271,7 +1281,7 @@ export default function UserLedger() {
         const status = directoryStatusLabel(row);
         return (
           <div className="flex justify-center">
-            <Tag variant={status === 'Added' ? 'added' : 'removed'} label={status} compact />
+            <Tag variant={status === 'Added' ? 'added' : 'removed'} label={displayStatus(row)} compact />
           </div>
         );
       },
@@ -1360,13 +1370,7 @@ export default function UserLedger() {
     }
   ];
 
-  const statusTabs = [
-    { key: 'All', label: 'All', count: allCount },
-    { key: 'Added', label: 'Added', count: addedCount },
-    { key: 'Removed', label: 'Removed', count: removedCount }
-  ];
-
-  const listResetKey = [directoryView, statusTab, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset].join('|');
+  const listResetKey = [directoryView, searchQuery, filterFirstName, filterLastName, filterEmail, filterLocation, sortPreset].join('|');
   const {
     pageItems,
     page,
@@ -1382,7 +1386,7 @@ export default function UserLedger() {
       <Toast />
       <PageHeader
         section={`${partnerLabel} Support`}
-        title={directoryView === 'archived' ? 'Archived users' : 'Users'}
+        title={<span className="text-lg sm:text-xl">{directoryView === 'archived' ? 'Archived Users' : 'Active Users'}</span>}
         description={
           directoryView === 'archived'
             ? 'Records removed from the active Directory. Restore them anytime.'
@@ -1390,28 +1394,14 @@ export default function UserLedger() {
         }
         workspace
         actions={
-          <button
-            type="button"
-            onClick={() => setConfirmExportOpen(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export CSV</span>
-          </button>
-        }
-        footer={
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <CountTabs
-              value={statusTab}
-              onChange={handleStatusTabSwitch}
-              tabs={statusTabs}
-            />
+          <>
             {directoryView === 'active' ? (
               <Link
                 to="/directory/archived"
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border border-[var(--color-border-default)] bg-white text-[var(--color-text-primary)] hover:bg-gray-50 transition-colors shadow-sm cursor-pointer"
               >
-                <span>Archived</span>
+                <Archive className="w-4 h-4 text-[var(--color-text-secondary)]" />
+                <span>Archive</span>
                 <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-md bg-[var(--color-surface-panel)] px-1.5 py-0.5 text-[11px] font-bold tabular-nums leading-none text-[var(--color-text-muted)]">
                   {archivedUserLedger.length}
                 </span>
@@ -1419,15 +1409,24 @@ export default function UserLedger() {
             ) : (
               <Link
                 to="/directory"
-                className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--color-brand-primary)] transition-colors hover:text-[var(--color-surface-sidebar-hover)]"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border border-[var(--color-border-default)] bg-white text-[var(--color-text-primary)] hover:bg-gray-50 transition-colors shadow-sm cursor-pointer"
               >
-                ← Active Directory
+                <span className="text-[var(--color-brand-primary)]">←</span>
+                <span className="text-[var(--color-brand-primary)]">Active Directory</span>
                 <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-md bg-[var(--color-brand-primary)]/10 px-1.5 py-0.5 text-[11px] font-bold tabular-nums leading-none text-[var(--color-brand-primary)]">
                   {liveUserLedger.length}
                 </span>
               </Link>
             )}
-          </div>
+            <button
+              type="button"
+              onClick={() => setConfirmExportOpen(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[var(--color-brand-primary)] hover:bg-[var(--color-surface-sidebar-hover)] transition-colors shadow-sm cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>Export CSV</span>
+            </button>
+          </>
         }
       />
 
@@ -1536,7 +1535,7 @@ export default function UserLedger() {
       <DirectoryMobileList
         rows={pageItems}
         loading={tableLoading}
-        emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
+        emptyMessage={'No users matching your search.'}
         onOpenUser={handleOpenUser}
         onEditUser={directoryView === 'active' ? setEditingUser : null}
         onArchiveUser={directoryView === 'active' ? setArchivingUser : null}
@@ -1561,7 +1560,7 @@ export default function UserLedger() {
             void highlightVersion;
             return directoryHighlightClass(row);
           }}
-          emptyMessage={`No ${statusTab === 'All' ? '' : statusTab.toLowerCase() + ' '}users matching your search.`}
+          emptyMessage={'No users matching your search.'}
           compact
           centerHeaders
           accent
