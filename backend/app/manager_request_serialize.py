@@ -741,11 +741,24 @@ def _build_directory_request_history(
 
     for req in rows:
         # ── Step 1: emit frozen history events ─────────────────────────────────
-        for stored_event in get_lifecycle_history(req):
+        stored_events = get_lifecycle_history(req)
+        stored_ids_for_req: set[str] = set()
+        for stored_event in stored_events:
             eid = stored_event.get("id")
             if eid and eid not in seen:
                 seen.add(eid)
+                stored_ids_for_req.add(eid)
                 events.append(stored_event)
+
+        # If we stored suffixed handled variants ("-handled-add" / "-handled-remove")
+        # for this row, the bare live-derivation ID would produce a duplicate
+        # "Marked as …" entry — block it pre-emptively.
+        bare_handled_id = f"{req.id}-handled"
+        if (
+            f"{req.id}-handled-add" in stored_ids_for_req
+            or f"{req.id}-handled-remove" in stored_ids_for_req
+        ):
+            seen.add(bare_handled_id)
 
         # ── Step 2: derive live events ──────────────────────────────────────────
         tags = req.tags or []

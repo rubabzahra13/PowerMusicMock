@@ -1479,10 +1479,13 @@ def resolve_group_delete_from_directory(
                 "managerName": dir_manager_name or ("Admin" if is_admin_entry else None),
             })
 
-    # Handled (Added) event
+    # Handled (Added) event — use "-handled-add" suffix so it does NOT clash
+    # with the live-derivation ID "{id}-handled" that will be generated after
+    # the row is mutated.  If they shared the same ID the dedup set would
+    # suppress whichever came second (the "Marked as Removed" event).
     if directory_person.status == "handled" and directory_person.handled_at:
         outcome_label = directory_person.outcome or dir_action
-        event_id = f"{directory_person.id}-handled"
+        event_id = f"{directory_person.id}-handled-add"
         if event_id not in existing_stored_ids:
             snapshot_events.append({
                 "id": event_id,
@@ -1533,7 +1536,7 @@ def resolve_group_delete_from_directory(
                     "managerName": mem_manager_name or ("Admin" if is_admin_entry else None),
                 })
 
-    # Append all new snapshot events (preserving old ones via existing_stored)
+    # Append all snapshot events captured so far (Add lifecycle + Remove requests).
     if snapshot_events:
         append_lifecycle_history(directory_person, snapshot_events)
 
@@ -1564,6 +1567,29 @@ def resolve_group_delete_from_directory(
 
     if admin_note:
         directory_person.admin_notes = admin_note
+
+    # ── Step 4: Freeze the "Marked as Removed" event with the correct timestamp ─
+    # The live history-builder will also try to emit "{id}-handled" for the
+    # mutated row, but since the same ID was already stored (via Step 1 frozen
+    # history OR via this explicit entry), the seen-set dedup will skip it.
+    # Using a distinct "-handled-remove" suffix ensures the dedup set never
+    # accidentally suppresses this event using the "-handled-add" or bare
+    # "-handled" IDs written above.
+    remove_event_id = f"{directory_person.id}-handled-remove"
+    all_stored_ids = {e.get("id") for e in get_lifecycle_history(directory_person)}
+    if remove_event_id not in all_stored_ids:
+        append_lifecycle_history(directory_person, [{
+            "id": remove_event_id,
+            "type": "handled",
+            "at": now.isoformat(),
+            "requestId": directory_person.id,
+            "displayId": dir_display_id,
+            "action": "Remove",
+            "title": "Marked as Removed",
+            "detail": f"By {dir_handled_by}" if dir_handled_by else None,
+            "handledBy": dir_handled_by or None,
+            "outcome": "Removed",
+        }])
 
     discarded_ids = [m.id for m in members if m.id != directory_person.id]
     count = len(discarded_ids)
