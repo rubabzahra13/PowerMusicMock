@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from app import models, schemas
 from app.manager_request_tags import TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_SENT_BY_ADMIN, has_tag
@@ -191,3 +191,42 @@ def bootstrap_intake_persons(req: models.ManagerRequest) -> None:
 
     if current:
         req.intake_persons = current
+
+
+# ── Lifecycle history helpers ──────────────────────────────────────────────────
+
+
+def get_lifecycle_history(req: models.ManagerRequest) -> List[Dict[str, Any]]:
+    """Return the append-only lifecycle history list stored inside intake_persons.
+
+    Each entry is a dict with at minimum:
+        id        – unique event identifier
+        type      – event type string ("manager_request", "handled", etc.)
+        at        – ISO-8601 timestamp string
+        action    – "Add" | "Remove" | ...
+        title     – human-readable title
+    """
+    raw = get_intake_persons(req).get("history")
+    if isinstance(raw, list):
+        return list(raw)
+    return []
+
+
+def append_lifecycle_history(
+    req: models.ManagerRequest,
+    events: List[Dict[str, Any]],
+) -> None:
+    """Append one or more lifecycle event dicts to intake_persons["history"].
+
+    This is the only write path — the history list is append-only.
+    Caller must assign the updated intake_persons back (already done here).
+    """
+    if not events:
+        return
+    current = dict(get_intake_persons(req))
+    existing: List[Dict[str, Any]] = []
+    if isinstance(current.get("history"), list):
+        existing = list(current["history"])
+    existing.extend(events)
+    current["history"] = existing
+    req.intake_persons = current

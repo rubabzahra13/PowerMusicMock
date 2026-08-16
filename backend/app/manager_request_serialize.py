@@ -726,11 +726,28 @@ def _build_directory_request_history(
     _db: Optional[Session],
     rows: List[models.ManagerRequest],
 ) -> List[Dict[str, Any]]:
-    """Timeline of manager submissions, auto-mail receipts, and handled outcomes."""
+    """Timeline of manager submissions, auto-mail receipts, and handled outcomes.
+
+    For each row the function:
+    1. Emits any frozen lifecycle events stored in intake_persons["history"]
+       (written before a row is mutated, e.g. Add → Remove via Case D).
+    2. Derives live events from the current row fields (manager_request /
+       auto_mail / handled), skipping any already covered by step 1.
+    """
+    from app.intake_persons import get_lifecycle_history
+
     events: List[Dict[str, Any]] = []
     seen: set[str] = set()
 
     for req in rows:
+        # ── Step 1: emit frozen history events ─────────────────────────────────
+        for stored_event in get_lifecycle_history(req):
+            eid = stored_event.get("id")
+            if eid and eid not in seen:
+                seen.add(eid)
+                events.append(stored_event)
+
+        # ── Step 2: derive live events ──────────────────────────────────────────
         tags = req.tags or []
         manager_user = getattr(req, "_manager_user", None)
         admin_user = getattr(req, "_admin_user", None)

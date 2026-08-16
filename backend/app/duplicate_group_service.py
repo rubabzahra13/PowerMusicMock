@@ -1424,16 +1424,120 @@ def resolve_group_delete_from_directory(
     """Resolve group by marking Directory person as Removed and permanently deleting incoming requests.
 
     Invariants:
+    - Preserves the Add lifecycle events into intake_persons["history"] BEFORE mutating.
     - Updates the directory_person with final_values.
-    - Sets outcome="Removed", action="Remove", archived_at=None.
+    - Sets outcome="Removed", action="Remove", handled_at=now, archived_at=None.
     - Permanently deletes all incoming member requests.
     - Does NOT call db.commit() — router commits.
 
     Returns the count of requests processed.
     """
+    from app.intake_persons import append_lifecycle_history, get_lifecycle_history
+    from app.user_display import resolve_handled_by_name, resolve_manager_name
+    from app.request_display import parse_request_display_number
+    from app.manager_request_tags import TAG_PARTNER_REQUEST, TAG_VERIFIED, has_tag as _has_tag
+
     now = datetime.now(timezone.utc)
-    
-    # 1. Nullify references in other DuplicateGroups pointing to this directory person
+
+    # ── Step 1: Snapshot existing Add lifecycle events before mutating ──────────
+    # The directory_person row currently represents the Add event.  Once we
+    # overwrite action/outcome/handled_at, that information would be lost.
+    # We freeze it into intake_persons["history"] so the history builder can
+    # always reconstruct the full Add → Remove timeline from a single row.
+    existing_stored = get_lifecycle_history(directory_person)
+    existing_stored_ids = {e.get("id") for e in existing_stored}
+
+    snapshot_events: list = []
+    dir_tags = directory_person.tags or []
+    dir_display_id = parse_request_display_number(directory_person.id)
+    dir_action = directory_person.action or ""
+    dir_action_verb = "add" if dir_action == "Add" else "remove" if dir_action == "Remove" else dir_action.lower()
+    dir_manager_name = resolve_manager_name(directory_person)
+    dir_handled_by = resolve_handled_by_name(directory_person)
+
+    # Manager request event
+    has_manager = (
+        _has_tag(dir_tags, TAG_PARTNER_REQUEST)
+        or _has_tag(dir_tags, TAG_VERIFIED)
+        or bool(directory_person.manager_id)
+    )
+    if has_manager and directory_person.received_at:
+        is_admin_entry = not directory_person.manager_id and _has_tag(dir_tags, TAG_PARTNER_REQUEST)
+        who = dir_manager_name or ("an admin" if is_admin_entry else "a manager")
+        title_prefix = "Admin entry" if is_admin_entry else "Manager request"
+        event_id = f"{directory_person.id}-manager-request"
+        if event_id not in existing_stored_ids:
+            snapshot_events.append({
+                "id": event_id,
+                "type": "manager_request",
+                "at": directory_person.received_at.isoformat() if hasattr(directory_person.received_at, "isoformat") else str(directory_person.received_at),
+                "requestId": directory_person.id,
+                "displayId": dir_display_id,
+                "action": dir_action,
+                "title": f"{title_prefix} to {dir_action_verb or 'update'}",
+                "detail": f"Submitted by {who}",
+                "managerName": dir_manager_name or ("Admin" if is_admin_entry else None),
+            })
+
+    # Handled (Added) event
+    if directory_person.status == "handled" and directory_person.handled_at:
+        outcome_label = directory_person.outcome or dir_action
+        event_id = f"{directory_person.id}-handled"
+        if event_id not in existing_stored_ids:
+            snapshot_events.append({
+                "id": event_id,
+                "type": "handled",
+                "at": directory_person.handled_at.isoformat() if hasattr(directory_person.handled_at, "isoformat") else str(directory_person.handled_at),
+                "requestId": directory_person.id,
+                "displayId": dir_display_id,
+                "action": dir_action,
+                "title": f"Marked as {outcome_label}",
+                "detail": f"By {dir_handled_by}" if dir_handled_by else None,
+                "handledBy": dir_handled_by or None,
+                "outcome": outcome_label,
+            })
+
+    # Persist the Remove request events from the incoming group members
+    # (received_at = when the Remove was requested; these rows will be deleted).
+    members = get_group_members(db, group.id)
+    for member in members:
+        if member.id == directory_person.id:
+            continue
+        mem_tags = member.tags or []
+        mem_display_id = parse_request_display_number(member.id)
+        mem_action = member.action or ""
+        mem_action_verb = "remove" if mem_action == "Remove" else mem_action.lower()
+        mem_manager_name = resolve_manager_name(member)
+        mem_handled_by = resolve_handled_by_name(member)
+
+        has_mem_manager = (
+            _has_tag(mem_tags, TAG_PARTNER_REQUEST)
+            or _has_tag(mem_tags, TAG_VERIFIED)
+            or bool(member.manager_id)
+        )
+        if has_mem_manager and member.received_at:
+            is_admin_entry = not member.manager_id and _has_tag(mem_tags, TAG_PARTNER_REQUEST)
+            who = mem_manager_name or ("an admin" if is_admin_entry else "a manager")
+            title_prefix = "Admin entry" if is_admin_entry else "Manager request"
+            event_id = f"{member.id}-manager-request"
+            if event_id not in existing_stored_ids:
+                snapshot_events.append({
+                    "id": event_id,
+                    "type": "manager_request",
+                    "at": member.received_at.isoformat() if hasattr(member.received_at, "isoformat") else str(member.received_at),
+                    "requestId": member.id,
+                    "displayId": mem_display_id,
+                    "action": mem_action,
+                    "title": f"{title_prefix} to {mem_action_verb or 'update'}",
+                    "detail": f"Submitted by {who}",
+                    "managerName": mem_manager_name or ("Admin" if is_admin_entry else None),
+                })
+
+    # Append all new snapshot events (preserving old ones via existing_stored)
+    if snapshot_events:
+        append_lifecycle_history(directory_person, snapshot_events)
+
+    # ── Step 2: Nullify references in other DuplicateGroups ────────────────────
     from sqlalchemy import update
     db.execute(
         update(models.DuplicateGroup)
@@ -1443,16 +1547,17 @@ def resolve_group_delete_from_directory(
         )
         .values(directory_person_id=None)
     )
-    
-    # 2. Update the directory record and set it to Removed
+
+    # ── Step 3: Mutate the directory record to Removed ─────────────────────────
     directory_person.person_first_name = (final_values.firstName or "").strip()
     directory_person.person_last_name = (final_values.lastName or "").strip()
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
     directory_person.outcome = "Removed"
     directory_person.action = "Remove"
+    directory_person.handled_at = now  # Record the actual removal time
     directory_person.archived_at = None
-    
+
     from app.manager_request_tags import TAG_REMOVED
     if TAG_REMOVED not in (directory_person.tags or []):
         directory_person.tags = (directory_person.tags or []) + [TAG_REMOVED]
@@ -1460,7 +1565,6 @@ def resolve_group_delete_from_directory(
     if admin_note:
         directory_person.admin_notes = admin_note
 
-    members = get_group_members(db, group.id)
     discarded_ids = [m.id for m in members if m.id != directory_person.id]
     count = len(discarded_ids)
 
