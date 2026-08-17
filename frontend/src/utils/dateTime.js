@@ -1,13 +1,13 @@
 /**
  * Timezone-aware display helpers.
- * Store UTC on the server; format in Pacific Time for all users.
+ * Store UTC on the server; format in Mountain Time (America/Denver) for Andrea / Admin Dashboard.
  *
  * All users of this application operate within the same timezone, so every
- * timestamp is displayed in Pacific Time (America/Los_Angeles) regardless of
+ * timestamp is displayed in Mountain Time (America/Denver) regardless of
  * the viewer's browser or device settings.
  */
 
-const APP_TIMEZONE = 'America/Los_Angeles';
+const APP_TIMEZONE = 'America/Denver';
 
 export function getUserTimeZone() {
   return APP_TIMEZONE;

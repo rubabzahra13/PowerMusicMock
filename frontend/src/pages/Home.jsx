@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { format, isToday, isYesterday, parseISO } from 'date-fns';
+import { formatDashboardActivity } from '../utils/dateTime';
 import {
   AlertTriangle,
   ArrowRight,
@@ -14,7 +14,7 @@ import {
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache, getDashboard } from '../utils/pilot2Api';
 import { AdminPageScroll, DottedScroll, PanelListSkeleton, DateFilter } from '../components/ui';
-import { calculateDateBounds } from '../utils/dateFilters';
+import { calculateDateBounds, getDateFilterLabel } from '../utils/dateFilters';
 import { TAG_ALREADY_EXISTS, TAG_PARTNER_REQUEST, TAG_AUTO_MAIL } from '../utils/requestTags';
 import { usePartners } from '../context/PartnerContext';
 
@@ -39,21 +39,15 @@ const EMPTY_INSIGHTS = {
   usersRemoved: 0,
   handledThisWeek: 0,
   receivedThisWeek: 0,
+  handledInPeriod: 0,
+  receivedInPeriod: 0,
+  granularity: 'daily',
   weeklyTrend: [],
 };
 
-function formatActivityDate(isoString) {
-  try {
-    const date = parseISO(isoString);
-    if (isToday(date)) return `Today, ${format(date, 'HH:mm')}`;
-    if (isYesterday(date)) return `Yesterday, ${format(date, 'HH:mm')}`;
-    return format(date, 'dd MMM, HH:mm');
-  } catch {
-    return isoString;
-  }
-}
 
-function InsightCard({ label, value, hint, icon: Icon, accent, onClick }) {
+
+function InsightCard({ label, badge, value, hint, icon: Icon, accent, onClick }) {
   const accents = {
     pink: { well: 'bg-[var(--color-brand-accent)]/10', icon: 'text-[var(--color-brand-accent)]' },
     blue: { well: 'bg-[#3b6ea5]/10', icon: 'text-[#3b6ea5]' },
@@ -71,10 +65,17 @@ function InsightCard({ label, value, hint, icon: Icon, accent, onClick }) {
       }`}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            {label}
-          </p>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              {label}
+            </p>
+            {badge ? (
+              <span className="inline-flex items-center rounded-md bg-[var(--color-brand-accent)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-brand-accent)] truncate max-w-[130px]">
+                {badge}
+              </span>
+            ) : null}
+          </div>
           <p className="mt-1 text-xl font-bold tabular-nums text-[var(--color-text-primary)] sm:text-2xl">
             {value}
           </p>
@@ -90,14 +91,21 @@ function InsightCard({ label, value, hint, icon: Icon, accent, onClick }) {
   );
 }
 
-function ChartCard({ title, subtitle, legend, children, className = '' }) {
+function ChartCard({ title, badge, subtitle, legend, children, className = '' }) {
   return (
     <section
       className={`flex h-full min-h-0 flex-col rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm ${className}`}
     >
       <div className="mb-4 shrink-0 space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="min-w-0 text-sm font-bold text-[var(--color-text-primary)]">{title}</h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="min-w-0 text-sm font-bold text-[var(--color-text-primary)]">{title}</h2>
+            {badge && (
+              <span className="px-2 py-0.5 rounded text-xs font-semibold text-red-600 bg-red-50 border border-red-200 shrink-0">
+                {badge}
+              </span>
+            )}
+          </div>
           {legend ? <div className="shrink-0">{legend}</div> : null}
         </div>
         {subtitle ? (
@@ -140,7 +148,7 @@ function QueueLink({ onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="whitespace-nowrap text-xs font-semibold text-[#3b6ea5] hover:underline"
+      className="whitespace-nowrap text-xs font-semibold text-[#3b6ea5] hover:underline cursor-pointer"
     >
       Open queue
     </button>
@@ -172,27 +180,60 @@ function niceTicks(maxValue, count = 3) {
   return { ticks, top: Math.max(top, 1) };
 }
 
-function WeeklyTrendChart({ days }) {
+function RequestFlowChart({ days }) {
   const rawMax = Math.max(1, ...days.flatMap((d) => [d.received, d.handled]));
   const { ticks, top } = niceTicks(rawMax, 4);
+  const count = Math.max(days.length, 1);
   const chartH = 110;
   const topPad = 6;
   const leftPad = 36;
+  const rightPad = 16;
   const bottomPad = 24;
-  const barW = 10;
-  const gap = 14;
-  const groupW = barW * 2 + 4;
-  const plotW = Math.max(days.length * (groupW + gap), 260);
-  const width = leftPad + plotW;
+
+  let barW = 10;
+  let gap = 14;
+  if (count > 25) {
+    barW = 5;
+    gap = 7;
+  } else if (count > 16) {
+    barW = 7;
+    gap = 10;
+  } else if (count > 8) {
+    barW = 10;
+    gap = 14;
+  } else if (count <= 4) {
+    barW = 16;
+    gap = 24;
+  }
+
+  const groupW = barW * 2 + 3;
+  const stepSize = groupW + gap;
+  const totalGroupsWidth = count * groupW + (count - 1) * gap;
+  const plotW = Math.max(totalGroupsWidth + 12, 280);
+  const width = leftPad + plotW + rightPad;
   const height = chartH + topPad + bottomPad;
+  const startX = leftPad + 8;
+
+  const minLabelSpacing = 48;
+  const labelStride = count <= 7 ? 1 : Math.max(1, Math.ceil(minLabelSpacing / stepSize));
+
+  const visibleIndices = new Set();
+  for (let i = 0; i < count; i += labelStride) {
+    visibleIndices.add(i);
+  }
+  const lastIndex = count - 1;
+  const lastVisible = Math.floor((count - 1) / labelStride) * labelStride;
+  if (lastIndex !== lastVisible && (lastIndex - lastVisible) * stepSize >= minLabelSpacing * 0.75) {
+    visibleIndices.add(lastIndex);
+  }
 
   return (
-    <div className="flex h-full w-full min-h-[9.5rem] items-end">
+    <div className="flex h-full w-full min-h-[9.5rem] items-end overflow-x-auto scrollbar-hide">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-[9.5rem] w-full"
+        className="h-[9.5rem] w-full min-w-[280px]"
         role="img"
-        aria-label="Weekly received versus handled requests"
+        aria-label="Request flow: received versus handled requests"
         preserveAspectRatio="xMidYMid meet"
       >
         {ticks.map((tick, index) => {
@@ -201,7 +242,7 @@ function WeeklyTrendChart({ days }) {
             <g key={`tick-${index}`}>
               <line
                 x1={leftPad}
-                x2={width}
+                x2={width - rightPad}
                 y1={y}
                 y2={y}
                 stroke={CHART.track}
@@ -228,13 +269,16 @@ function WeeklyTrendChart({ days }) {
           strokeWidth="1"
         />
         {days.map((day, index) => {
-          const x = leftPad + index * (groupW + gap) + 6;
+          const x = startX + index * (groupW + gap);
           const receivedH = (day.received / top) * chartH;
           const handledH = (day.handled / top) * chartH;
           const receivedY = topPad + chartH - receivedH;
           const handledY = topPad + chartH - handledH;
+
+          const showLabel = visibleIndices.has(index);
+
           return (
-            <g key={day.date}>
+            <g key={`${day.date}-${index}`}>
               <rect
                 x={x}
                 y={receivedY}
@@ -246,7 +290,7 @@ function WeeklyTrendChart({ days }) {
                 <title>{`${day.label}: ${day.received} received`}</title>
               </rect>
               <rect
-                x={x + barW + 3}
+                x={x + barW + 2}
                 y={handledY}
                 width={barW}
                 height={Math.max(handledH, day.handled ? 3 : 0)}
@@ -255,15 +299,17 @@ function WeeklyTrendChart({ days }) {
               >
                 <title>{`${day.label}: ${day.handled} handled`}</title>
               </rect>
-              <text
-                x={x + groupW / 2 - 1}
-                y={topPad + chartH + 16}
-                textAnchor="middle"
-                className="fill-[var(--color-text-muted)]"
-                style={{ fontSize: 10, fontWeight: 600 }}
-              >
-                {day.label}
-              </text>
+              {showLabel ? (
+                <text
+                  x={x + groupW / 2}
+                  y={topPad + chartH + 16}
+                  textAnchor="middle"
+                  className="fill-[var(--color-text-muted)]"
+                  style={{ fontSize: 10, fontWeight: 600 }}
+                >
+                  {day.label}
+                </text>
+              ) : null}
             </g>
           );
         })}
@@ -381,7 +427,7 @@ function ArrivalSourceList({ partnerReq, autoMail, onOpenQueue, partnerLabel = '
             <button
               type="button"
               onClick={() => onOpenQueue(row.sentVia)}
-              className={`flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] ${row.accent} bg-white px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-surface-panel)]`}
+              className={`flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] ${row.accent} bg-white px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-surface-panel)] cursor-pointer`}
             >
               <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${row.well}`}>
                 <Icon className={`h-3.5 w-3.5 ${row.iconClass}`} />
@@ -423,7 +469,7 @@ export default function Home() {
   const [fetching, setFetching] = useState(false);
   const [dateFilter, setDateFilter] = useState({ type: 'all', value: null });
 
-  const hasDateFilter = dateFilter.type !== 'all';
+  const activePeriodLabel = useMemo(() => getDateFilterLabel(dateFilter), [dateFilter]);
 
   useEffect(() => {
     const bounds = calculateDateBounds(dateFilter.type, dateFilter.value);
@@ -441,9 +487,9 @@ export default function Home() {
     const load = () => {
       setFetching(true);
       loadWithCache(
-        `home_dashboard_v2:${selectedPartnerId || ''}:${startIso}:${endIso}`, 
-        () => getDashboard(selectedPartnerId, startIso, endIso), 
-        applyDashboard
+        `home_dashboard_v3:${selectedPartnerId || ''}:${startIso}:${endIso}`,
+        () => getDashboard(selectedPartnerId, startIso, endIso),
+        applyDashboard,
       ).catch((err) => {
         console.error(err);
         setReady(true);
@@ -451,7 +497,9 @@ export default function Home() {
       });
     };
     load();
-    const refresh = () => { if (!document.hidden) load(); };
+    const refresh = () => {
+      if (!document.hidden) load();
+    };
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
   }, [location.key, selectedPartnerId, dateFilter]);
@@ -464,9 +512,6 @@ export default function Home() {
     [pendingRequests],
   );
 
-  // Count pending by arrival channel the same way the New Requests "Sent via"
-  // filter does, so the card numbers match the list you land on when clicking.
-  // (A request tagged both must not be double-counted across the two rows.)
   const arrivalCounts = useMemo(() => {
     const list = Array.isArray(pendingRequests) ? pendingRequests : [];
     let partner = 0;
@@ -500,6 +545,9 @@ export default function Home() {
         handled: 0,
       }));
 
+  const handledCount = insights.handledInPeriod ?? insights.handledThisWeek ?? 0;
+  const receivedCount = insights.receivedInPeriod ?? insights.receivedThisWeek ?? 0;
+
   const activityIcon = (type) => {
     if (type === 'marked_added') return UserPlus;
     if (type === 'marked_removed') return UserMinus;
@@ -528,8 +576,8 @@ export default function Home() {
 
       {!ready ? (
         <div className="space-y-4 pb-6">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {[0, 1, 2, 3].map((key) => (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {[0, 1, 2].map((key) => (
               <div key={key} className="h-24 animate-pulse rounded-2xl bg-[var(--color-surface-highlight)]" />
             ))}
           </div>
@@ -555,9 +603,10 @@ export default function Home() {
               onClick={() => navigate('/directory')}
             />
             <InsightCard
-              label={hasDateFilter ? "Handled in period" : "Handled this week"}
-              value={insights.handledThisWeek}
-              hint={`${insights.receivedThisWeek} New Requests received`}
+              label="Handled"
+              badge={activePeriodLabel}
+              value={handledCount}
+              hint={`${receivedCount} requests received in period`}
               icon={CheckCircle2}
               accent="pink"
               onClick={() => navigate('/directory')}
@@ -567,8 +616,9 @@ export default function Home() {
           <div className="grid shrink-0 grid-cols-1 gap-3 xl:grid-cols-5">
             <div className="h-[14rem] xl:col-span-3 xl:h-[16rem]">
               <ChartCard
-                title={hasDateFilter ? "Period flow" : "This week’s flow"}
-                subtitle="Requests received vs requests you handled"
+                title="Request flow"
+                badge={activePeriodLabel}
+                subtitle="Requests received vs handled"
                 legend={(
                   <div className="flex items-center gap-3">
                     <LegendDot color={CHART.blue} label="Received" />
@@ -576,14 +626,14 @@ export default function Home() {
                   </div>
                 )}
               >
-                <WeeklyTrendChart days={trendDays} />
+                <RequestFlowChart days={trendDays} />
               </ChartCard>
             </div>
 
             <div className="h-[14rem] xl:col-span-2 xl:h-[16rem]">
               <ChartCard
                 title="Pending by action"
-                subtitle="What’s waiting in New Requests"
+                subtitle="What is waiting in New Requests"
               >
                 <DonutChart
                   segments={actionSegments}
@@ -636,7 +686,7 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => navigate(`/new-requests/${encodeURIComponent(req.id)}`)}
-                          className="flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--color-brand-accent)] bg-white px-2.5 py-2 text-left transition-colors hover:bg-[#fff7f8]"
+                          className="flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--color-brand-accent)] bg-white px-2.5 py-2 text-left transition-colors hover:bg-[#fff7f8] cursor-pointer"
                         >
                           <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-brand-accent)]/10">
                             <AlertTriangle className="h-3.5 w-3.5 text-[var(--color-brand-accent)]" />
@@ -647,7 +697,7 @@ export default function Home() {
                             </p>
                             <p className="truncate text-xs text-[var(--color-text-secondary)]">{req.person?.email}</p>
                             <p className="mt-0.5 text-[10px] font-semibold text-[var(--color-text-muted)]">
-                              {formatActivityDate(req.receivedAt)}
+                              {formatDashboardActivity(req.receivedAt)}
                             </p>
                           </div>
                         </button>
@@ -704,7 +754,7 @@ export default function Home() {
                                 ) : null}
                               </div>
                               <p className="mt-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
-                                {formatActivityDate(item.timestamp)}
+                                {formatDashboardActivity(item.timestamp)}
                               </p>
                             </div>
                           </button>

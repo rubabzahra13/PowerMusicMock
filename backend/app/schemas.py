@@ -405,6 +405,9 @@ class DashboardInsightsOut(BaseModel):
     usersRemoved: int = 0
     handledThisWeek: int = 0
     receivedThisWeek: int = 0
+    handledInPeriod: int = 0
+    receivedInPeriod: int = 0
+    granularity: str = "daily"
     weeklyTrend: List[DashboardTrendDayOut] = Field(default_factory=list)
 
 

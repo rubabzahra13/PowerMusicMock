@@ -15,7 +15,7 @@ import {
   ADMIN_NEW_ROW_HIGHLIGHT_CLASS,
 } from '../utils/adminUiHighlights';
 import { formatRequestDisplayId, formatAdminDateTime, formatAdminDate } from '../utils/requestDisplayId';
-import { calculateDateBounds, filterByDateRange } from '../utils/dateFilters';
+import { calculateDateBounds, filterByDateRange, getDirectoryRecordTimestamp } from '../utils/dateFilters';
 import { formatManagerNotes, readManagerNotes, MANAGER_NOTES_EMPTY_LABEL } from '../utils/managerNotes';
 import { csvCell } from '../utils/csvSafe';
 import { getDirectoryManagerColumnContent } from '../utils/manualEntry';
@@ -994,7 +994,7 @@ export default function UserLedger() {
     });
 
     const bounds = calculateDateBounds(dateFilter.type, dateFilter.value);
-    const timeFiltered = filterByDateRange(filtered, (user) => directoryView === 'archived' && user.archivedAt ? user.archivedAt : user.dateAdded, bounds);
+    const timeFiltered = filterByDateRange(filtered, (user) => getDirectoryRecordTimestamp(user, directoryView), bounds);
 
     return [...timeFiltered].sort((a, b) => {
       if (field === 'managerName') return personManagerName(a).localeCompare(personManagerName(b)) * sortDir;
