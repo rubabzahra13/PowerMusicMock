@@ -403,6 +403,8 @@ class DashboardInsightsOut(BaseModel):
     partnerReq: int = 0
     usersAdded: int = 0
     usersRemoved: int = 0
+    usersInLedger: int = 0
+    usersArchived: int = 0
     handledThisWeek: int = 0
     receivedThisWeek: int = 0
     handledInPeriod: int = 0

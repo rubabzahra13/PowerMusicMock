@@ -196,7 +196,6 @@ function ControlsBar({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-            <DateFilter value={dateFilter} onChange={setDateFilter} />
             <button
               onClick={() => { setFilterOpen((o) => !o); setSortOpen(false); }}
               className={toolbarBtnClass(filterOpen || activeFilterCount > 0)}
@@ -282,9 +281,22 @@ function ControlsBar({
                 />
               </div>
             ))}
+            <div className="flex flex-col gap-1 min-w-[140px] max-w-[min(18rem,100%)]">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-brand-secondary)]/80">
+                Date
+              </label>
+              <DateFilter
+                value={dateFilter}
+                onChange={setDateFilter}
+                variant="slot"
+              />
+            </div>
             {activeFilterCount > 0 && (
               <button
-                onClick={() => filterSlots.forEach((s) => s.onChange(s.options[0].value))}
+                onClick={() => {
+                  filterSlots.forEach((s) => s.onChange(s.options[0].value));
+                  setDateFilter({ type: 'all', value: null });
+                }}
                 className="ml-auto text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-brand-accent)] transition-colors cursor-pointer pb-2"
               >
                 Clear filters
@@ -1023,7 +1035,8 @@ export default function UserLedger() {
     filterFirstName !== 'All',
     filterLastName !== 'All',
     filterEmail !== 'All',
-    filterLocation !== 'All'
+    filterLocation !== 'All',
+    dateFilter && dateFilter.type !== 'all'
   ].filter(Boolean).length;
 
   const handleOpenUser = (row) => {

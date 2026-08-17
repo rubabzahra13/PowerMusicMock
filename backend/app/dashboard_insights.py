@@ -9,7 +9,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
-from app.directory_person_match import removed_snapshot_rows, roster_snapshot_rows
+from app.directory_person_match import (
+    archived_snapshot_rows,
+    directory_ledger_rows,
+    removed_snapshot_rows,
+    roster_snapshot_rows,
+)
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
     TAG_AUTO_MAIL,
@@ -54,6 +59,8 @@ def build_dashboard_insights(
         and TAG_VERIFIED not in (row.get("tags") or [])
     )
 
+    users_in_ledger = len(directory_ledger_rows(db, limit=10_000, partner_id=partner_id))
+    users_archived = len(archived_snapshot_rows(db, limit=10_000, partner_id=partner_id))
     users_added = len(roster_snapshot_rows(db, limit=10_000, partner_id=partner_id))
     users_removed = len(removed_snapshot_rows(db, limit=10_000, partner_id=partner_id))
 
@@ -247,6 +254,8 @@ def build_dashboard_insights(
         "partnerReq": partner_req,
         "usersAdded": users_added,
         "usersRemoved": users_removed,
+        "usersInLedger": users_in_ledger,
+        "usersArchived": users_archived,
         "handledThisWeek": int(handled_in_period),
         "receivedThisWeek": int(received_in_period),
         "handledInPeriod": int(handled_in_period),

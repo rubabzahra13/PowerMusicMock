@@ -7,7 +7,7 @@ const VIEW_MONTH = 'month';
 const VIEW_YEAR = 'year';
 const VIEW_CUSTOM = 'custom';
 
-export default function DateFilter({ value, onChange, loading = false, className = '' }) {
+export default function DateFilter({ value, onChange, loading = false, className = '', variant = 'default' }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(VIEW_MAIN);
   const rootRef = useRef(null);
@@ -287,6 +287,63 @@ export default function DateFilter({ value, onChange, loading = false, className
   };
 
   const hasFilter = value && value.type !== 'all';
+
+  if (variant === 'slot') {
+    return (
+      <div ref={rootRef} className={`relative min-w-0 max-w-full ${className}`}>
+        <button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          className={`h-9 px-3 w-full flex items-center justify-between gap-2 rounded-lg text-sm font-medium transition-colors border cursor-pointer focus:outline-none ${
+            hasFilter
+              ? 'bg-white border-[var(--color-brand-primary)]/40 text-[var(--color-brand-primary)] font-semibold shadow-sm'
+              : 'bg-white border-[var(--color-border-default)] text-[var(--color-text-primary)] hover:border-[var(--color-border-focus)]'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0 truncate">
+            {isPending || loading ? (
+              <Loader2 className="w-3.5 h-3.5 text-[var(--color-text-muted)] shrink-0 animate-spin" />
+            ) : (
+              <Calendar className={`w-3.5 h-3.5 shrink-0 ${hasFilter ? 'text-[var(--color-brand-primary)]' : 'text-[var(--color-text-muted)]'}`} />
+            )}
+            <span className="truncate text-left">{hasFilter ? currentLabel : 'All'}</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {hasFilter && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSelectType('all');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.stopPropagation();
+                    handleSelectType('all');
+                  }
+                }}
+                className="p-0.5 text-[var(--color-text-muted)] hover:text-red-600 rounded transition-colors cursor-pointer"
+                title="Reset date filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </span>
+            )}
+            <ChevronDown className={`w-3.5 h-3.5 text-[var(--color-text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} />
+          </div>
+        </button>
+
+        {open && (
+          <div className="absolute left-0 top-[calc(100%+6px)] z-30 bg-white border border-[var(--color-border-default)] rounded-xl shadow-[var(--shadow-modal)] overflow-hidden">
+            {view === VIEW_MAIN && renderMainMenu()}
+            {view === VIEW_MONTH && renderMonthMenu()}
+            {view === VIEW_YEAR && renderYearMenu()}
+            {view === VIEW_CUSTOM && renderCustomMenu()}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div ref={rootRef} className={`relative inline-block ${className}`}>

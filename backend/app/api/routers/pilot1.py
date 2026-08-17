@@ -593,7 +593,7 @@ def _visible_new_requests_query(db: Session, partner_id: Optional[str] = None):
 @router.get("/api/kpis", response_model=schemas.KpiOut)
 def get_kpis(partner_id: Optional[str] = None, db: Session = Depends(get_db), _admin=Depends(require_admin)):
     pending = _visible_new_requests_query(db, partner_id=partner_id).count()
-    users = len(roster_snapshot_rows(db, limit=10_000, partner_id=partner_id))
+    users = len(directory_ledger_rows(db, limit=10_000, partner_id=partner_id))
     return {"pendingRequests": pending, "usersInLedger": users}
 
 
@@ -616,7 +616,7 @@ def get_dashboard(
     return {
         "kpis": {
             "pendingRequests": len(pending),
-            "usersInLedger": insights["usersAdded"],
+            "usersInLedger": insights["usersInLedger"],
         },
         "pendingRequests": pending_payloads,
         "activity": list_partner_activity(db, limit=8, partner_id=partner_id),

@@ -14,8 +14,16 @@ import {
 import PageHeader from '../components/layout/PageHeader';
 import { loadWithCache, getDashboard } from '../utils/pilot2Api';
 import { AdminPageScroll, DottedScroll, PanelListSkeleton, DateFilter } from '../components/ui';
+import StatusTag from '../components/ui/Tag';
 import { calculateDateBounds, getDateFilterLabel } from '../utils/dateFilters';
-import { TAG_ALREADY_EXISTS, TAG_PARTNER_REQUEST, TAG_AUTO_MAIL } from '../utils/requestTags';
+import {
+  TAG_ALREADY_EXISTS,
+  TAG_ALREADY_REMOVED,
+  TAG_CONFIRMED_DUPLICATE,
+  TAG_POTENTIAL_DUPLICATE,
+  TAG_PARTNER_REQUEST,
+  TAG_AUTO_MAIL,
+} from '../utils/requestTags';
 import { usePartners } from '../context/PartnerContext';
 
 const CHART = {
@@ -37,6 +45,8 @@ const EMPTY_INSIGHTS = {
   partnerReq: 0,
   usersAdded: 0,
   usersRemoved: 0,
+  usersInLedger: 0,
+  usersArchived: 0,
   handledThisWeek: 0,
   receivedThisWeek: 0,
   handledInPeriod: 0,
@@ -181,11 +191,12 @@ function niceTicks(maxValue, count = 3) {
 }
 
 function RequestFlowChart({ days }) {
+  const [hoveredIdx, setHoveredIdx] = useState(null);
   const rawMax = Math.max(1, ...days.flatMap((d) => [d.received, d.handled]));
   const { ticks, top } = niceTicks(rawMax, 4);
   const count = Math.max(days.length, 1);
   const chartH = 110;
-  const topPad = 6;
+  const topPad = 8;
   const leftPad = 36;
   const rightPad = 16;
   const bottomPad = 24;
@@ -226,6 +237,9 @@ function RequestFlowChart({ days }) {
   if (lastIndex !== lastVisible && (lastIndex - lastVisible) * stepSize >= minLabelSpacing * 0.75) {
     visibleIndices.add(lastIndex);
   }
+
+  // Minimum visible bar height (in pixels) for any non-zero count to ensure easy visibility & hoverability
+  const MIN_BAR_H = 7;
 
   return (
     <div className="flex h-full w-full min-h-[9.5rem] items-end overflow-x-auto scrollbar-hide">
@@ -270,42 +284,75 @@ function RequestFlowChart({ days }) {
         />
         {days.map((day, index) => {
           const x = startX + index * (groupW + gap);
-          const receivedH = (day.received / top) * chartH;
-          const handledH = (day.handled / top) * chartH;
+          
+          const receivedH = day.received > 0 ? Math.max((day.received / top) * chartH, MIN_BAR_H) : 0;
+          const handledH = day.handled > 0 ? Math.max((day.handled / top) * chartH, MIN_BAR_H) : 0;
           const receivedY = topPad + chartH - receivedH;
           const handledY = topPad + chartH - handledH;
 
           const showLabel = visibleIndices.has(index);
+          const isHovered = hoveredIdx === index;
 
           return (
-            <g key={`${day.date}-${index}`}>
+            <g
+              key={`${day.date}-${index}`}
+              className="cursor-pointer"
+              onMouseEnter={() => setHoveredIdx(index)}
+              onMouseLeave={() => setHoveredIdx(null)}
+            >
+              {/* Interactive full-height hit area for effortless hoverability */}
               <rect
-                x={x}
-                y={receivedY}
-                width={barW}
-                height={Math.max(receivedH, day.received ? 3 : 0)}
-                rx="3"
-                fill={CHART.blue}
+                x={x - 2}
+                y={topPad}
+                width={groupW + 4}
+                height={chartH + 2}
+                fill={isHovered ? 'rgba(44, 95, 143, 0.05)' : 'transparent'}
+                rx="4"
+                pointerEvents="all"
               >
-                <title>{`${day.label}: ${day.received} received`}</title>
+                <title>{`${day.label}\nReceived: ${day.received}\nHandled: ${day.handled}`}</title>
               </rect>
-              <rect
-                x={x + barW + 2}
-                y={handledY}
-                width={barW}
-                height={Math.max(handledH, day.handled ? 3 : 0)}
-                rx="3"
-                fill={CHART.pink}
-              >
-                <title>{`${day.label}: ${day.handled} handled`}</title>
-              </rect>
+
+              {/* Received Bar */}
+              {day.received > 0 && (
+                <rect
+                  x={x}
+                  y={receivedY}
+                  width={barW}
+                  height={receivedH}
+                  rx="2.5"
+                  fill={CHART.blue}
+                  opacity={isHovered ? 0.85 : 1}
+                  className="transition-opacity"
+                >
+                  <title>{`${day.label}: ${day.received} received`}</title>
+                </rect>
+              )}
+
+              {/* Handled Bar */}
+              {day.handled > 0 && (
+                <rect
+                  x={x + barW + 2}
+                  y={handledY}
+                  width={barW}
+                  height={handledH}
+                  rx="2.5"
+                  fill={CHART.pink}
+                  opacity={isHovered ? 0.85 : 1}
+                  className="transition-opacity"
+                >
+                  <title>{`${day.label}: ${day.handled} handled`}</title>
+                </rect>
+              )}
+
+              {/* X-Axis Date Label */}
               {showLabel ? (
                 <text
                   x={x + groupW / 2}
                   y={topPad + chartH + 16}
                   textAnchor="middle"
-                  className="fill-[var(--color-text-muted)]"
-                  style={{ fontSize: 10, fontWeight: 600 }}
+                  className={isHovered ? 'fill-[var(--color-brand-secondary)] font-bold' : 'fill-[var(--color-text-muted)]'}
+                  style={{ fontSize: 10, fontWeight: isHovered ? 700 : 600 }}
                 >
                   {day.label}
                 </text>
@@ -504,13 +551,32 @@ export default function Home() {
     return () => window.removeEventListener('focus', refresh);
   }, [location.key, selectedPartnerId, dateFilter]);
 
-  const duplicateAlerts = useMemo(
-    () => (Array.isArray(pendingRequests) ? pendingRequests : [])
-      .filter((req) => req.tags?.includes(TAG_ALREADY_EXISTS))
-      .sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt))
-      .slice(0, 4),
-    [pendingRequests],
-  );
+  const priorityAlerts = useMemo(() => {
+    const list = Array.isArray(pendingRequests) ? pendingRequests : [];
+    const ALERT_TAGS = [
+      TAG_ALREADY_EXISTS,
+      TAG_ALREADY_REMOVED,
+      TAG_CONFIRMED_DUPLICATE,
+      TAG_POTENTIAL_DUPLICATE,
+    ];
+    return list
+      .filter((req) => {
+        const tags = req.tags || [];
+        const hasAlertTag = ALERT_TAGS.some((t) => tags.includes(t));
+        const hasDirMatch = Boolean(req.directoryMatch);
+        const groupSummary = req.groupClassificationSummary;
+        const hasGroupAlert = Boolean(
+          groupSummary && (
+            groupSummary.alreadyExists ||
+            groupSummary.alreadyRemoved ||
+            (groupSummary.duplicateCount || 0) > 0 ||
+            (groupSummary.potentialCount || 0) > 0
+          )
+        );
+        return hasAlertTag || hasDirMatch || hasGroupAlert;
+      })
+      .sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+  }, [pendingRequests]);
 
   const arrivalCounts = useMemo(() => {
     const list = Array.isArray(pendingRequests) ? pendingRequests : [];
@@ -536,17 +602,38 @@ export default function Home() {
     { label: 'Remove', value: insights.pendingRemove, color: CHART.pink },
   ];
 
-  const trendDays = insights.weeklyTrend?.length
-    ? insights.weeklyTrend
-    : Array.from({ length: 7 }, (_, i) => ({
-        date: `d${i}`,
-        label: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i],
-        received: 0,
-        handled: 0,
-      }));
-
+  const trendDays = Array.isArray(insights.weeklyTrend) ? insights.weeklyTrend : [];
   const handledCount = insights.handledInPeriod ?? insights.handledThisWeek ?? 0;
   const receivedCount = insights.receivedInPeriod ?? insights.receivedThisWeek ?? 0;
+
+  function getAlertBadge(req) {
+    const tags = req.tags || [];
+    if (tags.includes(TAG_CONFIRMED_DUPLICATE)) {
+      return { label: 'Duplicate', variant: 'duplicate-confirmed' };
+    }
+    if (tags.includes(TAG_POTENTIAL_DUPLICATE)) {
+      return { label: 'Potential Duplicate', variant: 'duplicate-potential' };
+    }
+    if (tags.includes(TAG_ALREADY_REMOVED)) {
+      return { label: 'Already Removed', variant: 'already-removed' };
+    }
+    if (tags.includes(TAG_ALREADY_EXISTS) || req.directoryMatch) {
+      return { label: 'Exists in Directory', variant: 'already-exists' };
+    }
+    if (req.groupClassificationSummary?.duplicateCount > 0) {
+      return { label: 'Duplicate', variant: 'duplicate-confirmed' };
+    }
+    if (req.groupClassificationSummary?.potentialCount > 0) {
+      return { label: 'Similar requests found', variant: 'duplicate-potential' };
+    }
+    if (req.groupClassificationSummary?.alreadyRemoved) {
+      return { label: 'Already Removed', variant: 'already-removed' };
+    }
+    if (req.groupClassificationSummary?.alreadyExists) {
+      return { label: 'Exists in Directory', variant: 'already-exists' };
+    }
+    return { label: 'Review needed', variant: 'already-exists' };
+  }
 
   const activityIcon = (type) => {
     if (type === 'marked_added') return UserPlus;
@@ -597,7 +684,7 @@ export default function Home() {
             <InsightCard
               label="Users in Directory"
               value={kpis.usersInLedger}
-              hint={`${insights.usersRemoved} removed on record`}
+              hint={`${insights.usersArchived} in archive`}
               icon={Users}
               accent="grey"
               onClick={() => navigate('/directory')}
@@ -666,43 +753,51 @@ export default function Home() {
             <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-2xl border border-[var(--color-border-default)] bg-white p-4 shadow-sm lg:min-h-0 lg:h-full">
               <PanelHeader
                 title="Priority alerts"
-                subtitle={duplicateAlerts.length ? 'Possible Duplicates' : 'All clear'}
+                subtitle={priorityAlerts.length ? `${priorityAlerts.length} ${priorityAlerts.length === 1 ? 'alert' : 'alerts'} pending` : 'All clear'}
                 action={(
                   <span className="inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-[var(--color-brand-accent)]/10 px-2 py-0.5 text-xs font-bold text-[var(--color-brand-accent)]">
-                    {duplicateAlerts.length}
+                    {priorityAlerts.length}
                   </span>
                 )}
               />
-              {duplicateAlerts.length === 0 ? (
+              {priorityAlerts.length === 0 ? (
                 <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl bg-[var(--color-surface-panel)] px-3 py-4 text-center">
                   <CheckCircle2 className="mb-1.5 h-6 w-6 text-[var(--color-signal-green)]" />
-                  <p className="text-sm font-medium text-[var(--color-text-secondary)]">No duplicate alerts</p>
+                  <p className="text-sm font-medium text-[var(--color-text-secondary)]">No priority alerts</p>
                 </div>
               ) : (
                 <PanelScrollBody>
                   <ul className="space-y-1.5">
-                    {duplicateAlerts.map((req) => (
-                      <li key={req.id}>
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/new-requests/${encodeURIComponent(req.id)}`)}
-                          className="flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--color-brand-accent)] bg-white px-2.5 py-2 text-left transition-colors hover:bg-[#fff7f8] cursor-pointer"
-                        >
-                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-brand-accent)]/10">
-                            <AlertTriangle className="h-3.5 w-3.5 text-[var(--color-brand-accent)]" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
-                              {`${req.person?.firstName || ''} ${req.person?.lastName || ''}`.trim() || 'Unknown'}
-                            </p>
-                            <p className="truncate text-xs text-[var(--color-text-secondary)]">{req.person?.email}</p>
-                            <p className="mt-0.5 text-[10px] font-semibold text-[var(--color-text-muted)]">
-                              {formatDashboardActivity(req.receivedAt)}
-                            </p>
-                          </div>
-                        </button>
-                      </li>
-                    ))}
+                    {priorityAlerts.map((req) => {
+                      const alertBadge = getAlertBadge(req);
+                      return (
+                        <li key={req.id}>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/new-requests/${encodeURIComponent(req.id)}`)}
+                            className="flex w-full items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--color-brand-accent)] bg-white px-2.5 py-2 text-left transition-colors hover:bg-[#fff7f8] cursor-pointer"
+                          >
+                            <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-brand-accent)]/10">
+                              <AlertTriangle className="h-3.5 w-3.5 text-[var(--color-brand-accent)]" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-1.5">
+                                <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+                                  {`${req.person?.firstName || ''} ${req.person?.lastName || ''}`.trim() || 'Unknown'}
+                                </p>
+                                {alertBadge && (
+                                  <StatusTag variant={alertBadge.variant} label={alertBadge.label} fit compact />
+                                )}
+                              </div>
+                              <p className="truncate text-xs text-[var(--color-text-secondary)]">{req.person?.email}</p>
+                              <p className="mt-0.5 text-[10px] font-semibold text-[var(--color-text-muted)]">
+                                {formatDashboardActivity(req.receivedAt)}
+                              </p>
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </PanelScrollBody>
               )}
