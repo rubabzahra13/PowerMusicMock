@@ -344,6 +344,7 @@ export default function GroupResolutionView({
             location: (values.location || '').trim(),
           },
           adminNote: adminNote.trim() || null,
+          sourceRequestId: currentSourceRequestId,
         });
       } else {
         await resolveGroupMarkRemoved(group.id, {
@@ -354,6 +355,7 @@ export default function GroupResolutionView({
             location: (values.location || '').trim(),
           },
           adminNote: adminNote.trim() || null,
+          sourceRequestId: currentSourceRequestId,
         });
       }
       closeConfirmModal();

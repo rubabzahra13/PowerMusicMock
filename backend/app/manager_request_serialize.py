@@ -811,7 +811,7 @@ def _build_directory_request_history(
                 seen.add(event_id)
                 is_admin_entry = not req.manager_id and has_tag(tags, TAG_PARTNER_REQUEST)
                 who = manager_name or ("an admin" if is_admin_entry else "a manager")
-                title_prefix = "Admin entry" if is_admin_entry else "Manager request"
+                title_prefix = "Admin entry" if is_admin_entry else "Manager requested"
                 events.append(
                     {
                         "id": event_id,
@@ -821,7 +821,7 @@ def _build_directory_request_history(
                         "displayId": display_id,
                         "action": action,
                         "title": f"{title_prefix} to {action_verb or 'update'}",
-                        "detail": f"Submitted by {who}",
+                        "detail": f"Submitted by {manager_name}" if manager_name else f"Submitted by {who}",
                         "managerName": manager_name or ("Admin" if is_admin_entry else None),
                     }
                 )
@@ -831,6 +831,14 @@ def _build_directory_request_history(
             if event_id not in seen:
                 seen.add(event_id)
                 outcome = req.outcome or action
+                
+                if outcome == "Added":
+                    title_text = "Added and moved to active"
+                elif outcome == "Removed":
+                    title_text = "Removed to archive"
+                else:
+                    title_text = f"Marked as {outcome}"
+                    
                 events.append(
                     {
                         "id": event_id,
@@ -839,7 +847,7 @@ def _build_directory_request_history(
                         "requestId": req.id,
                         "displayId": display_id,
                         "action": action,
-                        "title": f"Marked as {outcome}",
+                        "title": title_text,
                         "detail": f"By {handled_by}" if handled_by else None,
                         "handledBy": handled_by or None,
                         "outcome": outcome,

@@ -702,6 +702,7 @@ class ResolveDeleteIn(BaseModel):
     directoryPersonId: str
     finalValues: PersonInfo
     adminNote: Optional[str] = Field(default=None, max_length=5000)
+    sourceRequestId: Optional[str] = None
 
 
 class ResolveMarkRemovedIn(BaseModel):
@@ -709,6 +710,7 @@ class ResolveMarkRemovedIn(BaseModel):
 
     finalValues: PersonInfo
     adminNote: Optional[str] = Field(default=None, max_length=5000)
+    sourceRequestId: Optional[str] = None
 
 
 class FieldDiffOut(BaseModel):

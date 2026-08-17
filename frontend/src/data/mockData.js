@@ -149,7 +149,7 @@ export const directoryData = [
     firstName: "Tom", lastName: "Briggs",
     email: "t.briggs@fitlife.com", location: "Bristol",
     status: "Added", dateAdded: "2026-06-21T14:15:00",
-    addedBy: "Andrea (Admin)", managerEmail: "andrea@powermusic.com", club: "Manual entry",
+    addedBy: "Power Music Admin", managerEmail: "andrea@powermusic.com", club: "Manual entry",
     sourceRequestId: "req-h-002",
     notes: "Manual admin entry: no manager form on file."
   },

@@ -53,7 +53,7 @@ def main():
         sys.exit(1)
 
     admin_email, admin_password = resolve_admin_credentials()
-    admin_full_name = os.getenv("ADMIN_FULL_NAME", "Andrea")
+    admin_full_name = os.getenv("ADMIN_FULL_NAME", "Power Music Admin")
     force_password_reset = os.getenv("ADMIN_FORCE_PASSWORD_RESET", "").lower() in {
         "1",
         "true",

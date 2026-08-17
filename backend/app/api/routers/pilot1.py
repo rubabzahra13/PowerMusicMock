@@ -337,7 +337,35 @@ def archive_person(
         if req.partner_id and req.partner_id != partner_id:
             raise HTTPException(status_code=404, detail="Directory record not found for partner")
 
-    req.archived_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    req.archived_at = now
+    
+    admin_name = "Power Music Admin"
+    if hasattr(_admin, "id") and _admin.id != "dev-bypass":
+        try:
+            from uuid import UUID
+            admin_user = db.query(models.PowermusicUser).filter(models.PowermusicUser.id == UUID(_admin.id)).first()
+            if admin_user:
+                admin_name = f"{admin_user.first_name} {admin_user.last_name}".strip() or admin_name
+        except Exception:
+            pass
+
+    from app.intake_persons import append_lifecycle_history
+    from app.request_display import parse_request_display_number
+    archive_event_id = f"{req.id}-archive-{now.timestamp()}"
+    append_lifecycle_history(req, [{
+        "id": archive_event_id,
+        "type": "handled",
+        "at": now.isoformat(),
+        "requestId": req.id,
+        "displayId": parse_request_display_number(req.id),
+        "action": "Remove",
+        "title": "Moved to archive",
+        "detail": f"By {admin_name}",
+        "handledBy": admin_name,
+        "outcome": "Removed",
+    }])
+
     db.commit()
     db.refresh(req)
     return directory_rows_to_api_dicts(db, [req])[0]
@@ -361,8 +389,36 @@ def bulk_archive_persons(
     if partner_id:
         reqs = [r for r in reqs if not r.partner_id or r.partner_id == partner_id]
 
+    now = datetime.now(timezone.utc)
+    
+    admin_name = "Power Music Admin"
+    if hasattr(_admin, "id") and _admin.id != "dev-bypass":
+        try:
+            from uuid import UUID
+            admin_user = db.query(models.PowermusicUser).filter(models.PowermusicUser.id == UUID(_admin.id)).first()
+            if admin_user:
+                admin_name = f"{admin_user.first_name} {admin_user.last_name}".strip() or admin_name
+        except Exception:
+            pass
+
+    from app.intake_persons import append_lifecycle_history
+    from app.request_display import parse_request_display_number
+
     for req in reqs:
-        req.archived_at = datetime.now(timezone.utc)
+        req.archived_at = now
+        archive_event_id = f"{req.id}-archive-{now.timestamp()}"
+        append_lifecycle_history(req, [{
+            "id": archive_event_id,
+            "type": "handled",
+            "at": now.isoformat(),
+            "requestId": req.id,
+            "displayId": parse_request_display_number(req.id),
+            "action": "Remove",
+            "title": "Moved to archive",
+            "detail": f"By {admin_name}",
+            "handledBy": admin_name,
+            "outcome": "Removed",
+        }])
 
     db.commit()
     for req in reqs:
@@ -387,7 +443,35 @@ def restore_person(
         if req.partner_id and req.partner_id != partner_id:
             raise HTTPException(status_code=404, detail="Directory record not found for partner")
 
+    now = datetime.now(timezone.utc)
     req.archived_at = None
+    
+    admin_name = "Power Music Admin"
+    if hasattr(_admin, "id") and _admin.id != "dev-bypass":
+        try:
+            from uuid import UUID
+            admin_user = db.query(models.PowermusicUser).filter(models.PowermusicUser.id == UUID(_admin.id)).first()
+            if admin_user:
+                admin_name = f"{admin_user.first_name} {admin_user.last_name}".strip() or admin_name
+        except Exception:
+            pass
+
+    from app.intake_persons import append_lifecycle_history
+    from app.request_display import parse_request_display_number
+    restore_event_id = f"{req.id}-restore-{now.timestamp()}"
+    append_lifecycle_history(req, [{
+        "id": restore_event_id,
+        "type": "handled",
+        "at": now.isoformat(),
+        "requestId": req.id,
+        "displayId": parse_request_display_number(req.id),
+        "action": "Add",
+        "title": "Restored to active",
+        "detail": f"By {admin_name}",
+        "handledBy": admin_name,
+        "outcome": "Added",
+    }])
+
     db.commit()
     db.refresh(req)
     return directory_rows_to_api_dicts(db, [req])[0]
@@ -408,10 +492,38 @@ def bulk_restore_persons(
 
     reqs = db.query(models.ManagerRequest).filter(models.ManagerRequest.id.in_(payload.ids)).all()
     
+    now = datetime.now(timezone.utc)
+
+    admin_name = "Power Music Admin"
+    if _admin and _admin.id and _admin.id != "dev-bypass":
+        try:
+            from uuid import UUID
+            admin_user = db.query(models.PowermusicUser).filter(models.PowermusicUser.id == UUID(_admin.id)).first()
+            if admin_user:
+                admin_name = f"{admin_user.first_name} {admin_user.last_name}".strip() or admin_name
+        except Exception:
+            pass
+
+    from app.intake_persons import append_lifecycle_history
+    from app.request_display import parse_request_display_number
+
     for req in reqs:
         if partner_id and req.partner_id and req.partner_id != partner_id:
             continue
         req.archived_at = None
+        restore_event_id = f"{req.id}-restore-{now.timestamp()}"
+        append_lifecycle_history(req, [{
+            "id": restore_event_id,
+            "type": "handled",
+            "at": now.isoformat(),
+            "requestId": req.id,
+            "displayId": parse_request_display_number(req.id),
+            "action": "Add",
+            "title": "Restored to active",
+            "detail": f"By {admin_name}",
+            "handledBy": admin_name,
+            "outcome": "Added",
+        }])
 
     db.commit()
     for req in reqs:
@@ -1716,7 +1828,7 @@ def resolve_group_delete_directory_api(
     admin_id = str(admin.id) if getattr(admin, "id", None) else None
 
     count = resolve_group_delete_from_directory(
-        db, group, directory_person=dir_person, final_values=payload.finalValues, admin_id=admin_id, admin_note=payload.adminNote
+        db, group, directory_person=dir_person, final_values=payload.finalValues, admin_id=admin_id, admin_note=payload.adminNote, source_request_id=payload.sourceRequestId
     )
 
     db.commit()
@@ -1754,7 +1866,7 @@ def resolve_group_mark_removed_api(
     admin_id = str(admin.id) if getattr(admin, "id", None) else None
 
     count = resolve_group_mark_removed(
-        db, group, final_values=payload.finalValues, admin_id=admin_id, admin_note=payload.adminNote
+        db, group, final_values=payload.finalValues, admin_id=admin_id, admin_note=payload.adminNote, source_request_id=payload.sourceRequestId
     )
     dir_person_id = group.directory_person_id
     db.commit()

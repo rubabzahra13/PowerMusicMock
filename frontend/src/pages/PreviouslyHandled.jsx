@@ -215,7 +215,7 @@ export default function PreviouslyHandled() {
         `${req.person.firstName} ${req.person.lastName}`,
         req.person.email,
         req.person.location || '',
-        isManual ? 'Andrea (Admin)' : `${req.submittedBy.firstName} ${req.submittedBy.lastName || ''}`.trim(),
+        isManual ? 'Power Music Admin' : `${req.submittedBy.firstName} ${req.submittedBy.lastName || ''}`.trim(),
         req.submittedBy.email || '',
         req.submittedBy.club,
         req.tags.join('; ')
@@ -291,7 +291,7 @@ export default function PreviouslyHandled() {
         const isManual = row.submittedBy.club === 'Manual entry';
         return (
           <span className="font-semibold text-sm text-[var(--color-text-primary)]">
-            {isManual ? 'Andrea (Admin)' : `${row.submittedBy.firstName} ${row.submittedBy.lastName || ''}`.trim()}
+            {isManual ? 'Power Music Admin' : `${row.submittedBy.firstName} ${row.submittedBy.lastName || ''}`.trim()}
           </span>
         );
       }
@@ -419,7 +419,7 @@ export default function PreviouslyHandled() {
             <div className="bg-[#f9fafb] border border-[var(--color-border-default)] rounded-md p-4 space-y-2">
               <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">Manager Details</span>
               <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {selectedRequest.submittedBy.club === 'Manual entry' ? 'Andrea (Admin)' : `${selectedRequest.submittedBy.firstName} ${selectedRequest.submittedBy.lastName || ''}`.trim()}
+                {selectedRequest.submittedBy.club === 'Manual entry' ? 'Power Music Admin' : `${selectedRequest.submittedBy.firstName} ${selectedRequest.submittedBy.lastName || ''}`.trim()}
               </div>
               <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 font-medium">
                 {selectedRequest.submittedBy.email && <div>Email: {selectedRequest.submittedBy.email}</div>}
@@ -460,7 +460,7 @@ export default function PreviouslyHandled() {
                   <span className="text-[var(--color-text-primary)]">
                     Request submitted by{' '}
                     {selectedRequest.submittedBy.club === 'Manual entry'
-                      ? 'Andrea (Admin)'
+                      ? 'Power Music Admin'
                       : `${selectedRequest.submittedBy.firstName} ${selectedRequest.submittedBy.lastName || ''}`.trim()}
                   </span>
                 </div>
@@ -469,7 +469,7 @@ export default function PreviouslyHandled() {
                     {formatTimeOnly(selectedRequest.handledAt)}
                   </span>
                   <span className="text-[var(--color-text-primary)]">
-                    Marked as {selectedRequest.action === 'Add' ? 'Added' : 'Removed'} by Andrea
+                    Marked as {selectedRequest.action === 'Add' ? 'Added' : 'Removed'} by Power Music Admin
                   </span>
                 </div>
               </div>

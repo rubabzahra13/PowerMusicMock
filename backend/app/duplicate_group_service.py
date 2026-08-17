@@ -1011,28 +1011,40 @@ def _apply_merge_manager_provenance(
     )
     from app.person_compare import person_to_mapping
 
-    intake: dict = {
-        "admin": person_to_mapping(final_values),
-    }
-    tags = [TAG_VERIFIED]
+    intake = dict(dir_row.intake_persons or {})
+    intake["admin"] = person_to_mapping(final_values)
+    
+    tags = list(dir_row.tags or [])
+    if TAG_VERIFIED not in tags:
+        tags.append(TAG_VERIFIED)
 
     if source is not None:
         dir_row.manager_id = source.manager_id
-        # Keep manager notes from the source request (historical inputs stay on members).
-        if source.manager_notes:
-            dir_row.manager_notes = source.manager_notes
+        if hasattr(source, "_manager_user"):
+            dir_row._manager_user = getattr(source, "_manager_user", None)
+        else:
+            dir_row._manager_user = None
+            
+        dir_row.manager_notes = source.manager_notes
+        dir_row.source_email_id = source.source_email_id
+        dir_row.source_gmail_message_id = source.source_gmail_message_id
 
         attributed = get_submitted_by_attribution(source)
         if any(attributed.values()):
             intake["submittedBy"] = attributed
+        else:
+            intake.pop("submittedBy", None)
 
         admin_submitted = get_admin_submitted_by(source)
         if any(admin_submitted.values()):
             intake["adminSubmittedBy"] = admin_submitted
+        else:
+            intake.pop("adminSubmittedBy", None)
 
         source_tags = source.tags or []
         if has_tag(source_tags, TAG_PARTNER_REQUEST) or source.manager_id:
-            tags.append(TAG_PARTNER_REQUEST)
+            if TAG_PARTNER_REQUEST not in tags:
+                tags.append(TAG_PARTNER_REQUEST)
         if has_tag(source_tags, TAG_SENT_BY_ADMIN) or (
             not source.manager_id and any(attributed.values())
         ):
@@ -1040,7 +1052,10 @@ def _apply_merge_manager_provenance(
                 tags.append(TAG_SENT_BY_ADMIN)
     else:
         # Admin merge with no manager on any member — treat as admin form entry.
-        tags.extend([TAG_PARTNER_REQUEST, TAG_SENT_BY_ADMIN])
+        if TAG_PARTNER_REQUEST not in tags:
+            tags.append(TAG_PARTNER_REQUEST)
+        if TAG_SENT_BY_ADMIN not in tags:
+            tags.append(TAG_SENT_BY_ADMIN)
 
     dir_row.intake_persons = intake
     dir_row.tags = tags
@@ -1166,6 +1181,50 @@ def _finalize_group(
             pass
     if admin_uuid:
         group.resolved_by_admin_id = admin_uuid
+
+
+def _snapshot_discarded_manager_requests(
+    directory_person: models.ManagerRequest,
+    members: List[models.ManagerRequest],
+    existing_stored_ids: set,
+) -> list:
+    from app.user_display import resolve_handled_by_name, resolve_manager_name
+    from app.request_display import parse_request_display_number
+    from app.manager_request_tags import TAG_PARTNER_REQUEST, TAG_VERIFIED, has_tag as _has_tag
+
+    snapshot_events = []
+    for member in members:
+        if member.id == directory_person.id:
+            continue
+        mem_tags = member.tags or []
+        mem_display_id = parse_request_display_number(member.id)
+        mem_action = member.action or ""
+        mem_action_verb = "remove" if mem_action == "Remove" else "add" if mem_action == "Add" else mem_action.lower()
+        mem_manager_name = resolve_manager_name(member)
+        
+        has_mem_manager = (
+            _has_tag(mem_tags, TAG_PARTNER_REQUEST)
+            or _has_tag(mem_tags, TAG_VERIFIED)
+            or bool(member.manager_id)
+        )
+        if has_mem_manager and member.received_at:
+            is_admin_entry = not member.manager_id and _has_tag(mem_tags, TAG_PARTNER_REQUEST)
+            who = mem_manager_name or ("an admin" if is_admin_entry else "a manager")
+            title_prefix = "Admin entry" if is_admin_entry else "Manager requested"
+            event_id = f"{member.id}-manager-request"
+            if event_id not in existing_stored_ids:
+                snapshot_events.append({
+                    "id": event_id,
+                    "type": "manager_request",
+                    "at": member.received_at.isoformat() if hasattr(member.received_at, "isoformat") else str(member.received_at),
+                    "requestId": member.id,
+                    "displayId": mem_display_id,
+                    "action": mem_action,
+                    "title": f"{title_prefix} to {mem_action_verb or 'update'}",
+                    "detail": f"Submitted by {mem_manager_name}" if mem_manager_name else f"Submitted by {who}",
+                    "managerName": mem_manager_name or ("Admin" if is_admin_entry else None),
+                })
+    return snapshot_events
 
 
 # ── Case A: Resolve & Add ────────────────────────────────────────────────────
@@ -1316,6 +1375,10 @@ def resolve_group_update(
     """
     _validate_final_values(final_values)
     now = datetime.now(timezone.utc)
+    
+    members = get_group_members(db, group.id)
+    from app.user_display import hydrate_request_users
+    hydrate_request_users(db, members + [directory_person])
 
     # Snapshot the current values for audit BEFORE modifying.
     previous = schemas.PersonInfo(
@@ -1331,12 +1394,61 @@ def resolve_group_update(
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
 
+    from app.intake_persons import append_lifecycle_history, get_lifecycle_history
+    
+    existing_stored = get_lifecycle_history(directory_person)
+    existing_stored_ids = {e.get("id") for e in existing_stored}
+    
     members = get_group_members(db, group.id)
+    
     manager_source = _current_request_member(
         members,
         source_request_id=source_request_id,
         representative_request_id=group.representative_request_id,
     )
+    if manager_source and manager_source.action == "Remove":
+        directory_person.action = "Remove"
+        directory_person.outcome = "Removed"
+        directory_person.handled_at = now
+        directory_person.archived_at = now
+        from app.manager_request_tags import TAG_REMOVED
+        if TAG_REMOVED not in (directory_person.tags or []):
+            directory_person.tags = (directory_person.tags or []) + [TAG_REMOVED]
+
+    snapshot_events = _snapshot_discarded_manager_requests(directory_person, members, existing_stored_ids)
+    
+    # Add explicit Update Directory event
+    from app.request_display import parse_request_display_number
+    dir_display_id = parse_request_display_number(directory_person.id)
+    
+    admin_name = "Power Music Admin"
+    if admin_id and admin_id != "dev-bypass":
+        from app.models import PowermusicUser
+        try:
+            from uuid import UUID
+            uuid_val = UUID(admin_id)
+            admin_user = db.query(PowermusicUser).filter(PowermusicUser.id == uuid_val).first()
+            if admin_user:
+                admin_name = f"{admin_user.first_name} {admin_user.last_name}".strip() or "Power Music Admin"
+        except Exception:
+            pass
+
+    update_event_id = f"{directory_person.id}-update-{now.timestamp()}"
+    snapshot_events.append({
+        "id": update_event_id,
+        "type": "handled",
+        "at": now.isoformat(),
+        "requestId": directory_person.id,
+        "displayId": dir_display_id,
+        "action": directory_person.action,
+        "title": "Power Music Admin updated the directory record",
+        "detail": f"By {admin_name}",
+        "handledBy": admin_name,
+        "outcome": directory_person.outcome,
+    })
+    
+    if snapshot_events:
+        append_lifecycle_history(directory_person, snapshot_events)
     _apply_merge_manager_provenance(
         directory_person, manager_source, final_values=final_values
     )
@@ -1388,6 +1500,18 @@ def resolve_group_keep_existing(
     """
     now = datetime.now(timezone.utc)
     members = get_group_members(db, group.id)
+    
+    from app.intake_persons import append_lifecycle_history, get_lifecycle_history
+    directory_person = db.query(models.ManagerRequest).filter(models.ManagerRequest.id == group.directory_person_id).first()
+    if directory_person:
+        from app.user_display import hydrate_request_users
+        hydrate_request_users(db, members + [directory_person])
+        existing_stored = get_lifecycle_history(directory_person)
+        existing_stored_ids = {e.get("id") for e in existing_stored}
+        snapshot_events = _snapshot_discarded_manager_requests(directory_person, members, existing_stored_ids)
+        if snapshot_events:
+            append_lifecycle_history(directory_person, snapshot_events)
+
     discarded_ids = [m.id for m in members if m.id != group.directory_person_id]
     count = len(discarded_ids)
 
@@ -1420,6 +1544,7 @@ def resolve_group_delete_from_directory(
     final_values: schemas.PersonInfo,
     admin_id: Optional[str],
     admin_note: Optional[str] = None,
+    source_request_id: Optional[str] = None,
 ) -> int:
     """Resolve group by marking Directory person as Removed and permanently deleting incoming requests.
 
@@ -1438,6 +1563,10 @@ def resolve_group_delete_from_directory(
     from app.manager_request_tags import TAG_PARTNER_REQUEST, TAG_VERIFIED, has_tag as _has_tag
 
     now = datetime.now(timezone.utc)
+    
+    members = get_group_members(db, group.id)
+    from app.user_display import hydrate_request_users
+    hydrate_request_users(db, members + [directory_person])
 
     # ── Step 1: Snapshot existing Add lifecycle events before mutating ──────────
     # The directory_person row currently represents the Add event.  Once we
@@ -1500,41 +1629,8 @@ def resolve_group_delete_from_directory(
                 "outcome": outcome_label,
             })
 
-    # Persist the Remove request events from the incoming group members
-    # (received_at = when the Remove was requested; these rows will be deleted).
     members = get_group_members(db, group.id)
-    for member in members:
-        if member.id == directory_person.id:
-            continue
-        mem_tags = member.tags or []
-        mem_display_id = parse_request_display_number(member.id)
-        mem_action = member.action or ""
-        mem_action_verb = "remove" if mem_action == "Remove" else mem_action.lower()
-        mem_manager_name = resolve_manager_name(member)
-        mem_handled_by = resolve_handled_by_name(member)
-
-        has_mem_manager = (
-            _has_tag(mem_tags, TAG_PARTNER_REQUEST)
-            or _has_tag(mem_tags, TAG_VERIFIED)
-            or bool(member.manager_id)
-        )
-        if has_mem_manager and member.received_at:
-            is_admin_entry = not member.manager_id and _has_tag(mem_tags, TAG_PARTNER_REQUEST)
-            who = mem_manager_name or ("an admin" if is_admin_entry else "a manager")
-            title_prefix = "Admin entry" if is_admin_entry else "Manager request"
-            event_id = f"{member.id}-manager-request"
-            if event_id not in existing_stored_ids:
-                snapshot_events.append({
-                    "id": event_id,
-                    "type": "manager_request",
-                    "at": member.received_at.isoformat() if hasattr(member.received_at, "isoformat") else str(member.received_at),
-                    "requestId": member.id,
-                    "displayId": mem_display_id,
-                    "action": mem_action,
-                    "title": f"{title_prefix} to {mem_action_verb or 'update'}",
-                    "detail": f"Submitted by {who}",
-                    "managerName": mem_manager_name or ("Admin" if is_admin_entry else None),
-                })
+    snapshot_events.extend(_snapshot_discarded_manager_requests(directory_person, members, existing_stored_ids))
 
     # Append all snapshot events captured so far (Add lifecycle + Remove requests).
     if snapshot_events:
@@ -1556,10 +1652,18 @@ def resolve_group_delete_from_directory(
     directory_person.person_last_name = (final_values.lastName or "").strip()
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
+    
+    manager_source = _current_request_member(
+        members,
+        source_request_id=source_request_id,
+        representative_request_id=group.representative_request_id,
+    )
+    _apply_merge_manager_provenance(directory_person, manager_source, final_values=final_values)
+    
     directory_person.outcome = "Removed"
     directory_person.action = "Remove"
     directory_person.handled_at = now  # Record the actual removal time
-    directory_person.archived_at = None
+    directory_person.archived_at = now
 
     from app.manager_request_tags import TAG_REMOVED
     if TAG_REMOVED not in (directory_person.tags or []):
@@ -1624,6 +1728,7 @@ def resolve_group_mark_removed(
     admin_id: Optional[str],
     partner_id: Optional[str] = None,
     admin_note: Optional[str] = None,
+    source_request_id: Optional[str] = None,
 ) -> int:
     """Resolve group and retain representative request as Removed Directory record (Case E), deleting discarded requests.
 
@@ -1671,7 +1776,15 @@ def resolve_group_mark_removed(
         dir_row.person_last_name = (final_values.lastName or "").strip()
         dir_row.person_email = (final_values.email or "").strip()
         dir_row.person_location = (final_values.location or "").strip()
-        dir_row.archived_at = None
+        dir_row.archived_at = now
+        
+        manager_source = _current_request_member(
+            members,
+            source_request_id=source_request_id,
+            representative_request_id=group.representative_request_id,
+        )
+        _apply_merge_manager_provenance(dir_row, manager_source, final_values=final_values)
+        
         if admin_uuid:
             dir_row.handled_by_admin_id = admin_uuid
         if admin_note:
@@ -1699,7 +1812,7 @@ def resolve_group_mark_removed(
             person_location=(final_values.location or "").strip(),
             tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED],
             partner_id=partner_id or group.partner_id,
-            archived_at=None,
+            archived_at=now,
         )
         if admin_uuid:
             dir_row.handled_by_admin_id = admin_uuid

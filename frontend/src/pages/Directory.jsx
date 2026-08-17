@@ -30,23 +30,6 @@ const personHandledBy = (user) => user.handledBy || user.addedBy || 'Power Music
 const personAdminNotes = (user) => user.adminNotes || '';
 const formatAdminNotes = (user) => personAdminNotes(user).trim() || MANAGER_NOTES_EMPTY_LABEL;
 
-/** Directory UI status: Added/Removed only (never GroupResolved etc.). */
-function directoryStatusLabel(row) {
-  if (row?.status === 'Added' || row?.status === 'Removed') return row.status;
-  const action =
-    row?.action
-    || [...(row?.requestHistory || [])]
-      .reverse()
-      .find((event) => event?.action === 'Add' || event?.action === 'Remove')
-      ?.action;
-  if (action === 'Remove') return 'Removed';
-  return 'Added';
-}
-
-function displayStatus(user) {
-  return directoryStatusLabel(user) === 'Added' ? 'Active' : 'Removed';
-}
-
 function buildFallbackHistory(user) {
   const events = [];
   if (user?.dateAdded) {
@@ -54,7 +37,7 @@ function buildFallbackHistory(user) {
       id: `${user.id}-handled`,
       type: 'handled',
       at: user.dateAdded,
-      title: `Marked as ${displayStatus(user)}`,
+      title: user.archivedAt ? 'Removed to archive' : 'Added and moved to active',
       detail: `By ${personHandledBy(user)}`,
       displayId: user.displayId,
     });
@@ -572,11 +555,6 @@ function DirectoryMobileList({
                     <span className="text-xs font-bold tabular-nums text-[var(--color-text-muted)]">
                       {formatRequestDisplayId(row.displayId)}
                     </span>
-                    <Tag
-                      variant={directoryStatusLabel(row) === 'Added' ? 'added' : 'removed'}
-                      label={displayStatus(row)}
-                      compact
-                    />
                     <div className="ml-auto flex items-center gap-1.5">
                       {onEditUser && (
                         <HoverTip label="Edit">
@@ -692,7 +670,7 @@ export default function UserLedger() {
   const [liveUserLedger, setLiveUserLedger] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
   const [highlightVersion, setHighlightVersion] = useState(0);
-  const toast = useToast();
+  const { showToast } = useToast();
 
   const directoryView = location.pathname.startsWith('/directory/archived') ? 'archived' : 'active';
   const [archivedUserLedger, setArchivedUserLedger] = useState([]);
@@ -744,10 +722,10 @@ export default function UserLedger() {
       });
       
       setSelectedIds(new Set());
-      toast.show(`Archived ${ids.length} record${ids.length === 1 ? '' : 's'} successfully`, 'success');
+      showToast(`Archived ${ids.length} record${ids.length === 1 ? '' : 's'} successfully`, 'success');
     } catch (err) {
       console.error(err);
-      toast.show(err.message || 'Failed to bulk archive records', 'error');
+      showToast(err.message || 'Failed to bulk archive records', 'error');
     } finally {
       setBulkArchiveLoading(false);
     }
@@ -788,22 +766,15 @@ export default function UserLedger() {
     
     try {
       const restoredRecords = await bulkRestorePersons(ids, selectedPartnerId);
-      const newlyActive = restoredRecords.filter(r => directoryStatusLabel(r) === 'Added');
-      const stillRemoved = restoredRecords.filter(r => directoryStatusLabel(r) === 'Removed');
       
-      setArchivedUserLedger((prev) => {
-        const remaining = prev.filter((r) => !selectedArchivedIds.has(r.id));
-        return [...stillRemoved, ...remaining];
-      });
-      setLiveUserLedger((prev) => {
-        return [...newlyActive, ...prev];
-      });
+      setArchivedUserLedger((prev) => prev.filter((r) => !selectedArchivedIds.has(r.id)));
+      setLiveUserLedger((prev) => [...restoredRecords, ...prev]);
       
       setSelectedArchivedIds(new Set());
-      toast.show(`Restored ${ids.length} record${ids.length === 1 ? '' : 's'} successfully`, 'success');
+      showToast(`Restored ${ids.length} record${ids.length === 1 ? '' : 's'} successfully`, 'success');
     } catch (err) {
       console.error(err);
-      toast.show(err.message || 'Failed to bulk restore records', 'error');
+      showToast(err.message || 'Failed to bulk restore records', 'error');
     } finally {
       setBulkRestoreLoading(false);
     }
@@ -836,10 +807,10 @@ export default function UserLedger() {
       }
       
       setDeletingUserId(null);
-      toast.show(`Permanently deleted ${ids.length} record${ids.length === 1 ? '' : 's'}`, 'success');
+      showToast(`Permanently deleted ${ids.length} record${ids.length === 1 ? '' : 's'}`, 'success');
     } catch (err) {
       console.error(err);
-      toast.show(err.message || 'Failed to permanently delete records', 'error');
+      showToast(err.message || 'Failed to permanently delete records', 'error');
     } finally {
       setBulkDeleteLoading(false);
     }
@@ -857,27 +828,13 @@ export default function UserLedger() {
 
     const applyPersons = (data) => {
       const activeData = Array.isArray(data) ? data : [];
-      setLiveUserLedger(activeData.filter(r => directoryStatusLabel(r) === 'Added'));
-      setArchivedUserLedger(prev => {
-        const removed = activeData.filter(r => directoryStatusLabel(r) === 'Removed');
-        const prevArchived = prev.filter(r => r.archivedAt != null);
-        const map = new Map();
-        for (const r of prevArchived) map.set(r.id, r);
-        for (const r of removed) map.set(r.id, r);
-        return Array.from(map.values()).sort((a, b) => new Date(b.dateAdded || 0) - new Date(a.dateAdded || 0));
-      });
+      setLiveUserLedger(activeData);
       setTableLoading(false);
     };
 
     const applyArchived = (data) => {
       const archivedData = Array.isArray(data) ? data : [];
-      setArchivedUserLedger(prev => {
-        const removed = prev.filter(r => r.archivedAt == null);
-        const map = new Map();
-        for (const r of archivedData) map.set(r.id, r);
-        for (const r of removed) map.set(r.id, r);
-        return Array.from(map.values()).sort((a, b) => new Date(b.dateAdded || 0) - new Date(a.dateAdded || 0));
-      });
+      setArchivedUserLedger(archivedData);
     };
 
     const load = () => {
@@ -931,10 +888,10 @@ export default function UserLedger() {
         setSelectedUser(null);
       }
       setArchivingUser(null);
-      toast.show('Record archived successfully', 'success');
+      showToast('Record archived successfully', 'success');
     } catch (err) {
       console.error(err);
-      toast.show(err.message || 'Failed to archive record', 'error');
+      showToast(err.message || 'Failed to archive record', 'error');
     } finally {
       setArchiveLoading(false);
     }
@@ -945,24 +902,16 @@ export default function UserLedger() {
     setRestoringUserId(user.id);
     try {
       const restored = await restorePerson(user.id, selectedPartnerId);
-      if (directoryStatusLabel(restored) === 'Added') {
-        setArchivedUserLedger((prev) => prev.filter((r) => r.id !== user.id));
-        setLiveUserLedger((prev) => [restored, ...prev.filter((r) => r.id !== user.id)]);
-        if (selectedUser?.id === user.id) {
-          setSelectedUser(restored);
-        }
-        toast.show('Record restored to active Directory', 'success');
-      } else {
-        setArchivedUserLedger((prev) => prev.map((r) => (r.id === user.id ? restored : r)));
-        if (selectedUser?.id === user.id) {
-          setSelectedUser(restored);
-        }
-        toast.show('Record unarchived, but remains in Archive because its status is Removed', 'success');
+      setArchivedUserLedger((prev) => prev.filter((r) => r.id !== user.id));
+      setLiveUserLedger((prev) => [restored, ...prev.filter((r) => r.id !== user.id)]);
+      if (selectedUser?.id === user.id) {
+        setSelectedUser(restored);
       }
+      showToast('Record restored to Active Directory', 'success');
       setRestoringUser(null);
     } catch (err) {
       console.error(err);
-      toast.show(err.message || 'Failed to restore record', 'error');
+      showToast(err.message || 'Failed to restore record', 'error');
     } finally {
       setRestoringUserId(null);
     }
@@ -1108,14 +1057,13 @@ export default function UserLedger() {
   }, [requestIdFromUrl, liveUserLedger, tableLoading]);
 
   const handleExportCSV = () => {
-    const headers = ['ID', 'Person Name', 'Person Email', 'Location', 'Status', 'Date Added', 'Manager Name', 'Manager Email', 'Club', 'Manager notes', 'Admin notes'];
+    const headers = ['ID', 'Person Name', 'Person Email', 'Location', 'Date Added', 'Manager Name', 'Manager Email', 'Club', 'Manager notes', 'Admin notes'];
     const csvRows = filteredLedger.map((user) =>
       [
         formatRequestDisplayId(user.displayId),
         `${user.firstName} ${user.lastName}`,
         user.email,
         user.location,
-        displayStatus(user),
         formatAdminDate(user.dateAdded),
         personManagerName(user),
         user.managerEmail || '',
@@ -1136,7 +1084,7 @@ export default function UserLedger() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     setConfirmExportOpen(false);
-    toast.show(
+    showToast(
       `Downloaded ${filteredLedger.length} record${filteredLedger.length === 1 ? '' : 's'}.`,
       'success',
     );
@@ -1276,22 +1224,6 @@ export default function UserLedger() {
           />
         );
       }
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      width: '4.75rem',
-      noShrink: true,
-      headerClassName: 'text-center',
-      cellClassName: 'align-middle whitespace-nowrap text-center',
-      render: (_, row) => {
-        const status = directoryStatusLabel(row);
-        return (
-          <div className="flex justify-center">
-            <Tag variant={status === 'Added' ? 'added' : 'removed'} label={displayStatus(row)} compact />
-          </div>
-        );
-      },
     },
     {
       key: 'open',
@@ -1610,8 +1542,7 @@ export default function UserLedger() {
               ? `${nameParts[0][0] || ''}${nameParts[nameParts.length - 1][0] || ''}`
               : (nameParts[0] || '?').slice(0, 2)
           ).toUpperCase();
-          const isAdded = directoryStatusLabel(selectedUser) === 'Added';
-          const statusLabel = directoryStatusLabel(selectedUser);
+
 
           return (
             <div className="space-y-3 text-left select-none">
@@ -1626,11 +1557,7 @@ export default function UserLedger() {
                         {fullName}
                       </h3>
                       <div className="flex shrink-0 items-center gap-2 pt-0.5">
-                        <Tag
-                          variant={isAdded ? 'added' : 'removed'}
-                          label={statusLabel}
-                          compact
-                        />
+
                         <div className="flex items-center gap-1.5">
                           {directoryView === 'active' ? (
                             <>
@@ -1767,7 +1694,7 @@ export default function UserLedger() {
                 )}
               </DrawerSection>
 
-              {isAdded && (
+              {directoryView === 'active' && (
                 <div className="flex items-start gap-2.5 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] p-4">
                   <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" />
                   <span className="text-xs font-semibold leading-normal text-[var(--color-text-secondary)]">

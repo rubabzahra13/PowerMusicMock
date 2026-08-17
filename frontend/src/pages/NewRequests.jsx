@@ -1783,7 +1783,7 @@ export default function Requests() {
           </div>
 
           <div className="text-[11px] font-medium text-[var(--color-text-muted)] select-none pt-3 border-t border-[var(--color-border-default)]/80">
-            Created by Andrea (Admin)
+            Created by Power Music Admin
           </div>
         </form>
       </Modal>
