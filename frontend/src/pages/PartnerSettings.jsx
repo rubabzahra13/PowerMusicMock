@@ -32,15 +32,17 @@ import {
   getManagerDomains,
   updateInbox,
   getPartnerCustomForm,
-  updatePartnerCustomForm,
+  uploadPartnerLogo,
+  deletePartnerLogo,
 } from '../utils/pilot2Api';
 import {
   cachePartnerSlugBranding,
-  downscalePartnerLogoDataUrl,
-  LARGE_PARTNER_LOGO_DATA_URL_LENGTH,
+  cachePartnerLogo,
   partnerCustomFormCacheKey,
   readInstantPartnerLogoByPartnerId,
+  resolvePartnerLogoSrc,
 } from '../utils/partnerSlugBrandingCache';
+import { dataUrlToBlob } from '../utils/cropPartnerLogo';
 
 const MAX_CONNECTED_INBOXES = 7;
 
@@ -305,6 +307,9 @@ export default function PartnerSettings() {
   const [previewAction, setPreviewAction] = useState('Add');
   const [formUrlCopied, setFormUrlCopied] = useState(false);
   const logoInputRef = useRef(null);
+  const pendingLogoBlobRef = useRef(null);
+  const pendingLogoRemoveRef = useRef(false);
+  const previewObjectUrlRef = useRef(null);
 
   const connectedAccounts = useMemo(
     () => accounts.filter((account) => account.status === 'Connected'),
@@ -383,6 +388,7 @@ export default function PartnerSettings() {
     const commitLogo = (logo, resForCache = null) => {
       if (loadId !== logoLoadRef.current) return;
       setLogoDataUrl((prev) => (prev === logo ? prev : logo));
+      if (selectedPartnerId) cachePartnerLogo(selectedPartnerId, logo);
       if (logo && partnerName) {
         cachePartnerSlugBranding(partnerSlugFromName(partnerName), {
           partnerName,
@@ -396,7 +402,7 @@ export default function PartnerSettings() {
 
     const processBrandingResponse = (res) => {
       if (loadId !== logoLoadRef.current) return;
-      const logo = res?.logo_data_url ?? null;
+      const logo = resolvePartnerLogoSrc(res?.logo_url, res?.logo_data_url);
       commitLogo(logo, res);
     };
 
@@ -418,6 +424,8 @@ export default function PartnerSettings() {
     const name = selectedPartner.name || '';
     setPartnerNameDraft(name);
     profileSnapshotRef.current = { name, logo: logoDataUrl };
+    pendingLogoBlobRef.current = null;
+    pendingLogoRemoveRef.current = false;
     setProfilePreviewing(false);
     setProfileEditing(true);
   };
@@ -425,6 +433,12 @@ export default function PartnerSettings() {
   const cancelProfileEdit = () => {
     const { name, logo } = profileSnapshotRef.current;
     setPartnerNameDraft(name);
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = null;
+    }
+    pendingLogoBlobRef.current = null;
+    pendingLogoRemoveRef.current = false;
     setLogoDataUrl(logo);
     if (logoInputRef.current) logoInputRef.current.value = '';
     setProfileEditing(false);
@@ -632,7 +646,11 @@ export default function PartnerSettings() {
   const partnerDirty = Boolean(selectedPartner)
     && partnerNameDraft.trim() !== (selectedPartner?.name || '')
     && partnerNameDraft.trim().length > 0;
-  const logoDirty = profileEditing && logoDataUrl !== profileSnapshotRef.current.logo;
+  const logoDirty =
+    profileEditing
+    && (pendingLogoBlobRef.current !== null
+      || pendingLogoRemoveRef.current
+      || logoDataUrl !== profileSnapshotRef.current.logo);
   const profileDirty = partnerDirty || logoDirty;
 
   // ── Manager form branding helpers ───────────────────────────────────────
@@ -642,22 +660,20 @@ export default function PartnerSettings() {
     if (logoInputRef.current) logoInputRef.current.value = '';
   };
 
-  const applyLogoDataUrl = async (raw) => {
-    let next = raw;
-    if (next && next.length > LARGE_PARTNER_LOGO_DATA_URL_LENGTH) {
-      next = await downscalePartnerLogoDataUrl(next);
-    }
-    setLogoDataUrl(next);
+  const applyLogoSrc = (src, { cacheResponse = null } = {}) => {
+    setLogoDataUrl(src);
     if (selectedPartnerId) {
+      cachePartnerLogo(selectedPartnerId, src);
       writeCache(partnerBrandingCacheKey, {
-        logo_data_url: next,
-        fields: [],
+        logo_url: src,
+        logo_data_url: null,
+        fields: cacheResponse?.fields ?? [],
       });
     }
     if (selectedPartner?.name) {
       cachePartnerSlugBranding(partnerSlugFromName(selectedPartner.name), {
         partnerName: selectedPartner.name,
-        logoDataUrl: next,
+        logoDataUrl: src,
       });
     }
   };
@@ -680,15 +696,32 @@ export default function PartnerSettings() {
   };
 
   const handleLogoCropConfirm = async (cropped) => {
-    await applyLogoDataUrl(cropped);
-    closeLogoCrop();
+    try {
+      pendingLogoRemoveRef.current = false;
+      pendingLogoBlobRef.current = await dataUrlToBlob(cropped);
+      if (previewObjectUrlRef.current) {
+        URL.revokeObjectURL(previewObjectUrlRef.current);
+      }
+      previewObjectUrlRef.current = URL.createObjectURL(pendingLogoBlobRef.current);
+      setLogoDataUrl(previewObjectUrlRef.current);
+      closeLogoCrop();
+    } catch (err) {
+      showToast(err.message || 'Could not prepare logo.', 'error');
+    }
   };
 
   const handleRemoveLogo = () => {
+    pendingLogoBlobRef.current = null;
+    pendingLogoRemoveRef.current = true;
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = null;
+    }
     setLogoDataUrl(null);
     if (logoInputRef.current) logoInputRef.current.value = '';
+    if (selectedPartnerId) cachePartnerLogo(selectedPartnerId, null);
     if (partnerBrandingCacheKey) {
-      writeCache(partnerBrandingCacheKey, { logo_data_url: null, fields: [] });
+      writeCache(partnerBrandingCacheKey, { logo_url: null, logo_data_url: null, fields: [] });
     }
     if (selectedPartner?.name) {
       cachePartnerSlugBranding(partnerSlugFromName(selectedPartner.name), {
@@ -707,29 +740,33 @@ export default function PartnerSettings() {
     }
 
     const nameChanged = nextName !== (selectedPartner.name || '');
-    const logoChanged = logoDataUrl !== profileSnapshotRef.current.logo;
-    if (!nameChanged && !logoChanged) return;
+    if (!nameChanged && !logoDirty) return;
 
     setProfileSaving(true);
     try {
-      // Persist the photo (server + cache) BEFORE the name change so the
-      // branding-load effect (re-triggered by the rename) reads the fresh logo.
-      if (logoChanged) {
-        await updatePartnerCustomForm(selectedPartnerId, {
-          logo_data_url: logoDataUrl,
-          fields: [],
-        });
-        writeCache(partnerBrandingCacheKey, {
-          logo_data_url: logoDataUrl,
-          fields: [],
-        });
+      let nextLogo = logoDataUrl;
+
+      if (pendingLogoRemoveRef.current) {
+        await deletePartnerLogo(selectedPartnerId);
+        nextLogo = null;
+        applyLogoSrc(null);
+        pendingLogoRemoveRef.current = false;
+      } else if (pendingLogoBlobRef.current) {
+        const uploaded = await uploadPartnerLogo(selectedPartnerId, pendingLogoBlobRef.current);
+        nextLogo = uploaded.logo_url;
+        applyLogoSrc(nextLogo);
+        pendingLogoBlobRef.current = null;
+        if (previewObjectUrlRef.current) {
+          URL.revokeObjectURL(previewObjectUrlRef.current);
+          previewObjectUrlRef.current = null;
+        }
       }
 
       const slug = partnerSlugFromName(nextName);
       if (slug) {
         cachePartnerSlugBranding(slug, {
           partnerName: nextName,
-          logoDataUrl: logoDataUrl,
+          logoDataUrl: nextLogo,
         });
       }
 
@@ -737,7 +774,7 @@ export default function PartnerSettings() {
         await updatePartner(selectedPartner.id, nextName);
       }
 
-      profileSnapshotRef.current = { name: nextName, logo: logoDataUrl };
+      profileSnapshotRef.current = { name: nextName, logo: nextLogo };
       setProfileEditing(false);
       showToast('Profile saved.', 'success');
     } catch (err) {

@@ -750,11 +750,18 @@ class ResolveGroupResultOut(BaseModel):
 
 class PartnerCustomFormOut(BaseModel):
     partner_id: str
+    logo_url: Optional[str] = None
     logo_data_url: Optional[str] = None
     fields: list = Field(default_factory=list)
     model_config = ConfigDict(from_attributes=True)
 
 
 class PartnerCustomFormIn(BaseModel):
+    logo_url: Optional[str] = None
     logo_data_url: Optional[str] = None
     fields: list = Field(default_factory=list)
+
+
+class PartnerLogoUploadOut(BaseModel):
+    partner_id: str
+    logo_url: str

@@ -2,7 +2,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, case, func
 
@@ -88,6 +88,14 @@ from app.duplicate_group_service import (
     get_active_groups,
     get_dismiss_impact,
     get_group_members,
+)
+from app.partner_logo_storage import (
+    delete_partner_logo,
+    migrate_inline_logo_to_storage,
+    resolve_partner_logo,
+    storage_enabled,
+    upload_partner_logo_bytes,
+    upload_partner_logo_from_data_url,
 )
 
 router = APIRouter()
@@ -1301,9 +1309,13 @@ def public_partner_branding(email: str = "", db: Session = Depends(get_db)):
         .filter(models.PartnerCustomForm.partner_id == partner_id)
         .first()
     )
+    if form:
+        migrate_inline_logo_to_storage(db, form)
+    logo = resolve_partner_logo(form)
     return {
         "partnerName": partner.name,
-        "logoDataUrl": form.logo_data_url if form else None,
+        "logoUrl": logo,
+        "logoDataUrl": logo,
     }
 
 
@@ -1921,20 +1933,87 @@ def manager_partner_branding(
         .filter(models.PartnerCustomForm.partner_id == partner_id)
         .first()
     )
+    if form:
+        migrate_inline_logo_to_storage(db, form)
+    logo = resolve_partner_logo(form)
     return {
         "partnerName": partner.name,
-        "logoDataUrl": form.logo_data_url if form else None,
+        "logoUrl": logo,
+        "logoDataUrl": logo,
     }
 
 
 # ── Custom Manager Form Branding ──────────────────────────────────────────
 
+def _get_or_create_partner_form(db: Session, partner_id: str) -> models.PartnerCustomForm:
+    form = (
+        db.query(models.PartnerCustomForm)
+        .filter(models.PartnerCustomForm.partner_id == partner_id)
+        .first()
+    )
+    if not form:
+        form = models.PartnerCustomForm(partner_id=partner_id)
+        db.add(form)
+    return form
+
+
 @router.get("/api/partners/{partner_id}/custom-form", response_model=schemas.PartnerCustomFormOut)
 def get_partner_custom_form(partner_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
     form = db.query(models.PartnerCustomForm).filter(models.PartnerCustomForm.partner_id == partner_id).first()
     if not form:
-        return {"partner_id": partner_id, "logo_data_url": None, "fields": []}
+        return {"partner_id": partner_id, "logo_url": None, "logo_data_url": None, "fields": []}
+    migrate_inline_logo_to_storage(db, form)
     return form
+
+
+@router.post("/api/partners/{partner_id}/logo", response_model=schemas.PartnerLogoUploadOut)
+async def upload_partner_logo(
+    partner_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    get_partner_or_404(db, partner_id)
+    if not storage_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Logo storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+        )
+
+    content = await file.read()
+    content_type = file.content_type or "image/png"
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Upload a PNG, JPEG, or WebP image.")
+
+    try:
+        logo_url = upload_partner_logo_bytes(partner_id, content, content_type=content_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    form = _get_or_create_partner_form(db, partner_id)
+    form.logo_url = logo_url
+    form.logo_data_url = None
+    form.fields = form.fields or []
+    db.commit()
+    return {"partner_id": partner_id, "logo_url": logo_url}
+
+
+@router.delete("/api/partners/{partner_id}/logo")
+def remove_partner_logo(
+    partner_id: str,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    get_partner_or_404(db, partner_id)
+    delete_partner_logo(partner_id)
+    form = db.query(models.PartnerCustomForm).filter(models.PartnerCustomForm.partner_id == partner_id).first()
+    if form:
+        form.logo_url = None
+        form.logo_data_url = None
+        db.commit()
+    return {"partner_id": partner_id, "deleted": True}
 
 
 @router.put("/api/partners/{partner_id}/custom-form", response_model=schemas.PartnerCustomFormOut)
@@ -1944,16 +2023,27 @@ def update_partner_custom_form(
     db: Session = Depends(get_db),
     admin=Depends(require_admin)
 ):
-    partner = db.query(models.Partner).filter(models.Partner.id == partner_id).first()
-    if not partner:
-        raise HTTPException(status_code=404, detail="Partner not found")
-        
-    form = db.query(models.PartnerCustomForm).filter(models.PartnerCustomForm.partner_id == partner_id).first()
-    if not form:
-        form = models.PartnerCustomForm(partner_id=partner_id)
-        db.add(form)
-        
-    form.logo_data_url = payload.logo_data_url
+    get_partner_or_404(db, partner_id)
+    form = _get_or_create_partner_form(db, partner_id)
+
+    if payload.logo_data_url and storage_enabled():
+        try:
+            form.logo_url = upload_partner_logo_from_data_url(partner_id, payload.logo_data_url)
+            form.logo_data_url = None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    elif payload.logo_url is not None:
+        form.logo_url = payload.logo_url
+        if payload.logo_url:
+            form.logo_data_url = None
+    elif payload.logo_data_url is not None:
+        form.logo_data_url = payload.logo_data_url
+        if payload.logo_data_url is None:
+            delete_partner_logo(partner_id)
+            form.logo_url = None
+
     form.fields = payload.fields
     db.commit()
     db.refresh(form)
@@ -1964,21 +2054,25 @@ def update_partner_custom_form(
 def get_public_custom_form(partner_slug: str, db: Session = Depends(get_db)):
     import re
     partners = db.query(models.Partner).all()
-    
+
     target_partner = None
     for p in partners:
         slug = re.sub(r'[^a-z0-9-]', '', re.sub(r'\s+', '-', p.name.lower()))
         if slug == partner_slug:
             target_partner = p
             break
-            
+
     if not target_partner:
         raise HTTPException(status_code=404, detail="Partner not found")
-        
+
     form = db.query(models.PartnerCustomForm).filter(models.PartnerCustomForm.partner_id == target_partner.id).first()
+    if form:
+        migrate_inline_logo_to_storage(db, form)
+    logo = resolve_partner_logo(form)
     return {
         "partnerName": target_partner.name,
-        "logoDataUrl": form.logo_data_url if form else None,
+        "logoUrl": logo,
+        "logoDataUrl": logo,
         "fields": form.fields if form else [],
         "allowedDomains": list_manager_domain_strings(db, partner_id=target_partner.id),
     }

@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import HoverTip from './HoverTip';
-import DottedScroll from './DottedScroll';
 
 let bodyScrollLockCount = 0;
 let lockedScrollY = 0;
@@ -211,14 +210,8 @@ export default function Modal({
         </div>
 
         {flushBody ? (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#f6f3ee]">
-            <DottedScroll
-              className="min-h-0 flex-1"
-              scrollClassName="h-full overflow-y-scroll scrollbar-hide overscroll-contain"
-              contentClassName="flex flex-col text-sm leading-relaxed text-[var(--color-text-primary)]"
-            >
-              {children}
-            </DottedScroll>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+            {children}
           </div>
         ) : (
           <div

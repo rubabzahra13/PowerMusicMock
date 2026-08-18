@@ -91,4 +91,16 @@ export async function exportCircularCrop(
   return canvas.toDataURL('image/png');
 }
 
+export function dataUrlToBlob(dataUrl) {
+  return fetch(dataUrl).then((res) => res.blob());
+}
+
+export async function exportCircularCropBlob(
+  imageSrc,
+  options,
+) {
+  const dataUrl = await exportCircularCrop(imageSrc, options);
+  return dataUrlToBlob(dataUrl);
+}
+
 export { DEFAULT_CROP_SIZE, DEFAULT_OUTPUT_SIZE };

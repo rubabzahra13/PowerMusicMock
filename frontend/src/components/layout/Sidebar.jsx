@@ -17,7 +17,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { usePartners } from '../../context/PartnerContext';
 import { useToast } from '../ui/useToast';
-import { Modal, HoverTip } from '../ui';
+import { Modal, HoverTip, DottedScroll } from '../ui';
 import { clearAdminIntroSeen } from '../admin/AdminPortalIntro';
 import { clearCache } from '../../utils/pilot2Api';
 
@@ -31,10 +31,55 @@ function partnerInitials(name) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
+function PartnerListAvatar({ name, logoDataUrl, active = false }) {
+  return (
+    <span
+      className={`flex h-10 w-10 shrink-0 overflow-hidden rounded-full ring-1 ${
+        active
+          ? 'bg-white ring-[var(--color-brand-secondary)]/30'
+          : 'bg-white ring-[var(--color-border-default)]'
+      }`}
+      aria-hidden="true"
+    >
+      {logoDataUrl ? (
+        <img src={logoDataUrl} alt="" className="h-full w-full object-cover object-center" />
+      ) : (
+        <span
+          className={`flex h-full w-full items-center justify-center text-xs font-bold ${
+            active ? 'text-[var(--color-brand-secondary)]' : 'text-[var(--color-text-primary)]'
+          }`}
+        >
+          {partnerInitials(name)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function PartnerSelectTriggerAvatar({ name, logoDataUrl, size = 'sm' }) {
+  const sizeClass = size === 'md' ? 'h-7 w-7 text-[10px]' : 'h-6 w-6 text-[10px]';
+  return (
+    <span
+      className={`flex shrink-0 overflow-hidden rounded-full bg-white ring-1 ring-white/20 ${sizeClass}`}
+      aria-hidden="true"
+    >
+      {logoDataUrl ? (
+        <img src={logoDataUrl} alt="" className="h-full w-full object-cover object-center" />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center font-bold text-[var(--color-brand-secondary)]">
+          {partnerInitials(name)}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function PartnerSelect({
   showExpanded,
   partners,
+  partnerLogos,
   selectedPartnerId,
+  selectedPartnerLogo,
   setSelectedPartnerId,
   partnerLabel,
 }) {
@@ -46,7 +91,9 @@ function PartnerSelect({
       : partners.map((p) => ({ value: p.id, label: p.name }));
   const selected = options.find((opt) => opt.value === (selectedPartnerId || '')) ?? options[0];
   const tipLabel = selected?.label || 'Partner';
-  const collapsedLabel = partnerInitials(selected?.label || partnerLabel);
+  const selectedLogo = selected?.value
+    ? partnerLogos[selected.value] ?? (selected.value === selectedPartnerId ? selectedPartnerLogo : null)
+    : null;
 
   const triggerClass = showExpanded
     ? 'flex w-full items-center justify-between gap-2 rounded-lg border border-[var(--color-brand-secondary-border)]/50 bg-[var(--color-brand-secondary)]/30 px-3 h-9 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[var(--color-brand-secondary)]/45 hover:border-[var(--color-brand-secondary-border)]/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-secondary)]/25 disabled:cursor-not-allowed disabled:opacity-50'
@@ -71,11 +118,12 @@ function PartnerSelect({
           >
             {showExpanded ? (
               <>
+                <PartnerSelectTriggerAvatar name={tipLabel} logoDataUrl={selectedLogo} size="sm" />
                 <span className="min-w-0 truncate text-left">{tipLabel}</span>
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--color-brand-secondary-border)]" />
               </>
             ) : (
-              <span className="truncate px-0.5">{collapsedLabel}</span>
+              <PartnerSelectTriggerAvatar name={tipLabel} logoDataUrl={selectedLogo} size="md" />
             )}
           </button>
         </HoverTip>
@@ -85,7 +133,8 @@ function PartnerSelect({
         isOpen={open}
         onClose={() => setOpen(false)}
         title="Select partner"
-        confirm
+        flushBody
+        stableHeight
         footer={
           <button
             type="button"
@@ -96,17 +145,24 @@ function PartnerSelect({
           </button>
         }
       >
-        <p className="mb-4 text-sm text-[var(--color-text-secondary)]">
+        <p className="shrink-0 px-4 pt-4 text-sm leading-relaxed text-[var(--color-text-secondary)] sm:px-6 sm:pt-6">
           Choose which partner workspace to view.
         </p>
-        <div
-          className="max-h-[min(50vh,22rem)] overflow-y-auto overscroll-contain pr-0.5"
-          role="listbox"
-          aria-label="Partners"
+
+        <DottedScroll
+          className="min-h-0 flex-1"
+          scrollClassName="h-full overflow-y-scroll scrollbar-hide overscroll-contain px-4 sm:px-6"
+          contentClassName="pb-4 sm:pb-6"
+          indicatorPlacement="below"
+          indicatorClassName="pb-2"
         >
-          <div className="flex flex-col gap-1.5 text-left">
+          <div
+            role="listbox"
+            aria-label="Partners"
+            className="overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/35 divide-y divide-[var(--color-border-default)]/70"
+          >
             {options.map((opt) => {
-              const isActive = (selectedPartnerId || '') === opt.value;
+              const isActive = String(selectedPartnerId ?? '') === String(opt.value ?? '');
               return (
                 <button
                   key={opt.value || 'all'}
@@ -119,19 +175,28 @@ function PartnerSelect({
                     setSelectedPartnerId(opt.value);
                     setOpen(false);
                   }}
-                  className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors ${
+                  className={`flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors ${
                     isActive
-                      ? 'border-[var(--color-brand-secondary)] bg-[var(--color-brand-secondary-muted)] text-[var(--color-brand-secondary)]'
-                      : 'border-[var(--color-border-default)] bg-white text-[var(--color-text-primary)] hover:border-[var(--color-brand-secondary-border)] hover:bg-[var(--color-brand-secondary-muted)]/50'
-                  }`}
+                      ? 'bg-[var(--color-brand-secondary-muted)] text-[var(--color-brand-secondary)]'
+                      : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-highlight)]'
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
-                  <span className="min-w-0 truncate text-sm font-semibold">{opt.label}</span>
-                  {isActive && <Check className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />}
+                  <PartnerListAvatar
+                    name={opt.label}
+                    logoDataUrl={opt.value ? partnerLogos[opt.value] ?? null : null}
+                    active={isActive}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">{opt.label}</span>
+                  {isActive ? (
+                    <Check className="h-4 w-4 shrink-0 text-[var(--color-brand-secondary)]" aria-hidden="true" />
+                  ) : (
+                    <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  )}
                 </button>
               );
             })}
           </div>
-        </div>
+        </DottedScroll>
       </Modal>
     </>
   );
@@ -144,7 +209,7 @@ export default function Sidebar({
   onExpandedChange,
 }) {
   const { logout, user } = useAuth();
-  const { partners, selectedPartnerId, setSelectedPartnerId, partnerLabel, createPartner } = usePartners();
+  const { partners, partnerLogos, selectedPartnerId, selectedPartnerLogo, setSelectedPartnerId, partnerLabel, createPartner } = usePartners();
   const { clearToasts, showToast } = useToast();
   const navigate = useNavigate();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -344,7 +409,9 @@ export default function Sidebar({
             <PartnerSelect
               showExpanded={showExpanded}
               partners={partners}
+              partnerLogos={partnerLogos}
               selectedPartnerId={selectedPartnerId}
+              selectedPartnerLogo={selectedPartnerLogo}
               setSelectedPartnerId={setSelectedPartnerId}
               partnerLabel={partnerLabel}
             />

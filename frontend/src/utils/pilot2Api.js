@@ -341,6 +341,24 @@ export const updatePartnerCustomForm = (partnerId, payload) =>
     body: JSON.stringify(payload),
   });
 
+export async function uploadPartnerLogo(partnerId, blob) {
+  const form = new FormData();
+  form.append('file', blob, 'avatar.png');
+  const res = await authFetch(`/api/partners/${partnerId}/logo`, {
+    method: 'POST',
+    body: form,
+    timeout: ADMIN_TIMEOUT_MS,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.detail || 'Could not upload logo.');
+  }
+  return data;
+}
+
+export const deletePartnerLogo = (partnerId) =>
+  request(`/api/partners/${partnerId}/logo`, { method: 'DELETE' });
+
 // Inboxes
 export const getInboxes = (partnerId = '') => {
   const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';

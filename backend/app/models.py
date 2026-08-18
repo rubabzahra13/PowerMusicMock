@@ -458,5 +458,6 @@ class PartnerCustomForm(Base):
     __tablename__ = "partner_custom_forms"
 
     partner_id = Column(String, ForeignKey("partners.id", ondelete="CASCADE"), primary_key=True)
+    logo_url = Column(Text, nullable=True)
     logo_data_url = Column(Text, nullable=True)
     fields = Column(JSONB, nullable=False, server_default="[]")

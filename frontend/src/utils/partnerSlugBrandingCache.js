@@ -59,6 +59,55 @@ export const LARGE_PARTNER_LOGO_DATA_URL_LENGTH = 200_000;
 
 const AVATAR_LOGO_SIZE = 256;
 const PARTNER_FORM_CACHE_KEY = 'partner_custom_form_v2';
+const PARTNER_LOGOS_MAP_KEY = 'pm_partner_logos_v1';
+
+function readPartnerLogosMap() {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(PARTNER_LOGOS_MAP_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writePartnerLogoToMap(partnerId, logoDataUrl) {
+  if (!partnerId || typeof window === 'undefined') return;
+  try {
+    const map = readPartnerLogosMap();
+    if (logoDataUrl) map[String(partnerId)] = logoDataUrl;
+    else delete map[String(partnerId)];
+    localStorage.setItem(PARTNER_LOGOS_MAP_KEY, JSON.stringify(map));
+  } catch {
+    /* quota */
+  }
+}
+
+export function cachePartnerLogo(partnerId, logoDataUrl) {
+  if (!partnerId) return;
+  writePartnerLogoToMap(partnerId, logoDataUrl);
+  preloadLogo(logoDataUrl ?? null);
+}
+
+export function buildPartnerLogosSync(partners = []) {
+  const logos = { ...readPartnerLogosMap() };
+  for (const partner of partners) {
+    if (!partner?.id) continue;
+    const instant = readInstantPartnerLogo(partner.id, partner.name);
+    if (instant) {
+      logos[partner.id] = instant;
+      if (!readPartnerLogosMap()[String(partner.id)]) {
+        writePartnerLogoToMap(partner.id, instant);
+      }
+    }
+  }
+  for (const logo of Object.values(logos)) {
+    preloadLogo(logo);
+  }
+  return logos;
+}
 
 function loadImageElement(dataUrl) {
   return new Promise((resolve, reject) => {
@@ -69,7 +118,11 @@ function loadImageElement(dataUrl) {
   });
 }
 
-/** Session cache key for partner custom form (includes logo_data_url). */
+export function resolvePartnerLogoSrc(logoUrl, logoDataUrl) {
+  return logoUrl ?? logoDataUrl ?? null;
+}
+
+/** Session cache key for partner custom form (includes logo_url / legacy logo_data_url). */
 export function partnerCustomFormCacheKey(partnerId) {
   return `${PARTNER_FORM_CACHE_KEY}:${partnerId}`;
 }
@@ -148,7 +201,7 @@ export function readInstantPartnerLogoByPartnerId(partnerId) {
     const raw = sessionStorage.getItem(`pm_cache_${partnerCustomFormCacheKey(partnerId)}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    const logo = parsed?.logo_data_url ?? null;
+    const logo = resolvePartnerLogoSrc(parsed?.logo_url, parsed?.logo_data_url);
     if (logo) preloadLogo(logo);
     return logo;
   } catch {
@@ -160,6 +213,13 @@ export function readInstantPartnerLogoByPartnerId(partnerId) {
 export function readInstantPartnerLogo(partnerId, partnerName, { slugFallback = true } = {}) {
   const byPartnerId = readInstantPartnerLogoByPartnerId(partnerId);
   if (byPartnerId) return byPartnerId;
+
+  const fromMap = partnerId ? readPartnerLogosMap()[String(partnerId)] : null;
+  if (fromMap) {
+    preloadLogo(fromMap);
+    return fromMap;
+  }
+
   if (!slugFallback) return null;
 
   const slug = partnerSlugFromName(partnerName);
@@ -189,9 +249,10 @@ export function cachePartnerSlugBranding(slug, branding) {
 
 function brandingFromApiResponse(data) {
   if (!data?.partnerName) return null;
+  const logo = resolvePartnerLogoSrc(data.logoUrl, data.logoDataUrl);
   return {
     partnerName: data.partnerName,
-    logoDataUrl: data.logoDataUrl ?? null,
+    logoDataUrl: logo,
     allowedDomains: normalizeAllowedDomainSuffixes(data.allowedDomains),
   };
 }
