@@ -44,7 +44,6 @@ from app.manager_request_summary_cache import (
 )
 from app.manager_request_stats import (
     decrement_manager_pending_stat,
-    get_stored_manager_request_stats,
     increment_manager_request_stats,
 )
 from app.partner_requests_realtime import notify_admin_requests_changed
@@ -61,9 +60,11 @@ from app.partner_allowlists import (
     list_partners,
     list_manager_domain_strings,
     list_manager_domains,
+    normalize_manager_domain,
     resolve_partner_for_manager_email,
     update_partner_name,
 )
+from app.pilot2.ignore_list import parse_ignore_pattern
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
     TAG_AUTO_MAIL,
@@ -1126,15 +1127,6 @@ def manager_requests_summary(
     if cached is not None:
         return cached
 
-    stored = get_stored_manager_request_stats(db, manager.id)
-    if stored is not None:
-        set_manager_request_summary(
-            manager.id,
-            total=stored["total"],
-            pending_count=stored["pendingCount"],
-        )
-        return stored
-
     base = _manager_requests_query(db, manager)
     total, pending_count = base.with_entities(
         func.count(),
@@ -1291,6 +1283,30 @@ def public_manager_allowed_domains(db: Session = Depends(get_db)):
     return {"domains": list_manager_domain_strings(db)}
 
 
+@router.get("/api/public/partner-branding")
+def public_partner_branding(email: str = "", db: Session = Depends(get_db)):
+    """Resolve partner name/logo from a manager email domain (sign-in page branding)."""
+    addr = (email or "").strip().lower()
+    if not addr or "@" not in addr:
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    try:
+        partner_id = resolve_partner_for_manager_email(db, addr)
+    except HTTPException:
+        partner_id = None
+    if not partner_id:
+        raise HTTPException(status_code=404, detail="No partner found for this email domain.")
+    partner = get_partner_or_404(db, partner_id)
+    form = (
+        db.query(models.PartnerCustomForm)
+        .filter(models.PartnerCustomForm.partner_id == partner_id)
+        .first()
+    )
+    return {
+        "partnerName": partner.name,
+        "logoDataUrl": form.logo_data_url if form else None,
+    }
+
+
 @router.get("/api/admin/manager-domains", response_model=List[schemas.ManagerAllowedDomainOut])
 def admin_list_manager_domains(
     db: Session = Depends(get_db),
@@ -1357,6 +1373,17 @@ def create_partner_api(
     db: Session = Depends(get_db),
     _admin=Depends(require_admin),
 ):
+    for domain in dict.fromkeys(payload.allowedDomains):
+        try:
+            normalize_manager_domain(domain)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    for source in dict.fromkeys(payload.automatedSources):
+        try:
+            parse_ignore_pattern(source)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     partner = create_partner(db, payload.name)
     for domain in dict.fromkeys(payload.allowedDomains):
         create_manager_domain(db, domain, partner.id)
@@ -1881,7 +1908,26 @@ def resolve_group_mark_removed_api(
     }
 
 
-# ── Custom Manager Form Builder ───────────────────────────────────────────
+@router.get("/api/manager/partner-branding")
+def manager_partner_branding(
+    db: Session = Depends(get_db),
+    manager=Depends(require_manager),
+):
+    """Partner name and optional logo for the signed-in manager's submission form."""
+    partner_id = _manager_partner_id(db, manager.email)
+    partner = get_partner_or_404(db, partner_id)
+    form = (
+        db.query(models.PartnerCustomForm)
+        .filter(models.PartnerCustomForm.partner_id == partner_id)
+        .first()
+    )
+    return {
+        "partnerName": partner.name,
+        "logoDataUrl": form.logo_data_url if form else None,
+    }
+
+
+# ── Custom Manager Form Branding ──────────────────────────────────────────
 
 @router.get("/api/partners/{partner_id}/custom-form", response_model=schemas.PartnerCustomFormOut)
 def get_partner_custom_form(partner_id: str, db: Session = Depends(get_db), admin=Depends(require_admin)):

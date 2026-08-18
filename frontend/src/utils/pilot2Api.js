@@ -323,6 +323,12 @@ export const updatePartner = (id, name) =>
 
 // --- Custom Manager Form API ---
 
+export const getManagerPartnerBranding = () =>
+  request('/api/manager/partner-branding');
+
+export const getPublicPartnerBranding = (email) =>
+  request(`/api/public/partner-branding?email=${encodeURIComponent(email)}`);
+
 export const getPartnerCustomForm = (partnerId) =>
   request(`/api/partners/${partnerId}/custom-form`);
 
@@ -331,9 +337,6 @@ export const updatePartnerCustomForm = (partnerId, payload) =>
     method: 'PUT',
     body: JSON.stringify(payload),
   });
-
-export const getPublicCustomForm = (partnerSlug) =>
-  request(`/api/public/custom-form/${partnerSlug}`);
 
 // Inboxes
 export const getInboxes = (partnerId = '') => {

@@ -14,7 +14,6 @@ import PartnerSettings from './pages/PartnerSettings';
 import AdminLogin from './pages/AdminLogin';
 import Signup from './pages/Signup';
 import AuthCallback from './pages/AuthCallback';
-import CustomManagerFormPage from './pages/CustomManagerFormPage';
 
 /** Admin pages that use the persistent sidebar shell. */
 function AdminShellLayout() {
@@ -62,12 +61,6 @@ export default function App() {
                 <Route path="/ignore-list" element={<Navigate to="/partner-settings" replace />} />
               </Route>
             </Route>
-
-            {/* ── Open route: partner-specific prototype form ──────────────
-                 MUST be outside all auth wrappers so it works whether the
-                 visitor is an admin, a manager, or an unauthenticated guest.
-                 MUST come before the * catch-all. */}
-            <Route path="/:partner/submit" element={<CustomManagerFormPage />} />
 
             <Route path="*" element={<Navigate to="/submit/signup" replace />} />
           </Routes>

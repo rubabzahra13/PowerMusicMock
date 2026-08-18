@@ -6,6 +6,7 @@ import {
   personName,
   requestStatusMeta,
 } from '../../utils/managerRequestHistory';
+
 export const MANAGER_REQUEST_HISTORY_GRID =
   'grid-cols-[1.75rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)]';
 
@@ -15,11 +16,8 @@ function highlightKind(request) {
   return null;
 }
 
-function statusTagVariant(request, meta) {
-  if (request.status === 'handled') {
-    return meta.label === 'Added' ? 'added' : 'removed';
-  }
-  return 'draft';
+function statusTagVariant(request) {
+  return request.status === 'handled' ? 'neutral' : 'draft';
 }
 
 function rowTimestamp(request) {
@@ -88,7 +86,7 @@ const ManagerRequestHistoryRow = forwardRef(function ManagerRequestHistoryRow(
 
         <div className="flex flex-wrap items-center gap-2">
           <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={isAdd ? 'Add' : 'Remove'} compact />
-          <Tag variant={statusTagVariant(request, meta)} label={meta.label} compact />
+          <Tag variant={statusTagVariant(request)} label={meta.label} compact />
           {highlighted && (
             <span className="inline-flex rounded-full bg-[var(--color-brand-primary)] px-1.5 py-px text-[10px] font-semibold leading-none text-white">
               New
@@ -103,7 +101,7 @@ const ManagerRequestHistoryRow = forwardRef(function ManagerRequestHistoryRow(
         onClick={handleOpen}
         title={contactLine || undefined}
         aria-label={ariaLabel}
-        className={`${rowInteractionClass} hidden sm:grid ${MANAGER_REQUEST_HISTORY_GRID} items-center gap-x-4 px-3 py-2 ${highlightClass}`}
+        className={`${rowInteractionClass} hidden sm:grid ${MANAGER_REQUEST_HISTORY_GRID} items-center gap-x-4 px-3 py-2.5 ${highlightClass}`}
       >
         <span className="text-left text-[11px] font-semibold tabular-nums text-[var(--color-text-secondary)]">
           {rowNumber}
@@ -134,7 +132,7 @@ const ManagerRequestHistoryRow = forwardRef(function ManagerRequestHistoryRow(
               New
             </span>
           )}
-          <Tag variant={statusTagVariant(request, meta)} label={meta.label} compact />
+          <Tag variant={statusTagVariant(request)} label={meta.label} compact />
         </span>
       </button>
     </li>

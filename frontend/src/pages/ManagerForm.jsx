@@ -2,19 +2,17 @@ import { useState, useMemo, useEffect, useRef, useId } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
+  ArrowLeft,
   CheckCircle2,
   Loader2,
-  LogOut,
   Plus,
   Search,
   Trash2,
-  UserMinus,
-  UserPlus,
 } from 'lucide-react';
 import { formatAdminDate } from '../utils/dateTime';
 import { Toast, useToast } from '../components/ui';
 import { fetchJson } from '../utils/api';
-import { clearCache } from '../utils/pilot2Api';
+import { clearCache, getManagerPartnerBranding } from '../utils/pilot2Api';
 import { waitForSubmissionJob } from '../utils/managerSubmissionJobs';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -38,37 +36,81 @@ import {
   validatePersonForms,
   firstInvalidPersonField,
 } from '../utils/managerFormValidation';
-import ManagerRequestHistory from '../components/manager/ManagerRequestHistory';
+import ManagerRequestHistoryPanel from '../components/manager/ManagerRequestHistoryPanel';
+import { useManagerRequestPortal } from '../components/manager/ManagerRequestHistory';
+import ManagerFormHeader from '../components/manager/ManagerFormHeader';
+import ManagerPortalHero from '../components/manager/ManagerPortalHero';
+import ManagerRequestChoice from '../components/manager/ManagerRequestChoice';
+import ManagerPortalIntro, {
+  cacheManagerPortalBranding,
+  clearManagerIntroSeen,
+  markManagerIntroSeen,
+  readCachedManagerPortalBranding,
+  shouldShowManagerPortalIntro,
+} from '../components/manager/ManagerPortalIntro';
+import { getPublicPartnerBranding } from '../utils/pilot2Api';
+import { FlowGradientBackground } from '../components/ui/flow-gradient-hero-section';
 import { useManagerDirectory } from '../hooks/useManagerDirectory';
 
-const cardClass =
-  'rounded-xl border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-card)]';
+const formCardClass =
+  'overflow-hidden rounded-2xl border border-[var(--color-manager-border)] bg-[var(--color-manager-panel)] shadow-[var(--shadow-manager-form)]';
+
+const workspaceShellClass = 'mx-auto w-full max-w-[1520px]';
+
+const workspaceOuterClass = 'flex flex-1 flex-col p-4 sm:p-5';
+
+const workspaceSplitClass =
+  'flex min-h-0 flex-1 flex-col gap-5 sm:gap-6 lg:flex-row lg:items-stretch lg:gap-6';
+
+const workspaceFormColumnClass =
+  'flex min-h-full min-w-0 flex-1 flex-col rounded-xl border border-[var(--color-manager-border)] bg-white p-4 sm:p-5';
+
+const workspaceDirectoryColumnClass =
+  'flex min-h-full min-w-0 flex-col rounded-xl border border-[var(--color-manager-border-strong)] bg-[var(--color-manager-directory)] p-5 sm:p-6 lg:w-[44%] xl:w-[42%] lg:min-w-[420px] lg:max-w-[620px]';
+
+const directorySectionClass =
+  'flex min-h-0 flex-1 flex-col gap-5 sm:gap-6 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto';
+
+const directorySearchInputClass =
+  'w-full h-11 rounded-xl border border-[var(--color-manager-border-strong)] bg-white px-3.5 pl-10 text-sm text-[var(--color-text-primary)] shadow-[0_1px_3px_rgba(26,26,46,0.05)] placeholder:text-[var(--color-text-muted)] transition-[border-color,box-shadow] focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/15 disabled:cursor-not-allowed disabled:bg-[var(--color-manager-panel)]';
+
+const directoryResultsClass =
+  'overflow-hidden rounded-xl border border-[var(--color-manager-border-strong)] bg-white shadow-[0_4px_18px_rgba(26,26,46,0.06)]';
+
+const directoryTableHeadClass =
+  'border-b border-[var(--color-manager-border)] bg-[var(--color-manager-panel)]';
 
 const inputClass =
-  'w-full h-9 rounded-lg border border-[var(--color-border-default)] bg-white px-3 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-[border-color,box-shadow] focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/15 disabled:cursor-not-allowed disabled:bg-[var(--color-surface-panel)]';
+  'w-full h-10 rounded-lg border border-[var(--color-manager-border-strong)] bg-white px-3.5 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-[border-color,box-shadow] focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-accent)]/15 disabled:cursor-not-allowed disabled:bg-[var(--color-manager-panel)]';
 
 const invalidInputClass =
   'border-red-300 focus:border-red-400 focus:ring-red-200/60';
 
 const textareaClass = `${inputClass} h-auto resize-none py-2`;
 
-const readonlyInputClass = `${inputClass} cursor-default bg-[var(--color-surface-panel)] read-only:cursor-default focus:ring-0`;
+const managerReadonlyInputClass =
+  'w-full h-10 cursor-not-allowed rounded-lg border border-[var(--color-manager-border)] bg-[var(--color-manager-panel)] px-3.5 text-sm text-[var(--color-text-secondary)] shadow-none focus:outline-none focus:ring-0 disabled:opacity-100';
+
+const readonlyLabelClass = 'mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]';
 
 const labelClass = 'mb-1.5 block text-xs font-medium text-[var(--color-text-primary)]';
 
 const sectionTitleClass =
-  'text-[11px] font-semibold tracking-wide text-[var(--color-text-secondary)]';
+  'text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-brand-secondary)]';
 
-const formGridClass = 'grid grid-cols-1 gap-3 sm:grid-cols-2';
+const directorySectionTitleClass =
+  'text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-primary)]';
 
-function Field({ id, label, required, hint, error, children }) {
+const managerGridClass = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4';
+
+function Field({ id, label, required, hint, error, children, labelMuted = false }) {
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   const describedBy = [errorId, hintId].filter(Boolean).join(' ') || undefined;
 
   return (
     <div>
-      <label htmlFor={id} className={labelClass}>
+      <label htmlFor={id} className={labelMuted ? readonlyLabelClass : labelClass}>
         {label}
         {required && (
           <>
@@ -99,7 +141,7 @@ function Field({ id, label, required, hint, error, children }) {
 
 function FormSection({ title, children }) {
   return (
-    <fieldset className="space-y-3 border-0 p-0 m-0">
+    <fieldset className="m-0 space-y-3 border-0 border-t border-[var(--color-manager-border)] p-0 pt-5 first:border-t-0 first:pt-0">
       <legend className={sectionTitleClass}>{title}</legend>
       {children}
     </fieldset>
@@ -115,9 +157,51 @@ function formatDirectoryDate(dateStr) {
   return formatAdminDate(dateStr) || null;
 }
 
+function activeFormUserIndexes(personForms) {
+  return personForms
+    .map((form, index) => (formHasMatchCriteria(form) ? index + 1 : null))
+    .filter(Boolean);
+}
+
+function directoryResultsEmptyMessage({ hasSearchQuery, hasFormCriteria, isSearchTooBroad }) {
+  if (isSearchTooBroad) return 'Nothing matched that search. Try a name or email address.';
+  if (hasSearchQuery) return 'No one matched that search.';
+  if (hasFormCriteria) return 'No directory matches for the details entered on the left yet.';
+  return 'Type at least 2 characters to search, or enter person details on the left to check automatically.';
+}
+
+function directoryLiveStatusMessage({
+  personForms,
+  formMatchResults,
+  hasSearchQuery,
+  displayResults,
+  multipleUsers,
+}) {
+  const activeUsers = activeFormUserIndexes(personForms);
+
+  if (formMatchResults.length > 0) {
+    if (multipleUsers && activeUsers.length > 1) {
+      return `${formMatchResults.length} possible match${formMatchResults.length === 1 ? '' : 'es'} across User ${activeUsers.join(', User ')}. Highlighted on the right.`;
+    }
+    return `${formMatchResults.length} possible match${formMatchResults.length === 1 ? '' : 'es'} from your form. Highlighted rows on the right.`;
+  }
+
+  if (activeUsers.length > 0) {
+    if (multipleUsers) {
+      return `Watching User ${activeUsers.join(', User ')} as you type. Matches appear beside your form.`;
+    }
+    return 'Watching your entries as you type. Matches appear beside your form.';
+  }
+
+  if (hasSearchQuery && displayResults.length > 0) {
+    return `${displayResults.length} search result${displayResults.length === 1 ? '' : 's'} shown.`;
+  }
+
+  return 'Enter person details on the left or search here. Results update as you type.';
+}
+
 export default function ManagerForm() {
   const formId = useId();
-  const actionGroupId = `${formId}-action`;
   const { showToast } = useToast();
   const { profile, user, session, logout } = useAuth();
   const navigate = useNavigate();
@@ -128,11 +212,17 @@ export default function ManagerForm() {
   const [requestRefreshToken, setRequestRefreshToken] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [partnerBranding, setPartnerBranding] = useState(() => readCachedManagerPortalBranding());
+  const [portalIntro, setPortalIntro] = useState(null);
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [flowStep, setFlowStep] = useState('choose');
+  const introCheckedRef = useRef(false);
   const [action, setAction] = useState('Add');
   const directoryOutcome = action === 'Remove' ? 'Removed' : 'Added';
+  const formActive = flowStep === 'form';
   const { people: directoryPeople, loading: directoryLoading, error: directoryError } =
     useManagerDirectory(user?.id, session?.access_token, {
-      enabled: !submitted && Boolean(user?.id && session?.access_token),
+      enabled: formActive && !submitted && Boolean(user?.id && session?.access_token),
       outcome: directoryOutcome,
     });
   const [searchInput, setSearchInput] = useState('');
@@ -141,6 +231,16 @@ export default function ManagerForm() {
   const [touchedFields, setTouchedFields] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const personFieldRefs = useRef({});
+  const directorySectionRef = useRef(null);
+
+  const { totalBadgeCount, ...requestPortal } =
+    useManagerRequestPortal(requestRefreshToken, requestsOpen);
+
+  useEffect(() => {
+    if (requestsOpen) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [requestsOpen]);
 
   const managerDetails = useMemo(() => {
     const nameParts = (profile?.full_name || '').trim().split(/\s+/).filter(Boolean);
@@ -201,10 +301,82 @@ export default function ManagerForm() {
     setPersonForms(normalizePersonFormsFromDraft(draft));
     if (draft.action) setAction(draft.action);
     if (typeof draft.searchInput === 'string') setSearchInput(draft.searchInput);
+
+    const hasDraftContent =
+      (typeof draft.searchInput === 'string' && draft.searchInput.trim()) ||
+      (Array.isArray(draft.personForms) &&
+        draft.personForms.some((person) =>
+          Object.values(person || {}).some((value) => String(value || '').trim()),
+        ));
+
+    if (draft.action && hasDraftContent) {
+      setFlowStep('form');
+    }
   }, [user?.id, submitted]);
 
   useEffect(() => {
-    if (!user?.id || submitted) return undefined;
+    if (!user?.id || introCheckedRef.current) return;
+    introCheckedRef.current = true;
+
+    if (!shouldShowManagerPortalIntro(user.id)) {
+      setPortalIntro(false);
+      return;
+    }
+
+    const showIntro = (branding) => {
+      if (branding?.partnerName) {
+        setPartnerBranding((prev) => (prev?.partnerName ? prev : branding));
+      }
+      setPortalIntro(true);
+    };
+
+    const cached = readCachedManagerPortalBranding();
+    if (cached?.partnerName) {
+      showIntro(cached);
+      return;
+    }
+
+    const email = profile?.email || user?.email;
+    if (!email) {
+      showIntro(null);
+      return;
+    }
+
+    let active = true;
+    getPublicPartnerBranding(email)
+      .then((data) => {
+        if (!active) return;
+        if (data?.partnerName) cacheManagerPortalBranding(data);
+        showIntro(data);
+      })
+      .catch(() => {
+        if (active) showIntro(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id, profile?.email, user?.email]);
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    getManagerPartnerBranding()
+      .then((data) => {
+        if (data?.partnerName) {
+          setPartnerBranding(data);
+          cacheManagerPortalBranding(data);
+        }
+      })
+      .catch(() => {});
+  }, [session?.access_token]);
+
+  const handlePortalIntroComplete = () => {
+    if (user?.id) markManagerIntroSeen(user.id);
+    setPortalIntro(false);
+  };
+
+  useEffect(() => {
+    if (!user?.id || submitted || !formActive) return undefined;
 
     const persistDraft = () => {
       const hasContent =
@@ -235,7 +407,27 @@ export default function ManagerForm() {
       window.clearTimeout(timer);
       window.removeEventListener('visibilitychange', handleHidden);
     };
-  }, [user?.id, personForms, action, searchInput, submitted]);
+  }, [user?.id, personForms, action, searchInput, submitted, formActive]);
+
+  const handleSelectRequestType = (nextAction) => {
+    setAction(nextAction);
+    setFlowStep('form');
+    setPersonForms([{ ...EMPTY_PERSON_FORM }]);
+    setTouchedFields({});
+    setSubmitAttempted(false);
+    setSearchInput('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleBackToChoice = () => {
+    setFlowStep('choose');
+    setPersonForms([{ ...EMPTY_PERSON_FORM }]);
+    setTouchedFields({});
+    setSubmitAttempted(false);
+    setSearchInput('');
+    if (user?.id) clearManagerFormDraft(user.id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handlePersonChange = (index, field, val) => {
     const sanitized = sanitizePersonFieldInput(field, val);
@@ -398,13 +590,17 @@ export default function ManagerForm() {
     setSubmitAttempted(false);
     setSearchInput('');
     setAction('Add');
+    setFlowStep('choose');
   };
 
   const handleSignOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
     try {
-      if (user?.id) clearManagerFormDraft(user.id);
+      if (user?.id) {
+        clearManagerFormDraft(user.id);
+        clearManagerIntroSeen(user.id);
+      }
       await logout();
       navigate('/submit/signup', { replace: true });
     } catch (err) {
@@ -445,6 +641,20 @@ export default function ManagerForm() {
     }
 
     return Array.from(byId.values());
+  }, [directoryPeople, personForms]);
+
+  const formMatchUsersByRowId = useMemo(() => {
+    const map = new Map();
+    personForms.forEach((form, index) => {
+      for (const row of findFormMatchCandidates(directoryPeople, form)) {
+        if (!row?.id) continue;
+        const users = map.get(row.id) || [];
+        const label = index + 1;
+        if (!users.includes(label)) users.push(label);
+        map.set(row.id, users);
+      }
+    });
+    return map;
   }, [directoryPeople, personForms]);
 
   const displayResults = useMemo(() => {
@@ -493,6 +703,20 @@ export default function ManagerForm() {
     (hasSearchQuery ||
       formMatchResults.length > 0 ||
       personForms.some(formHasMatchCriteria));
+  const hasFormMatchCriteria = personForms.some(formHasMatchCriteria);
+  const directoryLiveStatus = directoryLiveStatusMessage({
+    personForms,
+    formMatchResults,
+    hasSearchQuery,
+    displayResults,
+    multipleUsers: personForms.length > 1,
+  });
+  const directoryEmptyMessage = directoryResultsEmptyMessage({
+    hasSearchQuery,
+    hasFormCriteria: hasFormMatchCriteria,
+    isSearchTooBroad,
+  });
+
   const showInitialDirectoryLoading = directoryLoading && directoryPeople.length === 0;
   const multipleUsers = personForms.length > 1;
   const userSectionTitle =
@@ -503,12 +727,7 @@ export default function ManagerForm() {
       : multipleUsers
         ? 'Users to remove'
         : 'User to remove';
-  const actionOptions = [
-    { value: 'Add', label: 'Request addition', icon: UserPlus },
-    { value: 'Remove', label: 'Request removal', icon: UserMinus },
-  ];
   const isRemoveAction = action === 'Remove';
-  const directoryPanelTitle = isRemoveAction ? 'Removed users' : 'Existing Users';
   const directoryPanelDescription = isRemoveAction
     ? 'Search removed users by name or email. Person details on the form are checked automatically.'
     : 'Search by name or email. Person details on the form are checked automatically.';
@@ -518,8 +737,35 @@ export default function ManagerForm() {
     ? 'Rows that share any name, email, or location detail with your form are also listed here from removed users.'
     : 'Rows that share any name, email, or location detail with your form are also listed here.';
 
+  if (portalIntro === null) {
+    return (
+      <div className="fixed inset-0 overflow-hidden bg-[var(--color-brand-primary)]">
+        <FlowGradientBackground className="pointer-events-none fixed inset-0" interactive />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--color-surface-bg)] font-sans antialiased">
+    <div className="relative flex min-h-screen flex-col bg-[var(--color-manager-canvas)] font-sans antialiased">
+      <div
+        className="pointer-events-none fixed inset-x-0 top-0 z-0 h-72 bg-gradient-to-b from-[var(--color-manager-hero-from)]/20 via-[var(--color-manager-canvas-deep)]/40 to-transparent"
+        aria-hidden="true"
+      />
+      {portalIntro ? (
+        <ManagerPortalIntro
+          firstName={managerDetails.firstName}
+          email={managerDetails.email}
+          partnerName={partnerBranding?.partnerName}
+          logoDataUrl={partnerBranding?.logoDataUrl}
+          onComplete={handlePortalIntroComplete}
+        />
+      ) : null}
+
+      <div
+        className={`flex min-h-screen flex-1 flex-col transition-opacity duration-[600ms] ${
+          portalIntro ? 'pointer-events-none opacity-0' : 'opacity-100'
+        }`}
+      >
       <Toast />
       <a
         href="#manager-request-form"
@@ -528,50 +774,53 @@ export default function ManagerForm() {
         Skip to form
       </a>
 
-      <header className="shrink-0 border-b border-[var(--color-border-default)] bg-white">
-        <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between gap-3 px-4 sm:gap-4 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <img
-              src="/image.png"
-              alt=""
-              className="h-6 w-auto shrink-0 object-contain"
-              width={24}
-              height={24}
-            />
-            <div className="min-w-0 border-l border-[var(--color-border-default)] pl-3">
-              <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
-                Power Music
-              </p>
-              <p className="truncate text-[11px] text-[var(--color-text-secondary)]">
-                Submit a request
-              </p>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {profile?.email && (
-              <p className="hidden max-w-[200px] truncate text-xs text-[var(--color-text-secondary)] sm:block">
-                {profile.email}
-              </p>
-            )}
-            <button
-              type="button"
-              onClick={handleSignOut}
-              disabled={signingOut}
-              aria-label={signingOut ? 'Signing out' : 'Sign out'}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--color-brand-primary)] px-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
-            >
-              <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="hidden min-[420px]:inline">{signingOut ? 'Signing out…' : 'Sign out'}</span>
-            </button>
-          </div>
-        </div>
-      </header>
+      <ManagerFormHeader
+        partnerName={partnerBranding?.partnerName}
+        logoDataUrl={partnerBranding?.logoDataUrl}
+        managerName={managerDetails.firstName || managerDetails.lastName
+          ? `${managerDetails.firstName} ${managerDetails.lastName}`.trim()
+          : null}
+        userEmail={managerDetails.email}
+        clubLocation={managerDetails.club}
+        onSignOut={handleSignOut}
+        signingOut={signingOut}
+      />
 
-      <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-4 p-4 sm:gap-6 sm:p-6 md:flex-row md:items-start md:p-8">
-        <section className="flex w-full min-w-0 flex-col md:w-[44%] lg:w-[42%]">
+      {!requestsOpen ? (
+        <ManagerPortalHero
+          firstName={managerDetails.firstName}
+          email={managerDetails.email}
+          partnerName={partnerBranding?.partnerName}
+          clubLocation={managerDetails.club}
+          pendingCount={requestPortal.pendingCount}
+          handledCount={Math.max(0, (requestPortal.summaryTotal || 0) - (requestPortal.pendingCount || 0))}
+          badgeCount={totalBadgeCount}
+          loading={requestPortal.summaryPending}
+          onOpenRequests={() => setRequestsOpen(true)}
+        />
+      ) : null}
+
+      <main className="relative z-[1] mx-auto flex w-full max-w-[1520px] flex-1 flex-col gap-4 p-4 sm:gap-6 sm:p-6 md:p-8">
+        {requestsOpen ? (
+          <ManagerRequestHistoryPanel
+            onBack={() => {
+              requestPortal.closeHistory();
+              setRequestsOpen(false);
+            }}
+            requests={requestPortal.requests}
+            pendingUnseenCount={requestPortal.pendingUnseenCount}
+            loading={requestPortal.listLoading}
+            error={requestPortal.historyError}
+            highlightVersion={requestPortal.highlightVersion}
+            onHighlightChange={requestPortal.bumpHighlights}
+          />
+        ) : flowStep === 'choose' && !submitted ? (
+          <ManagerRequestChoice onSelect={handleSelectRequestType} />
+        ) : (
+        <div className={`${workspaceShellClass} flex flex-1 flex-col`}>
           {submitted ? (
             <div
-              className={`${cardClass} flex flex-1 flex-col items-center justify-center p-6 text-center sm:p-10`}
+              className={`${formCardClass} flex flex-1 flex-col items-center justify-center p-6 text-center sm:p-10`}
             >
               <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
                 <CheckCircle2 className="h-7 w-7 text-[var(--color-signal-green)]" aria-hidden="true" />
@@ -597,116 +846,87 @@ export default function ManagerForm() {
             <form
               id="manager-request-form"
               onSubmit={handleSubmit}
-              className={`${cardClass} space-y-5 p-4 sm:p-6`}
+              className={`${formCardClass} relative flex min-h-[calc(100dvh-12rem)] flex-1 flex-col`}
             >
-              <div className="space-y-4 border-b border-[var(--color-border-default)] pb-5">
-                <div
-                  role="radiogroup"
-                  aria-labelledby={actionGroupId}
-                  className="mx-auto flex w-full max-w-md flex-col gap-1 rounded-lg bg-[var(--color-surface-panel)] p-1 ring-1 ring-[var(--color-border-default)] sm:flex-row sm:gap-0 sm:p-0.5"
-                >
-                  <p id={actionGroupId} className="sr-only">
-                    Request type
-                  </p>
-                  {actionOptions.map(({ value, label, icon: Icon }) => {
-                    const selected = action === value;
-                    const isAdd = value === 'Add';
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        role="radio"
-                        aria-checked={selected}
-                        onClick={() => setAction(value)}
-                        className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2.5 text-xs font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/30 focus-visible:ring-offset-1 sm:py-2 sm:text-sm ${
-                          selected
-                            ? isAdd
-                              ? 'bg-white text-[var(--color-tag-add-action-text)] shadow-sm ring-1 ring-[var(--color-border-default)]'
-                              : 'bg-white text-[var(--color-tag-remove-action-text)] shadow-sm ring-1 ring-[var(--color-border-default)]'
-                            : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                        }`}
-                      >
-                        <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div>
-                  <h1 className="text-base font-semibold text-[var(--color-text-primary)]">
-                    {action === 'Add'
-                      ? multipleUsers
-                        ? 'Add users'
-                        : 'Add a user'
-                      : multipleUsers
-                        ? 'Remove users'
-                        : 'Remove a user'}
-                  </h1>
-                  <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
-                    {action === 'Add'
-                      ? multipleUsers
-                        ? 'Ask Power Music to add several people in one submission.'
-                        : 'Ask Power Music to add someone to the system.'
-                      : multipleUsers
-                        ? 'Ask Power Music to remove several people in one submission.'
-                        : 'Ask Power Music to remove someone from the system.'}
-                  </p>
-                </div>
-              </div>
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-gradient-to-r from-[var(--color-brand-accent)] via-[var(--color-brand-secondary)] to-[var(--color-brand-accent)]"
+                aria-hidden="true"
+              />
 
+              <div className={workspaceOuterClass}>
+                <button
+                  type="button"
+                  onClick={handleBackToChoice}
+                  className="-ml-1 inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/25"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                  Back
+                </button>
+
+                <div className={`${workspaceSplitClass} mt-3 sm:mt-4`}>
+                <div className={workspaceFormColumnClass}>
+              <h1 className="text-base font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-lg">
+                {action === 'Add'
+                  ? multipleUsers
+                    ? 'Add users'
+                    : 'Add a user'
+                  : multipleUsers
+                    ? 'Remove users'
+                    : 'Remove a user'}
+              </h1>
+              <div className="mt-4 space-y-5 sm:mt-5 sm:space-y-6">
               <FormSection title="Manager details">
                 <p className="-mt-1 text-[11px] text-[var(--color-text-secondary)]">
                   Taken from your signed-in account and cannot be changed here.
                 </p>
-                <div className={formGridClass}>
-                  <Field id={ids.managerFirst} label="Manager first name" required>
+                <div className={managerGridClass}>
+                  <Field id={ids.managerFirst} label="Manager first name" required labelMuted>
                     <input
                       id={ids.managerFirst}
                       type="text"
-                      required
+                      disabled
                       readOnly
                       aria-readonly="true"
                       autoComplete="given-name"
                       value={managerDetails.firstName}
-                      className={readonlyInputClass}
+                      className={managerReadonlyInputClass}
                     />
                   </Field>
-                  <Field id={ids.managerLast} label="Manager last name" required>
+                  <Field id={ids.managerLast} label="Manager last name" required labelMuted>
                     <input
                       id={ids.managerLast}
                       type="text"
-                      required
+                      disabled
                       readOnly
                       aria-readonly="true"
                       autoComplete="family-name"
                       value={managerDetails.lastName}
-                      className={readonlyInputClass}
+                      className={managerReadonlyInputClass}
                     />
                   </Field>
-                </div>
-                <div className={formGridClass}>
-                  <Field id={ids.managerEmail} label="Manager email" required>
+
+                  <Field id={ids.managerEmail} label="Manager email" required labelMuted>
                     <input
                       id={ids.managerEmail}
                       type="email"
-                      required
+                      disabled
                       readOnly
                       aria-readonly="true"
                       autoComplete="email"
                       value={managerDetails.email}
-                      className={readonlyInputClass}
+                      className={managerReadonlyInputClass}
                     />
                   </Field>
-                  <Field id={ids.managerClub} label="Manager club location" required>
+                  <Field id={ids.managerClub} label="Manager club location" required labelMuted>
                     <input
                       id={ids.managerClub}
                       type="text"
-                      required
+                      disabled
                       readOnly
                       aria-readonly="true"
                       autoComplete="organization"
                       value={managerDetails.club}
-                      className={readonlyInputClass}
+                      className={managerReadonlyInputClass}
                     />
                   </Field>
                 </div>
@@ -724,7 +944,7 @@ export default function ManagerForm() {
                         key={`person-row-${index}`}
                         className={
                           showRowLabel
-                            ? 'space-y-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 p-3'
+                            ? 'space-y-3 rounded-xl border border-[var(--color-manager-border)] bg-[var(--color-manager-panel)]/60 p-3.5'
                             : 'space-y-3'
                         }
                       >
@@ -743,7 +963,7 @@ export default function ManagerForm() {
                             </button>
                           </div>
                         )}
-                        <div className={formGridClass}>
+                        <div className={managerGridClass}>
                           <Field
                             id={rowIds.first}
                             label="User first name"
@@ -796,8 +1016,7 @@ export default function ManagerForm() {
                               />
                             )}
                           </Field>
-                        </div>
-                        <div className={formGridClass}>
+
                           <Field
                             id={rowIds.email}
                             label="User email"
@@ -916,16 +1135,27 @@ export default function ManagerForm() {
                 )}
               </FormSection>
 
-              <div className="space-y-2 border-t border-[var(--color-border-default)] pt-4">
+              <div
+                className={`flex flex-col gap-3 border-t border-[var(--color-manager-border)] pt-5 sm:flex-row sm:items-center ${
+                  isFormValid ? 'sm:justify-end' : 'sm:justify-between'
+                }`}
+              >
+                {!isFormValid && (
+                  <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)] sm:max-w-md">
+                    {submitAttempted
+                      ? 'Fix the highlighted fields to submit.'
+                      : 'Fill all required fields with valid details to submit.'}
+                  </p>
+                )}
                 <button
                   type="submit"
                   disabled={!isFormValid || submitting}
                   aria-busy={submitting}
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:bg-[var(--color-text-muted)] disabled:opacity-70"
+                  className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 self-end rounded-lg bg-[var(--color-brand-primary)] px-4 text-sm font-semibold text-white shadow-sm transition-[background-color,box-shadow] hover:bg-[var(--color-surface-sidebar-hover)] hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[var(--color-text-muted)] disabled:opacity-70 disabled:shadow-none sm:self-auto"
                 >
                   {submitting ? (
                     <>
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                       Submitting…
                     </>
                   ) : personForms.length === 1 ? (
@@ -934,299 +1164,319 @@ export default function ManagerForm() {
                     `Submit ${personForms.length} requests`
                   )}
                 </button>
-                {!isFormValid && (
-                  <p className="text-center text-[11px] text-[var(--color-text-muted)]">
-                    {submitAttempted
-                      ? 'Fix the highlighted fields to submit.'
-                      : 'Fill all required fields with valid details to submit.'}
-                  </p>
-                )}
               </div>
-            </form>
-          )}
-        </section>
+                </div>
+                </div>
 
-        <aside
-          className={`${cardClass} flex w-full min-w-0 flex-col gap-4 self-start p-4 sm:gap-5 sm:p-5 md:w-[56%] md:p-6 lg:w-[58%]`}
-        >
-          <ManagerRequestHistory refreshToken={requestRefreshToken} />
+              {!submitted ? (
+                <aside
+                  ref={directorySectionRef}
+                  aria-labelledby="directory-search-heading"
+                  className={workspaceDirectoryColumnClass}
+                >
+                <section className={directorySectionClass}>
+                  <div>
+                    <p className={directorySectionTitleClass} id="directory-search-heading">
+                      {isRemoveAction ? 'Check removed users' : 'Check directory'}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                      {directoryPanelDescription}
+                    </p>
+                    <p
+                      className="mt-3 rounded-lg border border-[var(--color-manager-border-strong)] bg-white px-3 py-2.5 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {directoryLiveStatus}
+                    </p>
+                  </div>
 
-          <section aria-labelledby="directory-search-heading" className="space-y-4">
-          <div>
-            <h2
-              id="directory-search-heading"
-              className="text-base font-semibold text-[var(--color-text-primary)]"
-            >
-              {directoryPanelTitle}
-            </h2>
-            <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-              {directoryPanelDescription}
-            </p>
-          </div>
+                  <div className="relative">
+                    <Search
+                      className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]"
+                      aria-hidden="true"
+                    />
+                    <input
+                      id={ids.search}
+                      type="search"
+                      placeholder="Search by name, email, or location..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      disabled={submitted}
+                      aria-label="Search by name, email, or location"
+                      className={directorySearchInputClass}
+                    />
+                  </div>
 
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]"
-              aria-hidden="true"
-            />
-            <input
-              id={ids.search}
-              type="search"
-              placeholder="Search by name, email, or location..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              disabled={submitted}
-              aria-label="Search by name, email, or location"
-              className={`${inputClass} pl-9`}
-            />
-          </div>
+                  {searchQueryHint && !submitted && (
+                  <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]" role="status">
+                  {searchQueryHint}
+                  </p>
+                  )}
 
-          {searchQueryHint && !submitted && (
-            <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]" role="status">
-              {searchQueryHint}
-            </p>
-          )}
-
-          <div className="overflow-hidden rounded-lg border border-[var(--color-border-default)] sm:hidden">
-            {!showDirectoryResults && !showInitialDirectoryLoading && !isSearchTooBroad && (
-              <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
-                Type at least 2 characters to search, or enter person details to check for matches.
-              </p>
-            )}
-            {showInitialDirectoryLoading && (
-              <p className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-[var(--color-text-muted)]">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                {directoryLoadingLabel}
-              </p>
-            )}
-            {!showInitialDirectoryLoading && directoryError && displayResults.length === 0 && (
-              <p className="px-3 py-8 text-center text-xs text-red-600">{directoryError}</p>
-            )}
-            {isSearchTooBroad && !showInitialDirectoryLoading && displayResults.length === 0 && (
-              <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
-                Nothing matched that search. Try a name or email address.
-              </p>
-            )}
-            {!showInitialDirectoryLoading &&
-              !directoryError &&
-              showDirectoryResults &&
-              !isSearchTooBroad &&
-              displayResults.length === 0 && (
-                <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
-                  No one matched that search.
-                </p>
-              )}
-            {!submitted && !showInitialDirectoryLoading && displayResults.length > 0 && (
-              <ul className="divide-y divide-[var(--color-border-default)]">
-                {displayResults.map((row) => {
+                  <div className={`${directoryResultsClass} sm:hidden`}>
+                  {!showDirectoryResults && !showInitialDirectoryLoading && !isSearchTooBroad && (
+                  <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
+                  {directoryEmptyMessage}
+                  </p>
+                  )}
+                  {showInitialDirectoryLoading && (
+                  <p className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-[var(--color-text-muted)]">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  {directoryLoadingLabel}
+                  </p>
+                  )}
+                  {!showInitialDirectoryLoading && directoryError && displayResults.length === 0 && (
+                  <p className="px-3 py-8 text-center text-xs text-red-600">{directoryError}</p>
+                  )}
+                  {isSearchTooBroad && !showInitialDirectoryLoading && displayResults.length === 0 && (
+                  <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
+                  {directoryEmptyMessage}
+                  </p>
+                  )}
+                  {!showInitialDirectoryLoading &&
+                  !directoryError &&
+                  showDirectoryResults &&
+                  !isSearchTooBroad &&
+                  displayResults.length === 0 && (
+                  <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
+                  {directoryEmptyMessage}
+                  </p>
+                  )}
+                  {!submitted && !showInitialDirectoryLoading && displayResults.length > 0 && (
+                  <ul className="divide-y divide-[var(--color-border-default)]">
+                  {displayResults.map((row) => {
                   const isMatch = directoryRowMatchesForm(row);
                   const isAdded = row.status === 'Added';
                   const dateLabel = formatDirectoryDate(row.dateAdded);
+                  const matchedUsers = formMatchUsersByRowId.get(row.id) || [];
 
                   return (
-                    <li
-                      key={row.id}
-                      className={`px-3 py-3 ${isMatch ? (isAdded ? 'bg-emerald-50/80' : 'bg-red-50/80') : ''}`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className={`truncate text-sm font-medium ${isMatch ? 'font-semibold' : ''}`}>
-                            {row.firstName} {row.lastName}
-                          </p>
-                          {row.email && (
-                            <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{row.email}</p>
-                          )}
-                          {row.location && (
-                            <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">{row.location}</p>
-                          )}
-                        </div>
-                        <span
-                          className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            isAdded
-                              ? 'bg-[var(--color-tag-added-bg)] text-[var(--color-tag-added-text)]'
-                              : 'bg-[var(--color-tag-removed-bg)] text-[var(--color-tag-removed-text)]'
-                          }`}
-                        >
-                          {row.status}
-                        </span>
-                      </div>
-                      {dateLabel && (
-                        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-                          {directoryDateColumnLabel}: {dateLabel}
-                        </p>
-                      )}
-                    </li>
+                  <li
+                  key={row.id}
+                  className={`px-3 py-3 ${isMatch ? (isAdded ? 'bg-[var(--color-tag-added-bg)]/70' : 'bg-[var(--color-tag-removed-bg)]/70') : 'hover:bg-[var(--color-manager-panel)]'}`}
+                  >
+                  <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                  <p className={`truncate text-sm font-medium ${isMatch ? 'font-semibold' : ''}`}>
+                  {row.firstName} {row.lastName}
+                  </p>
+                  {multipleUsers && matchedUsers.length > 0 ? (
+                  <p className="mt-1 text-[10px] font-semibold text-[var(--color-brand-secondary)]">
+                  Matches User {matchedUsers.join(', User ')}
+                  </p>
+                  ) : null}
+                  {row.email && (
+                  <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{row.email}</p>
+                  )}
+                  {row.location && (
+                  <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">{row.location}</p>
+                  )}
+                  </div>
+                  <span
+                  className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  isAdded
+                  ? 'bg-[var(--color-tag-added-bg)] text-[var(--color-tag-added-text)]'
+                  : 'bg-[var(--color-tag-removed-bg)] text-[var(--color-tag-removed-text)]'
+                  }`}
+                  >
+                  {row.status}
+                  </span>
+                  </div>
+                  {dateLabel && (
+                  <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+                  {directoryDateColumnLabel}: {dateLabel}
+                  </p>
+                  )}
+                  </li>
                   );
-                })}
-              </ul>
-            )}
-          </div>
+                  })}
+                  </ul>
+                  )}
+                  </div>
 
-          <div className="hidden overflow-hidden rounded-lg border border-[var(--color-border-default)] sm:block">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] table-fixed border-collapse text-left text-xs">
-                <caption className="sr-only">
+                  <div className={`${directoryResultsClass} hidden sm:block`}>
+                  <div className="overflow-x-auto">
+                  <table className="w-full table-fixed border-collapse text-left text-xs">
+                  <caption className="sr-only">
                   {isRemoveAction ? 'Removed users search results' : 'Directory search results'}
-                </caption>
-                <colgroup>
-                  <col className="w-[22%]" />
-                  <col className="w-[30%]" />
+                  </caption>
+                  <colgroup>
+                  <col className="w-[18%]" />
+                  <col className="w-[36%]" />
                   <col className="w-[18%]" />
                   <col className="w-[14%]" />
-                  <col className="w-[16%]" />
-                </colgroup>
-                <thead>
-                  <tr className="border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]">
-                    <th
-                      scope="col"
-                      className="px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
-                    >
-                      Name
-                    </th>
-                    <th
-                      scope="col"
-                      className="px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
-                    >
-                      Email
-                    </th>
-                    <th
-                      scope="col"
-                      className="px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
-                    >
-                      Location
-                    </th>
-                    <th
-                      scope="col"
-                      className="px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
-                    >
-                      {directoryDateColumnLabel}
-                    </th>
-                    <th
-                      scope="col"
-                      className="px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
-                    >
-                      Status
-                    </th>
+                  <col className="w-[14%]" />
+                  </colgroup>
+                  <thead>
+                  <tr className={directoryTableHeadClass}>
+                  <th
+                  scope="col"
+                  className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]"
+                  >
+                  Name
+                  </th>
+                  <th
+                  scope="col"
+                  className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]"
+                  >
+                  Email
+                  </th>
+                  <th
+                  scope="col"
+                  className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]"
+                  >
+                  Location
+                  </th>
+                  <th
+                  scope="col"
+                  className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]"
+                  >
+                  {directoryDateColumnLabel}
+                  </th>
+                  <th
+                  scope="col"
+                  className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]"
+                  >
+                  Status
+                  </th>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-default)]">
+                  </thead>
+                  <tbody className="divide-y divide-[var(--color-manager-border)]">
                   {!showDirectoryResults && !showInitialDirectoryLoading && !isSearchTooBroad && (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
-                        Type at least 2 characters to search, or enter person details to check for
-                        matches.
-                      </td>
-                    </tr>
+                  <tr>
+                  <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
+                  {directoryEmptyMessage}
+                  </td>
+                  </tr>
                   )}
                   {showInitialDirectoryLoading && (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
-                        <span className="inline-flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                          {directoryLoadingLabel}
-                        </span>
-                      </td>
-                    </tr>
+                  <tr>
+                  <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
+                  <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  {directoryLoadingLabel}
+                  </span>
+                  </td>
+                  </tr>
                   )}
                   {!showInitialDirectoryLoading && directoryError && displayResults.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-8 text-center text-red-600">
-                        {directoryError}
-                      </td>
-                    </tr>
+                  <tr>
+                  <td colSpan={5} className="px-3 py-8 text-center text-red-600">
+                  {directoryError}
+                  </td>
+                  </tr>
                   )}
                   {isSearchTooBroad && !showInitialDirectoryLoading && displayResults.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
-                        Nothing matched that search. Try a name or email address.
-                      </td>
-                    </tr>
+                  <tr>
+                  <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
+                  {directoryEmptyMessage}
+                  </td>
+                  </tr>
                   )}
                   {!showInitialDirectoryLoading &&
-                    !directoryError &&
-                    showDirectoryResults &&
-                    !isSearchTooBroad &&
-                    displayResults.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
-                          No one matched that search.
-                        </td>
-                      </tr>
-                    )}
+                  !directoryError &&
+                  showDirectoryResults &&
+                  !isSearchTooBroad &&
+                  displayResults.length === 0 && (
+                  <tr>
+                  <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
+                  {directoryEmptyMessage}
+                  </td>
+                  </tr>
+                  )}
                   {!submitted &&
-                    !showInitialDirectoryLoading &&
-                    displayResults.map((row) => {
-                      const isMatch = directoryRowMatchesForm(row);
-                      const isAdded = row.status === 'Added';
-                      const dateLabel = formatDirectoryDate(row.dateAdded);
+                  !showInitialDirectoryLoading &&
+                  displayResults.map((row) => {
+                  const isMatch = directoryRowMatchesForm(row);
+                  const isAdded = row.status === 'Added';
+                  const dateLabel = formatDirectoryDate(row.dateAdded);
+                  const matchedUsers = formMatchUsersByRowId.get(row.id) || [];
 
-                      return (
-                        <tr
-                          key={row.id}
-                          className={
-                            isMatch ? (isAdded ? 'bg-emerald-50/80' : 'bg-red-50/80') : undefined
-                          }
-                        >
-                          <td className="px-2 py-2 align-top">
-                            <span
-                              className={`break-words font-medium leading-snug ${isMatch ? 'font-semibold' : ''}`}
-                            >
-                              {row.firstName} {row.lastName}
-                            </span>
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 font-normal text-[var(--color-text-secondary)]">
-                            {row.email || '-'}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 font-normal text-[var(--color-text-secondary)]">
-                            {row.location || '-'}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 font-normal text-[var(--color-text-secondary)]">
-                            {dateLabel || '-'}
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                isAdded
-                                  ? 'bg-[var(--color-tag-added-bg)] text-[var(--color-tag-added-text)]'
-                                  : 'bg-[var(--color-tag-removed-bg)] text-[var(--color-tag-removed-text)]'
-                              }`}
-                            >
-                              {row.status}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                  return (
+                  <tr
+                  key={row.id}
+                  className={
+                  isMatch
+                  ? isAdded
+                  ? 'bg-[var(--color-tag-added-bg)]/70'
+                  : 'bg-[var(--color-tag-removed-bg)]/70'
+                  : 'hover:bg-[var(--color-manager-panel)]'
+                  }
+                  >
+                  <td className="px-4 py-3 align-top">
+                  <span
+                  className={`break-words font-medium leading-snug ${isMatch ? 'font-semibold' : ''}`}
+                  >
+                  {row.firstName} {row.lastName}
+                  </span>
+                  {multipleUsers && matchedUsers.length > 0 ? (
+                  <span className="mt-1 block text-[10px] font-semibold text-[var(--color-brand-secondary)]">
+                  User {matchedUsers.join(', User ')}
+                  </span>
+                  ) : null}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 font-normal text-[var(--color-text-secondary)]">
+                  {row.email || '-'}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 font-normal text-[var(--color-text-secondary)]">
+                  {row.location || '-'}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 font-normal text-[var(--color-text-secondary)]">
+                  {dateLabel || '-'}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                  <span
+                  className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  isAdded
+                  ? 'bg-[var(--color-tag-added-bg)] text-[var(--color-tag-added-text)]'
+                  : 'bg-[var(--color-tag-removed-bg)] text-[var(--color-tag-removed-text)]'
+                  }`}
+                  >
+                  {row.status}
+                  </span>
+                  </td>
+                  </tr>
+                  );
+                  })}
+                  </tbody>
+                  </table>
+                  </div>
+                  </div>
 
-          {showDirectoryResults && !directoryError && (
-            <p className="text-[11px] text-[var(--color-text-muted)]">
-              {displayResults.length === 0
-                ? 'No results to show yet.'
-                : `${displayResults.length} result${displayResults.length === 1 ? '' : 's'}`}
-              {hasSearchQuery && formMatchResults.length > 0
-                ? ` (${searchResults.length} from search, ${formMatchResults.length} from form)`
-                : ''}
-              {formMatchResults.length > 0 && !hasSearchQuery ? ' from your form details' : ''}
-              {hasSearchQuery && formMatchResults.length === 0 && displayResults.length > 0
-                ? ' from search'
-                : ''}
-            </p>
+                  {showDirectoryResults && !directoryError && (
+                  <p className="text-[11px] text-[var(--color-text-muted)]">
+                  {displayResults.length === 0
+                  ? 'No results to show yet.'
+                  : `${displayResults.length} result${displayResults.length === 1 ? '' : 's'}`}
+                  {hasSearchQuery && formMatchResults.length > 0
+                  ? ` (${searchResults.length} from search, ${formMatchResults.length} from form)`
+                  : ''}
+                  {formMatchResults.length > 0 && !hasSearchQuery ? ' from your form details' : ''}
+                  {hasSearchQuery && formMatchResults.length === 0 && displayResults.length > 0
+                  ? ' from search'
+                  : ''}
+                  </p>
+                  )}
+
+                  {directoryError && displayResults.length > 0 && (
+                  <p className="text-[11px] text-red-600">{directoryError}</p>
+                  )}
+
+                  <p className="text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                  {directoryFooterText}
+                  </p>
+                </section>
+                </aside>
+              ) : null}
+              </div>
+              </div>
+            </form>
           )}
-
-          {directoryError && displayResults.length > 0 && (
-            <p className="text-[11px] text-red-600">{directoryError}</p>
-          )}
-
-          <p className="border-t border-[var(--color-border-default)] pt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-            {directoryFooterText}
-          </p>
-          </section>
-        </aside>
+        </div>
+        )}
       </main>
+      </div>
     </div>
   );
 }

@@ -145,7 +145,10 @@ def assert_manager_email_allowed(db: Session, email: str) -> str:
 
 def create_manager_domain(db: Session, raw: str, partner_id: str) -> models.ManagerAllowedDomain:
     get_partner_or_404(db, partner_id)
-    domain = normalize_manager_domain(raw)
+    try:
+        domain = normalize_manager_domain(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     existing = (
         db.query(models.ManagerAllowedDomain)
         .filter(models.ManagerAllowedDomain.domain == domain)

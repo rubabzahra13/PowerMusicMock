@@ -24,13 +24,10 @@ export function personName(person) {
 
 export function requestStatusMeta(request) {
   if (request.status === 'handled') {
-    const outcome = request.outcome || (request.action === 'Add' ? 'Added' : 'Removed');
-    const isAdded = outcome === 'Added';
     return {
-      label: outcome,
-      className: isAdded
-        ? 'bg-[var(--color-tag-added-bg)] text-[var(--color-tag-added-text)]'
-        : 'bg-[var(--color-tag-removed-bg)] text-[var(--color-tag-removed-text)]',
+      label: 'Handled',
+      className:
+        'bg-[var(--color-tag-neutral-bg)] text-[var(--color-tag-neutral-text)] ring-1 ring-inset ring-[var(--color-tag-neutral-border)]',
       detail: request.handledAt
         ? `Handled ${formatRequestTimestamp(request.handledAt)}`
         : 'Handled',

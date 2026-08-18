@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isRateLimitError, loadWithCache, refreshCache } from '../utils/pilot2Api';
+import { clearCache, isRateLimitError, loadWithCache, refreshCache } from '../utils/pilot2Api';
 import {
   fetchManagerRequestsPage,
   fetchManagerRequestsSummary,
@@ -9,7 +9,8 @@ import { useBackgroundRefresh } from './useBackgroundRefresh';
 
 const CACHE_KEY = 'manager_requests_all';
 const SUMMARY_CACHE_KEY = 'manager_requests_summary';
-const FETCH_LIMIT = 100;
+/** Backend caps manager list page size at 50. */
+const FETCH_LIMIT = 50;
 
 function applyManagerRequestsPayload(data, onHighlightChange) {
   const items = Array.isArray(data?.items) ? data.items : [];
@@ -126,7 +127,7 @@ export function useManagerRequestSummary(refreshToken = 0) {
 export function useManagerRequests(
   refreshToken = 0,
   onHighlightChange,
-  { enabled = false, backgroundPollEnabled, pollIntervalMs = 60000 } = {},
+  { enabled = false, backgroundPollEnabled, pollIntervalMs = 60000, networkFirst = false } = {},
 ) {
   const [requests, setRequests] = useState([]);
   const [meta, setMeta] = useState({ total: 0, pendingCount: 0 });
@@ -138,6 +139,10 @@ export function useManagerRequests(
   onHighlightChangeRef.current = onHighlightChange;
 
   const apply = useCallback((data, isStale) => {
+    const items = Array.isArray(data?.items) ? data.items : [];
+    // Ignore stale empty snapshots — summary may already show requests exist.
+    if (isStale && items.length === 0) return;
+
     const next = applyManagerRequestsPayload(data, () => {
       onHighlightChangeRef.current?.();
     });
@@ -163,6 +168,7 @@ export function useManagerRequests(
       if (!isRateLimitError(err)) {
         setError(err.message || 'Could not load your requests.');
       }
+      setInitialLoading(false);
     } finally {
       refreshInFlightRef.current = false;
     }
@@ -176,7 +182,18 @@ export function useManagerRequests(
 
     const run = async () => {
       try {
+        if (networkFirst) {
+          clearCache(CACHE_KEY);
+        }
+
         if (hasLoadedRef.current && refreshToken > 0) {
+          await refreshCache(CACHE_KEY, fetchAll, (data, isStale) => {
+            if (!cancelled) apply(data, isStale);
+          });
+          return;
+        }
+
+        if (networkFirst) {
           await refreshCache(CACHE_KEY, fetchAll, (data, isStale) => {
             if (!cancelled) apply(data, isStale);
           });
@@ -201,7 +218,7 @@ export function useManagerRequests(
     return () => {
       cancelled = true;
     };
-  }, [enabled, refreshToken, apply, fetchAll]);
+  }, [enabled, refreshToken, apply, fetchAll, networkFirst]);
 
   useBackgroundRefresh(refresh, {
     enabled: backgroundPollEnabled ?? enabled,

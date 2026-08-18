@@ -3,7 +3,6 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import {
-  managerEmailDomainHint,
   isManagerAccountExistsMessage,
   validateManagerSignupFields,
   validateManagerEmail,
@@ -29,6 +28,8 @@ import PasswordRequirements, { PasswordMatchHint } from '../components/auth/Pass
 import PasswordInput from '../components/auth/PasswordInput';
 import ManagerAuthEmailNotice from '../components/auth/ManagerAuthEmailNotice';
 import { getAuthLinkExpiryLabel } from '../utils/authRedirect';
+import { queueManagerPortalIntro, prefetchManagerPortalBranding } from '../components/manager/ManagerPortalIntro';
+import { usePartnerBrandingFromEmail } from '../hooks/usePartnerBrandingFromEmail';
 
 export default function Signup() {
   const {
@@ -77,7 +78,17 @@ export default function Signup() {
   const resendInFlightRef = useRef(false);
   const [allowedDomains, setAllowedDomains] = useState(() => getCachedManagerAllowedDomains());
   const [domainsReady, setDomainsReady] = useState(() => Boolean(getCachedManagerAllowedDomains()));
-  const domainHint = managerEmailDomainHint(allowedDomains);
+
+  const brandingEmail = verifySent
+    ? registeredEmail
+    : resetSent
+      ? resetEmail
+      : mode === 'signup'
+        ? formData.email
+        : mode === 'forgot'
+          ? forgotEmail
+          : signInEmail;
+  const partnerBranding = usePartnerBrandingFromEmail(brandingEmail);
 
   useEffect(() => {
     let active = true;
@@ -204,6 +215,11 @@ export default function Signup() {
 
       if (result.needsConfirmation) {
         showVerifyScreen(result.email);
+      } else {
+        queueManagerPortalIntro(partnerBranding);
+        if (!partnerBranding?.partnerName) {
+          await prefetchManagerPortalBranding(validated.value.email);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -306,6 +322,7 @@ export default function Signup() {
       await signInManager(signInEmail, signInPassword, {
         enforceDomain: appConfig.enforceDomainCheck,
       });
+      queueManagerPortalIntro(partnerBranding);
       navigate('/submit', { replace: true });
     } catch (err) {
       console.error(err);
@@ -406,7 +423,7 @@ export default function Signup() {
 
     if (resetSent) {
       return (
-        <ManagerAuthShell>
+        <ManagerAuthShell partnerBranding={partnerBranding}>
           <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Check your email</h2>
           <p className="mt-1 mb-4 text-sm text-[var(--color-text-secondary)]">
             We sent a password reset link to{' '}
@@ -485,7 +502,7 @@ export default function Signup() {
     }
 
     return (
-      <ManagerAuthShell>
+      <ManagerAuthShell partnerBranding={partnerBranding}>
         <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Reset password</h2>
         <p className="mt-1 mb-6 text-sm text-[var(--color-text-secondary)]">
           Enter your email and we will send you a link to choose a new password.
@@ -515,7 +532,7 @@ export default function Signup() {
         <form onSubmit={handleForgotPasswordSubmit} className="space-y-4" noValidate>
           <div>
             <label htmlFor={forgotEmailId} className={labelClass}>
-              Email{appConfig.enforceDomainCheck ? ` (${domainHint})` : ''}
+              Email
             </label>
             <input
               id={forgotEmailId}
@@ -568,7 +585,7 @@ export default function Signup() {
     const showCreateAccountHint = isManagerAccountNotFoundMessage(errorMsg);
 
     return (
-      <ManagerAuthShell>
+      <ManagerAuthShell partnerBranding={partnerBranding}>
         <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Sign in</h2>
         <p className="mt-1 mb-6 text-sm text-[var(--color-text-secondary)]">
           Use the email and password you chose when you signed up.
@@ -608,7 +625,7 @@ export default function Signup() {
         <form onSubmit={handleSignInSubmit} className="space-y-4" noValidate>
           <div>
             <label htmlFor={signInEmailId} className={labelClass}>
-              Email{appConfig.enforceDomainCheck ? ` (${domainHint})` : ''}
+              Email
             </label>
             <input
               id={signInEmailId}
@@ -685,7 +702,7 @@ export default function Signup() {
   }
 
   return (
-    <ManagerAuthShell wide>
+    <ManagerAuthShell wide partnerBranding={partnerBranding}>
       <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Create account</h2>
       <p className="mt-1 mb-6 text-sm text-[var(--color-text-secondary)]">
         Fill in your details and choose a password. You may need to confirm your email once.
@@ -747,7 +764,7 @@ export default function Signup() {
 
         <div>
           <label htmlFor="signup-email" className={labelClass}>
-            Email{appConfig.enforceDomainCheck ? ` (${domainHint})` : ''}
+            Email
           </label>
           <input
             id="signup-email"

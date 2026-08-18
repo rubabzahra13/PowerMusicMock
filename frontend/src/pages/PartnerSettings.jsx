@@ -1,19 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft,
   AtSign,
-  Check,
-  Copy,
   Eye,
-  LayoutTemplate,
   Loader2,
   Mail,
   Plus,
   Shield,
   Trash2,
   Upload,
+  LayoutTemplate,
 } from 'lucide-react';
 import { AdminPageScroll, Toast, useToast, CardListSkeleton, Modal, HoverTip } from '../components/ui';
+import ManagerFormPreview, { PreviewFormActionToggle } from '../components/partner/ManagerFormPreview';
 import { getUserTimeZoneLabel, formatShortDate } from '../utils/dateTime';
 import { clearManagerAllowedDomainsCache } from '../utils/managerAuth';
 import { usePartners } from '../context/PartnerContext';
@@ -41,20 +40,20 @@ const MAX_CONNECTED_INBOXES = 7;
 const SETTINGS_TABS = [
   {
     id: 'access',
-    label: 'Access settings',
-    descriptionFor: () => 'Partner name and who can sign in',
+    label: 'Access Settings',
+    descriptionFor: () => 'Who can sign in to the Partner Portal',
     Icon: Shield,
   },
   {
     id: 'automation',
-    label: 'Email automation settings',
-    descriptionFor: () => 'Inbox connection and auto sources',
+    label: 'Automated Email Intake',
+    descriptionFor: () => 'Receiving Inbox and Allowed Senders',
     Icon: Mail,
   },
   {
     id: 'form-builder',
-    label: 'Custom Manager Form',
-    descriptionFor: () => 'Build a branded form for managers',
+    label: 'Partner Form Branding',
+    descriptionFor: () => 'Logo and Name on the Partner Form',
     Icon: LayoutTemplate,
   },
 ];
@@ -233,6 +232,8 @@ const fieldStandaloneClass =
 
 export default function PartnerSettings() {
   const { showToast } = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
   const {
     selectedPartner,
     selectedPartnerId,
@@ -266,13 +267,27 @@ export default function PartnerSettings() {
   const [partnerNameEditing, setPartnerNameEditing] = useState(false);
   const [settingsTab, setSettingsTab] = useState('access');
 
-  // ── Form builder state ───────────────────────────────────────────────────
-  const [formFields, setFormFields] = useState([]);
-  const [logoDataUrl, setLogoDataUrl] = useState(null);  // base64 data URL — survives cross-tab
-  const [builtForm, setBuiltForm] = useState(null);
-  const [formErrors, setFormErrors] = useState({});
-  const [formAttempted, setFormAttempted] = useState(false);
-  const [urlCopied, setUrlCopied] = useState(false);
+  useEffect(() => {
+    const tabFromState = location.state?.settingsTab;
+    const tabFromQuery = new URLSearchParams(location.search).get('tab');
+    const nextTab = tabFromState || tabFromQuery;
+    if (nextTab && SETTINGS_TABS.some((tab) => tab.id === nextTab)) {
+      setSettingsTab(nextTab);
+      if (tabFromState) {
+        navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+      }
+    }
+  }, [location.pathname, location.search, location.state, navigate]);
+
+  // ── Partner Form branding ───────────────────────────────────────────────
+  const [logoDataUrl, setLogoDataUrl] = useState(null);
+  const [brandingSaving, setBrandingSaving] = useState(false);
+  const [formPreviewOpen, setFormPreviewOpen] = useState(false);
+  const [previewAction, setPreviewAction] = useState('Add');
+
+  useEffect(() => {
+    if (formPreviewOpen) setPreviewAction('Add');
+  }, [formPreviewOpen]);
   const logoInputRef = useRef(null);
 
   const connectedAccounts = useMemo(
@@ -296,7 +311,7 @@ export default function PartnerSettings() {
       setInboxesLoading(false);
     }).catch((err) => {
       setInboxesLoading(false);
-      showToast(`Could not load inboxes: ${err.message}`, 'error');
+      showToast(`Could not load Inboxes: ${err.message}`, 'error');
     });
   }, [inboxCacheKey, selectedPartnerId, showToast]);
 
@@ -306,7 +321,7 @@ export default function PartnerSettings() {
       setDomainsLoading(false);
     }).catch((err) => {
       setDomainsLoading(false);
-      showToast(`Could not load manager domains: ${err.message}`, 'error');
+      showToast(`Could not load Partner Domains: ${err.message}`, 'error');
     });
   }, [domainsCacheKey, selectedPartnerId, showToast]);
 
@@ -316,7 +331,7 @@ export default function PartnerSettings() {
       setSourcesLoading(false);
     }).catch((err) => {
       setSourcesLoading(false);
-      showToast(`Could not load automated sources: ${err.message}`, 'error');
+      showToast(`Could not load Automated Sources: ${err.message}`, 'error');
     });
   }, [selectedPartnerId, showToast, sourcesCacheKey]);
 
@@ -332,30 +347,14 @@ export default function PartnerSettings() {
     setPartnerNameDraft(selectedPartner?.name || '');
     setPartnerNameEditing(false);
     
-    // Fetch custom form for partner
     if (selectedPartnerId) {
-      getPartnerCustomForm(selectedPartnerId).then(res => {
-        if (res && res.fields && res.fields.length > 0) {
-          const config = {
-            partnerName: selectedPartner?.name || 'Partner',
-            logoDataUrl: res.logo_data_url,
-            fields: res.fields
-          };
-          setBuiltForm(config);
-          setLogoDataUrl(res.logo_data_url);
-          setFormFields(res.fields);
-        } else {
-          setBuiltForm(null);
-          setLogoDataUrl(null);
-          setFormFields([]);
-        }
-      }).catch(err => {
-        console.error("Could not load custom form", err);
+      getPartnerCustomForm(selectedPartnerId).then((res) => {
+        setLogoDataUrl(res?.logo_data_url || null);
+      }).catch((err) => {
+        console.error('Could not load manager form branding', err);
       });
     } else {
-      setBuiltForm(null);
       setLogoDataUrl(null);
-      setFormFields([]);
     }
   }, [selectedPartner?.name, selectedPartnerId]);
 
@@ -374,7 +373,7 @@ export default function PartnerSettings() {
     if (!selectedPartner) return;
     const nextName = partnerNameDraft.trim();
     if (!nextName) {
-      showToast(`${partnerLabel} name cannot be empty.`, 'error');
+      showToast(`${partnerLabel} Name cannot be empty.`, 'error');
       return;
     }
     setPartnerRenameBusy(true);
@@ -392,11 +391,11 @@ export default function PartnerSettings() {
   const handleAddAccount = async () => {
     const title = addTitle.trim();
     if (!title) {
-      showToast('Enter a display name for this inbox.', 'error');
+      showToast('Enter a Display Name for this Inbox.', 'error');
       return;
     }
     if (atAccountLimit) {
-      showToast(`Maximum of ${MAX_CONNECTED_INBOXES} connected inboxes reached.`, 'error');
+      showToast(`Maximum of ${MAX_CONNECTED_INBOXES} connected Inboxes reached.`, 'error');
       return;
     }
     setAddBusy(true);
@@ -407,7 +406,7 @@ export default function PartnerSettings() {
         window.location.assign(result.authUrl);
         return;
       }
-      showToast('Inbox connected.', 'success');
+      showToast('Inbox Connected.', 'success');
       setAddOpen(false);
       setAddTitle('');
       refreshInboxes();
@@ -465,7 +464,7 @@ export default function PartnerSettings() {
         writeCache(inboxCacheKey, next);
         return next;
       });
-      showToast('Inbox renamed.', 'success');
+      showToast('Inbox Renamed.', 'success');
       setRenameTarget(null);
     } catch (err) {
       showToast(`Rename failed: ${err.message}`, 'error');
@@ -509,9 +508,9 @@ export default function PartnerSettings() {
       });
       setDomainInput('');
       clearManagerAllowedDomainsCache();
-      showToast('Manager domain added.', 'success');
+      showToast('Partner Domain added.', 'success');
     } catch (err) {
-      showToast(err.message || 'Could not add domain.', 'error');
+      showToast(err.message || 'Could not add Domain.', 'error');
     } finally {
       setDomainAdding(false);
     }
@@ -528,7 +527,7 @@ export default function PartnerSettings() {
       });
       clearManagerAllowedDomainsCache();
       setPendingDomainRemove(null);
-      showToast('Manager domain removed.', 'success');
+      showToast('Partner Domain removed.', 'success');
     } catch (err) {
       showToast(`Remove failed: ${err.message}`, 'error');
     } finally {
@@ -540,7 +539,7 @@ export default function PartnerSettings() {
     event.preventDefault();
     const value = sourceInput.trim();
     if (!value) {
-      showToast('Enter an email or domain.', 'error');
+      showToast('Enter an Email or domain.', 'error');
       return;
     }
     setSourceAdding(true);
@@ -552,9 +551,9 @@ export default function PartnerSettings() {
         return next;
       });
       setSourceInput('');
-      showToast('Automated source added.', 'success');
+      showToast('Automated Source added.', 'success');
     } catch (err) {
-      showToast(err.message || 'Could not add source.', 'error');
+      showToast(err.message || 'Could not add Source.', 'error');
     } finally {
       setSourceAdding(false);
     }
@@ -570,7 +569,7 @@ export default function PartnerSettings() {
         return next;
       });
       setPendingSourceRemove(null);
-      showToast('Automated source removed.', 'success');
+      showToast('Automated Source removed.', 'success');
     } catch (err) {
       showToast(`Remove failed: ${err.message}`, 'error');
     } finally {
@@ -582,14 +581,13 @@ export default function PartnerSettings() {
     && partnerNameDraft.trim() !== (selectedPartner?.name || '')
     && partnerNameDraft.trim().length > 0;
 
-  // ── Form builder helpers ─────────────────────────────────────────────────
+  // ── Manager form branding helpers ───────────────────────────────────────
   const handleLogoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       setLogoDataUrl(ev.target.result);
-      setFormErrors((prev) => ({ ...prev, logo: null }));
     };
     reader.readAsDataURL(file);
   };
@@ -599,75 +597,45 @@ export default function PartnerSettings() {
     if (logoInputRef.current) logoInputRef.current.value = '';
   };
 
-  const handleAddField = () => {
-    setFormFields((prev) => [...prev, { id: `f_${Date.now()}`, name: '', type: 'Text' }]);
-  };
-
-  const handleRemoveField = (id) => {
-    setFormFields((prev) => prev.filter((f) => f.id !== id));
-  };
-
-  const handleFieldChange = (id, key, value) => {
-    setFormFields((prev) => prev.map((f) => f.id === id ? { ...f, [key]: value } : f));
-  };
-
-  const handleCreateForm = async () => {
-    setFormAttempted(true);
-    const errors = {};
-    if (!logoDataUrl) errors.logo = 'Please upload a partner logo.';
-    if (formFields.length === 0) errors.fields = 'Add at least one field to the form.';
-    const fieldErrors = {};
-    formFields.forEach((f) => { if (!f.name.trim()) fieldErrors[f.id] = 'Field name is required.'; });
-    if (Object.keys(fieldErrors).length > 0) errors.fieldErrors = fieldErrors;
-    if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
-    setFormErrors({});
-    
-    const partnerName = selectedPartner?.name || 'Partner';
-    const config = { partnerName, logoDataUrl, fields: formFields.map((f) => ({ ...f })) };
-    
+  const handleSaveBranding = async () => {
+    setBrandingSaving(true);
     try {
       await updatePartnerCustomForm(selectedPartnerId, {
         logo_data_url: logoDataUrl,
-        fields: config.fields
+        fields: [],
       });
-      setBuiltForm(config);
-      showToast('Custom form saved to database.', 'success');
+      showToast(
+        logoDataUrl ? 'Partner Form Branding saved.' : 'Partner Form Branding removed.',
+        'success',
+      );
     } catch (err) {
-      showToast(`Could not save custom form: ${err.message}`, 'error');
+      showToast(`Could not save Branding: ${err.message}`, 'error');
+    } finally {
+      setBrandingSaving(false);
     }
   };
 
-  const handleEditForm = () => setBuiltForm(null);
-
-  const builtFormSlug = builtForm
-    ? (builtForm.partnerName || 'partner').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-    : '';
-  const builtFormUrl = builtForm ? `${window.location.origin}/${builtFormSlug}/submit` : '';
-
-  const handleCopyUrl = () => {
-    navigator.clipboard.writeText(builtFormUrl).then(() => {
-      setUrlCopied(true);
-      setTimeout(() => setUrlCopied(false), 2000);
-    });
-  };
+  const previewPartnerName = partnerNameEditing
+    ? partnerNameDraft.trim() || partnerLabel
+    : (selectedPartner?.name || partnerLabel);
 
   return (
     <AdminPageScroll dataPage="partner-settings" contentClassName="min-w-0 select-none pb-16">
       <Toast />
 
-      <div className="mx-auto w-full max-w-[42rem]">
+      <div className="mx-auto w-full max-w-4xl">
         <header className="mb-5">
           <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
-            {partnerLabel} support
+            {partnerLabel} Support
           </p>
           <h1 className="text-xl font-bold text-[var(--color-text-primary)] sm:text-2xl">
-            {partnerLabel} settings
+            {partnerLabel} Settings
           </h1>
         </header>
 
         <div
           role="tablist"
-          aria-label={`${partnerLabel} settings sections`}
+          aria-label={`${partnerLabel} Settings sections`}
           className="mb-5 grid grid-cols-1 gap-1 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] p-1 sm:grid-cols-3"
         >
           {SETTINGS_TABS.map((tab) => {
@@ -683,7 +651,7 @@ export default function PartnerSettings() {
                 aria-selected={selected}
                 onClick={() => {
                   setSettingsTab(tab.id);
-                  if (tab.id !== 'access') setPartnerNameEditing(false);
+                  if (tab.id !== 'form-builder') setPartnerNameEditing(false);
                 }}
                 className={`flex items-start gap-3 rounded-lg px-3.5 py-3 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 ${
                   selected
@@ -703,7 +671,7 @@ export default function PartnerSettings() {
                 </span>
                 <span className="min-w-0">
                   <span
-                    className={`block text-sm leading-5 ${
+                    className={`block whitespace-nowrap text-sm leading-5 ${
                       selected
                         ? 'font-semibold text-[var(--color-text-primary)]'
                         : 'font-medium'
@@ -734,54 +702,9 @@ export default function PartnerSettings() {
           {settingsTab === 'access' ? (
             <SettingsPage>
           <SettingsSection
-            id="partner"
-            title="Partner name"
-            hint={`Shown across the admin app for ${selectedPartner?.name || 'this partner'}.`}
-          >
-            {partnerNameEditing ? (
-              <div className="space-y-3">
-                <input
-                  id="partner-name"
-                  type="text"
-                  value={partnerNameDraft}
-                  onChange={(event) => setPartnerNameDraft(event.target.value)}
-                  placeholder="Partner name"
-                  disabled={!selectedPartner || partnerRenameBusy}
-                  autoFocus
-                  className={fieldStandaloneClass}
-                  aria-label="Partner name"
-                />
-                <div className="flex justify-end gap-2">
-                  <TextButton onClick={cancelPartnerRename} disabled={partnerRenameBusy}>
-                    Cancel
-                  </TextButton>
-                  <FilledButton
-                    onClick={handleRenamePartner}
-                    disabled={partnerRenameBusy || !partnerDirty}
-                  >
-                    {partnerRenameBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    Save
-                  </FilledButton>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-[var(--color-text-primary)]">
-                    {selectedPartner?.name || 'No partner selected'}
-                  </p>
-                </div>
-                <TextButton onClick={startPartnerRename} disabled={!selectedPartner}>
-                  Edit
-                </TextButton>
-              </div>
-            )}
-          </SettingsSection>
-
-          <SettingsSection
-            id="manager-access"
-            title="Manager access"
-            hint="Only these email domains can sign in to the manager portal."
+            id="partner-access"
+            title="Partner Access"
+            hint="Only these Email domains can sign in to the Partner Portal."
             footer={(
               <AddBar
                 onSubmit={handleAddDomain}
@@ -790,7 +713,7 @@ export default function PartnerSettings() {
                 disabled={!domainInput.trim()}
               >
                 <input
-                  id="manager-domain"
+                  id="partner-domain"
                   type="text"
                   value={domainInput}
                   onChange={(event) => setDomainInput(event.target.value)}
@@ -831,8 +754,8 @@ export default function PartnerSettings() {
             <SettingsPage>
           <SettingsSection
             id="connected-inbox"
-            title="Connected inbox (Power Music)"
-            hint={`Used for automated add/remove email · ${getUserTimeZoneLabel()}`}
+            title="Connected Inbox (Power Music)"
+            hint={`Used for automated add/remove Email · ${getUserTimeZoneLabel()}`}
             action={(
               <TextButton
                 onClick={() => { setAddTitle(''); setAddOpen(true); }}
@@ -849,9 +772,9 @@ export default function PartnerSettings() {
               <div className="flex items-start gap-3 rounded-lg border border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-3.5 py-4">
                 <Mail className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
                 <div>
-                  <p className="text-sm font-medium text-[var(--color-text-primary)]">No inbox connected</p>
+                  <p className="text-sm font-medium text-[var(--color-text-primary)]">No Inbox Connected</p>
                   <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                    Connect the inbox that receives {partnerLabel} add/remove mail.
+                    Connect the Inbox that receives {partnerLabel} add/remove mail.
                   </p>
                 </div>
               </div>
@@ -877,11 +800,11 @@ export default function PartnerSettings() {
                             {account.title}
                           </p>
                           <StatusPill tone={needsReconnect ? 'warn' : isConnected ? 'ok' : 'muted'}>
-                            {needsReconnect ? 'Reconnect required' : account.status}
+                            {needsReconnect ? 'Reconnect Required' : account.status}
                           </StatusPill>
                         </div>
                         <p className="mt-0.5 break-all text-xs text-[var(--color-text-secondary)]">
-                          {account.email || 'No email yet'}
+                          {account.email || 'No Email yet'}
                         </p>
                         {statusLine ? (
                           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
@@ -906,7 +829,7 @@ export default function PartnerSettings() {
                           </TextButton>
                         ) : null}
                         <IconButton
-                          label="Remove inbox"
+                          label="Remove Inbox"
                           onClick={() => setDeleteTarget(account)}
                           disabled={isBusy}
                           danger
@@ -923,7 +846,7 @@ export default function PartnerSettings() {
 
           <SettingsSection
             id="auto-sources"
-            title={`Automated email sources (${partnerLabel})`}
+            title={`Automated Email Sources (${partnerLabel})`}
             hint="Emails or domains that can create add/remove requests automatically."
             footer={(
               <AddBar
@@ -939,7 +862,7 @@ export default function PartnerSettings() {
                   onChange={(event) => setSourceInput(event.target.value)}
                   placeholder="Email or @domain"
                   className={fieldClass}
-                  aria-label="Email or domain"
+                  aria-label="Email or Domain"
                 />
               </AddBar>
             )}
@@ -947,13 +870,13 @@ export default function PartnerSettings() {
             {sourcesLoading ? (
               <CardListSkeleton rows={3} />
             ) : (
-              <ItemList empty={autoSources.length === 0 ? 'No sources yet. Add an email or domain below.' : null}>
+              <ItemList empty={autoSources.length === 0 ? 'No sources yet. Add an Email or domain below.' : null}>
                 {autoSources.map((row) => (
                   <ItemRow
                     key={row.id}
                     icon={row.kind === 'domain' ? <AtSign className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
                     title={formatSourcePattern(row)}
-                    badge={<StatusPill>{row.kind === 'domain' ? 'Domain' : 'Email'}</StatusPill>}
+                    badge={<StatusPill>{row.kind === 'domain' ? 'Partner Domain' : 'Email'}</StatusPill>}
                     meta={row.createdAt ? `Added ${formatAdded(row.createdAt)}` : null}
                     action={(
                       <IconButton
@@ -972,187 +895,122 @@ export default function PartnerSettings() {
           </SettingsSection>
             </SettingsPage>
           ) : (
-            // ── Custom Manager Form Builder ──────────────────────────────────
-            <>
-              {builtForm ? (
-                // Preview
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between gap-3 py-1">
-                    <TextButton onClick={handleEditForm}>
-                      <ArrowLeft className="h-4 w-4" /> Edit form
-                    </TextButton>
-                    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Form Preview</span>
-                  </div>
-
-                  {/* URL card */}
-                  <div className="overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white shadow-sm">
-                    <div className="border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-5 py-4">
-                      <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Manager Form URL</h2>
-                      <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Share this link with managers. (Prototype, not yet active.)</p>
-                    </div>
-                    <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
-                      <code className="min-w-0 flex-1 break-all rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
-                        {builtFormUrl}
-                      </code>
-                      <FilledButton onClick={handleCopyUrl}>
-                        {urlCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                        {urlCopied ? 'Copied!' : 'Copy URL'}
-                      </FilledButton>
-                    </div>
-                  </div>
-
-                  {/* Form preview card */}
-                  <div className="overflow-hidden rounded-xl border border-[var(--color-border-default)] bg-white shadow-sm">
-                    <div className="flex items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-5 py-3">
-                      <Eye className="h-4 w-4 text-[var(--color-text-muted)]" />
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Preview: how managers will see this form</span>
-                    </div>
-                    <div className="mx-auto max-w-md space-y-6 px-6 py-8">
-                      <div className="flex flex-col items-center gap-3 text-center">
-                        <img src={builtForm.logoDataUrl} alt={builtForm.partnerName} className="h-16 w-16 rounded-xl border border-[var(--color-border-default)] bg-white object-contain p-1.5" />
-                        <div>
-                          <h2 className="text-lg font-bold text-[var(--color-text-primary)]">{builtForm.partnerName}</h2>
-                          <p className="mt-1 text-base font-bold text-[var(--color-text-primary)]">Submission Form</p>
-                          <p className="mt-1.5 text-sm text-[var(--color-text-secondary)]">Power Music admin has invited you to fill out this form.</p>
-                          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Please provide the requested information below.</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        {builtForm.fields.map((field) => (
-                          <div key={field.id}>
-                            <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-primary)]">{field.name}</label>
-                            {field.type === 'Date' ? (
-                              <input type="date" className={fieldStandaloneClass} readOnly />
-                            ) : field.type === 'Number' ? (
-                              <input type="number" placeholder="0" className={fieldStandaloneClass} readOnly />
-                            ) : field.type === 'Email' ? (
-                              <input type="email" placeholder="name@example.com" className={fieldStandaloneClass} readOnly />
-                            ) : (
-                              <input type="text" className={fieldStandaloneClass} readOnly />
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
+            <SettingsPage>
+              <SettingsSection
+                id="form-partner"
+                title="Partner Name"
+                hint="Shown on the Partner Form header and across the admin app."
+              >
+                {partnerNameEditing ? (
+                  <div className="space-y-3">
+                    <input
+                      id="partner-name"
+                      type="text"
+                      value={partnerNameDraft}
+                      onChange={(event) => setPartnerNameDraft(event.target.value)}
+                      placeholder="Partner Name"
+                      disabled={!selectedPartner || partnerRenameBusy}
+                      autoFocus
+                      className={fieldStandaloneClass}
+                      aria-label="Partner Name"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <TextButton onClick={cancelPartnerRename} disabled={partnerRenameBusy}>
+                        Cancel
+                      </TextButton>
                       <FilledButton
-                        onClick={() => showToast('Form submission is not available in this prototype.', 'success')}
+                        onClick={handleRenamePartner}
+                        disabled={partnerRenameBusy || !partnerDirty}
                       >
-                        Submit
+                        {partnerRenameBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Save
                       </FilledButton>
-
-                      <p className="text-center text-[10px] text-[var(--color-text-muted)]">
-                        Prototype preview only. Submission is not functional.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-[var(--color-text-primary)]">
+                        {selectedPartner?.name || 'No Partner Selected'}
                       </p>
                     </div>
+                    <TextButton onClick={startPartnerRename} disabled={!selectedPartner}>
+                      Edit
+                    </TextButton>
                   </div>
-                </div>
-              ) : (
-                // Builder
-                <SettingsPage>
-                  <SettingsSection id="form-partner" title="Partner" hint="The custom manager form will be created for this partner.">
-                    <div className="flex items-center gap-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3">
-                      <p className="text-sm font-medium text-[var(--color-text-primary)]">{selectedPartner?.name || 'No partner selected'}</p>
+                )}
+              </SettingsSection>
+
+              <SettingsSection
+                id="form-logo"
+                title="Partner Logo"
+                hint="Optional logo shown on the Partner Form header next to the Partner Name."
+              >
+                {logoDataUrl ? (
+                  <div className="flex items-center gap-4">
+                    <img
+                      src={logoDataUrl}
+                      alt="Partner Logo"
+                      className="h-16 w-16 rounded-lg border border-[var(--color-border-default)] bg-white object-contain p-1.5"
+                    />
+                    <div className="space-y-1">
+                      <TextButton onClick={() => logoInputRef.current?.click()}>Replace Logo</TextButton>
+                      <div>
+                        <button
+                          type="button"
+                          onClick={handleRemoveLogo}
+                          className="block rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
-                  </SettingsSection>
-
-                  <SettingsSection id="form-logo" title="Partner Logo" hint="Required. Shown at the top of the manager form.">
-                    {logoDataUrl ? (
-                      <div className="flex items-center gap-4">
-                        <img src={logoDataUrl} alt="Partner logo" className="h-16 w-16 rounded-lg border border-[var(--color-border-default)] bg-white object-contain p-1.5" />
-                        <div className="space-y-1">
-                          <TextButton onClick={() => logoInputRef.current?.click()}>Replace logo</TextButton>
-                          <div>
-                            <button type="button" onClick={handleRemoveLogo} className="block rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50">
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => logoInputRef.current?.click()}
-                        className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-8 text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand-primary)]/40 hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
-                      >
-                        <Upload className="h-5 w-5" />
-                        <span className="font-medium">Upload Logo</span>
-                        <span className="text-xs text-[var(--color-text-muted)]">PNG, JPG, SVG, or WEBP</span>
-                      </button>
-                    )}
-                    <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
-                    {formAttempted && formErrors.logo && (
-                      <p className="mt-2 text-[11px] text-red-600">{formErrors.logo}</p>
-                    )}
-                  </SettingsSection>
-
-                  <SettingsSection
-                    id="form-fields"
-                    title="Form Fields"
-                    hint="Add the fields you want managers to fill in when submitting a request."
-                    action={<TextButton onClick={handleAddField}><Plus className="h-4 w-4" /> Add Field</TextButton>}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => logoInputRef.current?.click()}
+                    className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-8 text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand-primary)]/40 hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
                   >
-                    {formFields.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-8 text-center">
-                        <p className="text-sm font-medium text-[var(--color-text-secondary)]">No fields added yet.</p>
-                        <p className="mt-1 text-xs text-[var(--color-text-muted)]">Add fields to build your manager form.</p>
-                      </div>
-                    ) : (
-                      <ul className="space-y-3">
-                        {formFields.map((field, index) => (
-                          <li key={field.id} className="space-y-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Field {index + 1}</p>
-                              <IconButton label="Remove field" onClick={() => handleRemoveField(field.id)} danger>
-                                <Trash2 className="h-4 w-4" />
-                              </IconButton>
-                            </div>
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                              <div>
-                                <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-primary)]">Field name</label>
-                                <input
-                                  type="text"
-                                  placeholder="e.g. First Name"
-                                  value={field.name}
-                                  onChange={(e) => handleFieldChange(field.id, 'name', e.target.value)}
-                                  className={fieldStandaloneClass + (formAttempted && formErrors.fieldErrors?.[field.id] ? ' !border-red-300 focus:!border-red-400' : '')}
-                                />
-                                {formAttempted && formErrors.fieldErrors?.[field.id] && (
-                                  <p className="mt-1 text-[11px] text-red-600">{formErrors.fieldErrors[field.id]}</p>
-                                )}
-                              </div>
-                              <div>
-                                <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-primary)]">Data type</label>
-                                <select
-                                  value={field.type}
-                                  onChange={(e) => handleFieldChange(field.id, 'type', e.target.value)}
-                                  className={fieldStandaloneClass}
-                                >
-                                  <option value="Text">Text</option>
-                                  <option value="Number">Number</option>
-                                  <option value="Email">Email</option>
-                                  <option value="Date">Date</option>
-                                  <option value="Text and Number">Text and Number</option>
-                                </select>
-                              </div>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {formAttempted && formErrors.fields && (
-                      <p className="mt-2 text-[11px] text-red-600">{formErrors.fields}</p>
-                    )}
-                  </SettingsSection>
+                    <Upload className="h-5 w-5" />
+                    <span className="font-medium">Upload Logo</span>
+                    <span className="text-xs text-[var(--color-text-muted)]">PNG, JPG, SVG, or WEBP</span>
+                  </button>
+                )}
+                <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+              </SettingsSection>
 
-                  <section className="px-5 py-5 sm:px-6">
-                    <FilledButton onClick={handleCreateForm}>
-                      Create Custom Manager Form
-                    </FilledButton>
-                  </section>
-                </SettingsPage>
-              )}
-            </>
+              <SettingsSection
+                id="form-preview"
+                title="Partner Form Preview"
+                hint="How the live Partner Form looks with your Name and Logo. Field layout matches the manager portal."
+              >
+                <button
+                  type="button"
+                  onClick={() => setFormPreviewOpen(true)}
+                  className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[var(--color-brand-secondary-border)] bg-[var(--color-brand-secondary-muted)]/40 px-4 py-8 text-left transition-colors hover:bg-[var(--color-brand-secondary-muted)]/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-secondary)]/30 sm:flex-row sm:justify-between sm:gap-4 sm:px-5 sm:py-6"
+                >
+                  <div className="min-w-0 text-center sm:text-left">
+                    <p className="text-sm font-semibold text-[var(--color-brand-secondary)]">
+                      Open Partner Form preview
+                    </p>
+                    <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                      See a read-only mockup with your current Name and Logo.
+                    </p>
+                  </div>
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--color-brand-secondary)] shadow-sm ring-1 ring-[var(--color-brand-secondary-border)]/60">
+                    <Eye className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                </button>
+              </SettingsSection>
+
+              <section className="px-5 py-5 sm:px-6">
+                <FilledButton onClick={handleSaveBranding} disabled={brandingSaving}>
+                  {brandingSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Save Branding
+                </FilledButton>
+              </section>
+            </SettingsPage>
           )}
         </div>
       </div>
@@ -1160,7 +1018,7 @@ export default function PartnerSettings() {
       <Modal
         isOpen={addOpen}
         onClose={() => !addBusy && setAddOpen(false)}
-        title="Connect inbox"
+        title="Connect Inbox"
         footer={(
           <>
             <button type="button" onClick={() => setAddOpen(false)} disabled={addBusy} className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium hover:bg-gray-50 disabled:opacity-40">
@@ -1175,7 +1033,7 @@ export default function PartnerSettings() {
         <div className="space-y-4">
           <div>
             <label className="mb-1.5 block text-xs text-[var(--color-text-secondary)]">
-              Display name
+              Display Name
             </label>
             <input
               type="text"
@@ -1188,7 +1046,7 @@ export default function PartnerSettings() {
             />
           </div>
           <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
-            You’ll be redirected to Google to choose the inbox for automated roster emails.
+            You’ll be redirected to Google to choose the Inbox for automated roster emails.
           </p>
         </div>
       </Modal>
@@ -1196,7 +1054,7 @@ export default function PartnerSettings() {
       <Modal
         isOpen={renameTarget != null}
         onClose={() => setRenameTarget(null)}
-        title="Rename inbox"
+        title="Rename Inbox"
         footer={(
           <>
             <button type="button" onClick={() => setRenameTarget(null)} className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium hover:bg-gray-50">Cancel</button>
@@ -1204,7 +1062,7 @@ export default function PartnerSettings() {
           </>
         )}
       >
-        <label className="mb-1.5 block text-xs text-[var(--color-text-secondary)]">Display name</label>
+        <label className="mb-1.5 block text-xs text-[var(--color-text-secondary)]">Display Name</label>
         <input
           type="text"
           value={renameValue}
@@ -1219,22 +1077,22 @@ export default function PartnerSettings() {
         isOpen={deleteTarget != null}
         onClose={() => setDeleteTarget(null)}
         confirm
-        title="Remove inbox"
+        title="Remove Inbox"
         footer={(
           <>
             <button type="button" onClick={() => setDeleteTarget(null)} className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium hover:bg-gray-50">Cancel</button>
-            <button type="button" onClick={handleDeleteInbox} disabled={busyId === deleteTarget?.id} className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-[var(--color-brand-primary)] disabled:opacity-40">Remove inbox</button>
+            <button type="button" onClick={handleDeleteInbox} disabled={busyId === deleteTarget?.id} className="px-4 py-2 text-white text-sm font-semibold rounded-md bg-[var(--color-brand-primary)] disabled:opacity-40">Remove Inbox</button>
           </>
         )}
       >
-        <p>Remove <strong>{deleteTarget?.title}</strong> ({deleteTarget?.email})? Automated emails will no longer be imported from this inbox.</p>
+        <p>Remove <strong>{deleteTarget?.title}</strong> ({deleteTarget?.email})? Automated emails will no longer be imported from this Inbox.</p>
       </Modal>
 
       <Modal
         isOpen={pendingDomainRemove != null}
         onClose={() => !busyId && setPendingDomainRemove(null)}
         confirm
-        title="Remove manager domain"
+        title="Remove Partner Domain"
         footer={(
           <>
             <button type="button" onClick={() => setPendingDomainRemove(null)} disabled={busyId != null} className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium hover:bg-gray-50 disabled:opacity-50">Cancel</button>
@@ -1242,14 +1100,14 @@ export default function PartnerSettings() {
           </>
         )}
       >
-        <p>Managers with <strong>@{pendingDomainRemove?.domain}</strong> emails will no longer be able to sign in or sign up.</p>
+        <p>Sign-in from <strong>@{pendingDomainRemove?.domain}</strong> will no longer be allowed.</p>
       </Modal>
 
       <Modal
         isOpen={pendingSourceRemove != null}
         onClose={() => !busyId && setPendingSourceRemove(null)}
         confirm
-        title="Remove automated source"
+        title="Remove Automated Source"
         footer={(
           <>
             <button type="button" onClick={() => setPendingSourceRemove(null)} disabled={busyId != null} className="px-4 py-2 border border-[var(--color-border-default)] rounded-md text-sm font-medium hover:bg-gray-50 disabled:opacity-50">Cancel</button>
@@ -1258,6 +1116,26 @@ export default function PartnerSettings() {
         )}
       >
         <p>Stop treating messages from <strong>{pendingSourceRemove ? formatSourcePattern(pendingSourceRemove) : ''}</strong> as automated add/remove requests.</p>
+      </Modal>
+
+      <Modal
+        isOpen={formPreviewOpen}
+        onClose={() => setFormPreviewOpen(false)}
+        title="Partner Form Preview"
+        headerExtra={(
+          <PreviewFormActionToggle
+            action={previewAction}
+            onChange={setPreviewAction}
+          />
+        )}
+        extraWide
+        flushBody
+      >
+        <ManagerFormPreview
+          partnerName={previewPartnerName}
+          logoDataUrl={logoDataUrl}
+          action={previewAction}
+        />
       </Modal>
     </AdminPageScroll>
   );

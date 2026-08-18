@@ -18,6 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { usePartners } from '../../context/PartnerContext';
 import { useToast } from '../ui/useToast';
 import { Modal, HoverTip } from '../ui';
+import { clearAdminIntroSeen } from '../admin/AdminPortalIntro';
 import { clearCache } from '../../utils/pilot2Api';
 
 function partnerInitials(name) {
@@ -182,7 +183,8 @@ export default function Sidebar({
       clearCache(`inboxes:${created.id}`);
       clearCache(`manager_domains:${created.id}`);
       clearCache(`automated_sources:${created.id}`);
-      showToast(`Partner ${created.name} created.`, 'success');
+      showToast(`Partner ${created.name} created. Set up Form Branding next.`, 'success');
+      navigate('/partner-settings', { state: { settingsTab: 'form-builder' } });
     } catch (err) {
       showToast(err.message || 'Could not create partner.', 'error');
     } finally {
@@ -228,6 +230,7 @@ export default function Sidebar({
       await logout();
       clearToasts();
       setConfirmOpen(false);
+      if (user?.id) clearAdminIntroSeen(user.id);
       sessionStorage.setItem(
         'adminSignedOut',
         JSON.stringify({ name: displayName }),

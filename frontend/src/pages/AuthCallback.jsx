@@ -5,6 +5,7 @@ import { getSupabase } from '../supabaseClient';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { validatePassword, isPasswordStrongEnough } from '../utils/managerAuth';
 import ManagerAuthShell, { errorClass, labelClass, buttonClass } from '../components/auth/ManagerAuthShell';
+import { queueManagerPortalIntro, prefetchManagerPortalBranding } from '../components/manager/ManagerPortalIntro';
 import PasswordInput from '../components/auth/PasswordInput';
 import PasswordRequirements, { PasswordMatchHint } from '../components/auth/PasswordRequirements';
 
@@ -262,7 +263,10 @@ export default function AuthCallback() {
 
     clearAuthParamsFromUrl();
     if (role === 'manager') {
-      navigate('/submit', { replace: true });
+      queueManagerPortalIntro();
+      void prefetchManagerPortalBranding(user.email).finally(() => {
+        navigate('/submit', { replace: true });
+      });
       return;
     }
     if (role === 'admin') {

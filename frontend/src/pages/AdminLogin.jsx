@@ -2,8 +2,11 @@ import { useState, useEffect, useId } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
-import { Toast, useToast } from '../components/ui';
+import { useToast } from '../components/ui';
+import AdminAuthShell from '../components/auth/AdminAuthShell';
+import { queueAdminPortalIntro } from '../components/admin/AdminPortalIntro';
 import { AUTH_PAGE_CANVAS, useAuthPageCanvas } from '../components/auth/useAuthPageCanvas';
+import { FlowGradientBackground } from '../components/ui/flow-gradient-hero-section';
 import PasswordInput from '../components/auth/PasswordInput';
 
 const inputClass =
@@ -60,11 +63,14 @@ export default function AdminLogin() {
   if (redirectingAdmin) {
     return (
       <div
-        className="fixed inset-0 z-0 flex items-center justify-center"
+        className="fixed inset-0 z-0 overflow-hidden"
         style={{ backgroundColor: AUTH_PAGE_CANVAS }}
       >
-        <Loader2 className="h-8 w-8 animate-spin text-white/90" aria-hidden="true" />
-        <span className="sr-only">Opening dashboard…</span>
+        <FlowGradientBackground className="pointer-events-none fixed inset-0" interactive />
+        <div className="relative flex h-full items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-white/90" aria-hidden="true" />
+          <span className="sr-only">Opening dashboard…</span>
+        </div>
       </div>
     );
   }
@@ -85,6 +91,7 @@ export default function AdminLogin() {
 
     try {
       await login(email.trim(), password, 'admin');
+      queueAdminPortalIntro();
       navigate(from, { replace: true });
     } catch (err) {
       console.error(err);
@@ -95,123 +102,90 @@ export default function AdminLogin() {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-0 overflow-y-auto overscroll-y-none"
-      style={{ backgroundColor: AUTH_PAGE_CANVAS }}
-    >
-      <div className="relative flex min-h-[100dvh] flex-col items-center justify-center px-3 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))] sm:px-6 sm:py-10 antialiased font-sans overflow-hidden">
-      <Toast />
-
-      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0a1020] via-[#121f3d] to-[#1a2d52]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,rgba(233,69,96,0.22),transparent_55%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_100%_100%,rgba(56,100,180,0.35),transparent_50%)]" />
-        <div className="absolute -top-32 left-1/4 h-96 w-96 rounded-full bg-[var(--color-brand-accent)]/20 blur-[100px]" />
-        <div className="absolute -bottom-40 right-1/4 h-[28rem] w-[28rem] rounded-full bg-[#3b5bdb]/25 blur-[120px]" />
-      </div>
-
-      <main className="relative z-10 w-full min-w-0 max-w-[420px]">
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-white shadow-[0_24px_64px_rgba(0,0,0,0.35)] sm:rounded-2xl">
-          <div className="border-b border-[var(--color-border-default)] bg-gradient-to-b from-white to-[var(--color-surface-panel)]/40 px-5 pb-6 pt-7 text-center sm:px-8 sm:pb-7 sm:pt-8">
-            <div className="mx-auto mb-4 inline-flex items-center justify-center rounded-xl bg-white p-2.5 shadow-[0_2px_12px_rgba(26,26,46,0.08)] ring-1 ring-black/[0.06] sm:p-3">
-              <img src="/image.png" alt="" className="h-9 w-auto object-contain sm:h-10" width={120} height={40} />
-            </div>
-            <h1 className="text-base font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-lg">
-              Power Music Ops
-            </h1>
-            <p className="mt-1 text-xs text-[var(--color-text-secondary)] sm:text-sm">Admin dashboard</p>
-          </div>
-
-          <div className="px-5 py-6 sm:px-8 sm:py-7">
-            {signedOutNotice && (
-              <div
-                role="status"
-                className="mb-5 flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-sm text-emerald-900"
-              >
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
-                <div>
-                  <p className="font-medium">Signed out successfully</p>
-                  <p className="mt-0.5 text-emerald-800/90">
-                    {signedOutNotice.name
-                      ? `See you next time, ${signedOutNotice.name}.`
-                      : 'You have been signed out.'}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Sign in</h2>
-            <p className="mt-1 mb-6 text-sm text-[var(--color-text-secondary)]">
-              Use your admin email and password to access the dashboard.
+    <AdminAuthShell>
+      {signedOutNotice && (
+        <div
+          role="status"
+          className="mb-5 flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-sm text-emerald-900"
+        >
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+          <div>
+            <p className="font-medium">Signed out successfully</p>
+            <p className="mt-0.5 text-emerald-800/90">
+              {signedOutNotice.name
+                ? `See you next time, ${signedOutNotice.name}.`
+                : 'You have been signed out.'}
             </p>
-
-            {errorMsg && (
-              <div
-                role="alert"
-                className="mb-5 flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-900"
-              >
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-              <div>
-                <label htmlFor={emailId} className="mb-1.5 block text-sm font-medium text-[var(--color-text-primary)]">
-                  Email
-                </label>
-                <input
-                  id={emailId}
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  inputMode="email"
-                  spellCheck={false}
-                  placeholder="andrea@powermusic.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={loading}
-                  className={inputClass}
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor={passwordId} className="mb-1.5 block text-sm font-medium text-[var(--color-text-primary)]">
-                  Password
-                </label>
-                <PasswordInput
-                  id={passwordId}
-                  name="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={loading}
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="mt-2 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    <span>Signing in…</span>
-                  </>
-                ) : (
-                  'Sign in'
-                )}
-              </button>
-            </form>
           </div>
         </div>
+      )}
 
-        <p className="mt-4 px-2 text-center text-xs text-white/45 sm:mt-6">Authorized personnel only.</p>
-      </main>
-      </div>
-    </div>
+      <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Sign in</h2>
+      <p className="mt-1 mb-6 text-sm text-[var(--color-text-secondary)]">
+        Use your admin email and password to access the dashboard.
+      </p>
+
+      {errorMsg && (
+        <div
+          role="alert"
+          className="mb-5 flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-900"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <div>
+          <label htmlFor={emailId} className="mb-1.5 block text-sm font-medium text-[var(--color-text-primary)]">
+            Email
+          </label>
+          <input
+            id={emailId}
+            name="email"
+            type="email"
+            autoComplete="email"
+            inputMode="email"
+            spellCheck={false}
+            placeholder="andrea@powermusic.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={loading}
+            className={inputClass}
+            required
+          />
+        </div>
+
+        <div>
+          <label htmlFor={passwordId} className="mb-1.5 block text-sm font-medium text-[var(--color-text-primary)]">
+            Password
+          </label>
+          <PasswordInput
+            id={passwordId}
+            name="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={loading}
+            required
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="mt-2 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-brand-primary)] text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[var(--color-surface-sidebar-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/35 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <span>Signing in…</span>
+            </>
+          ) : (
+            'Sign in'
+          )}
+        </button>
+      </form>
+    </AdminAuthShell>
   );
 }

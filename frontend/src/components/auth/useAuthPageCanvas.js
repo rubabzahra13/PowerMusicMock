@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-export const AUTH_PAGE_CANVAS = '#0f1729';
+export const AUTH_PAGE_CANVAS = '#1a1a2e';
 
 /** Pin html/body to the auth background so overscroll never reveals white (Instagram-style). */
 export function useAuthPageCanvas() {

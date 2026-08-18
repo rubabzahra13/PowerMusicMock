@@ -16,6 +16,16 @@
   --color-surface-sidebar: #1a1a2e;
   --color-surface-sidebar-hover: #252542;
   --color-surface-sidebar-active: rgba(255, 255, 255, 0.1);
+  /* Manager portal — richer canvas + hero (signup/splash continuity) */
+  --color-manager-canvas: #e4e9f2;
+  --color-manager-canvas-deep: #d8dfea;
+  --color-manager-hero-from: #1a1a2e;
+  --color-manager-hero-to: #141425;
+  --color-manager-card: #ffffff;
+  --color-manager-panel: #f3f5fa;
+  --color-manager-directory: #e8ebf0;
+  --color-manager-border: rgba(26, 26, 46, 0.08);
+  --color-manager-border-strong: rgba(26, 26, 46, 0.14);
   --color-surface-panel: #eef1f4;
   --color-surface-highlight: #e8ebef;
   --color-surface-highlight-strong: #dde2e8;
@@ -102,6 +112,9 @@
   --shadow-card: 0 1px 3px rgba(0,0,0,0.08);
   --shadow-drawer: -4px 0 24px rgba(0,0,0,0.12);
   --shadow-modal: 0 8px 32px rgba(0,0,0,0.16);
+  /* Manager portal — elevated work surfaces (auth card language, lighter touch) */
+  --shadow-manager-form: 0 16px 48px rgba(26, 26, 46, 0.09), 0 2px 8px rgba(26, 26, 46, 0.04);
+  --shadow-manager-panel: 0 4px 24px rgba(26, 26, 46, 0.05);
 
   /* Layout */
   --app-sidebar-width: 240px;

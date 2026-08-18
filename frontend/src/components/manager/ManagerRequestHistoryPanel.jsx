@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { Modal, HoverTip } from '../ui';
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { HoverTip } from '../ui';
 import ManagerRequestHistoryRow, {
   MANAGER_REQUEST_HISTORY_GRID,
 } from './ManagerRequestHistoryRow';
 import ManagerRequestHistoryTabs, {
   MANAGER_REQUEST_HISTORY_PANEL_ID,
 } from './ManagerRequestHistoryTabs';
+import ManagerRequestHistoryEmpty, {
+  ManagerRequestHistoryNotice,
+} from './ManagerRequestHistoryEmpty';
 import {
   countManagerHandledRequestUnseen,
   countManagerPendingUnseen,
@@ -46,11 +49,12 @@ function latestPendingRequestId(requests) {
   return latestId;
 }
 
-export default function ManagerRequestHistoryModal({
-  isOpen,
-  onClose,
+/**
+ * Inline request history — same content as the former modal, embedded in the portal.
+ */
+export default function ManagerRequestHistoryPanel({
+  onBack,
   requests = [],
-  pendingCount = 0,
   pendingUnseenCount = 0,
   loading = false,
   error = null,
@@ -102,9 +106,8 @@ export default function ManagerRequestHistoryModal({
   }, [activeTab, highlightVersion, pendingUnseenInSession, tabbedRequests, unreadCount]);
 
   useEffect(() => {
-    if (!isOpen) return;
     setPage(1);
-  }, [activeTab, isOpen]);
+  }, [activeTab]);
 
   useEffect(() => {
     setPage((current) => Math.min(current, pageCount));
@@ -144,38 +147,62 @@ export default function ManagerRequestHistoryModal({
     const handled = requests.filter((request) => request.status === 'handled').length;
     return {
       all: requests.length,
-      new: pendingCount || pending,
+      new: pending,
       handled,
     };
-  }, [requests, pendingCount]);
+  }, [requests]);
+
+  const showPagination = hasList && pageCount > 1;
 
   const dateColumnLabel =
     activeTab === 'new' ? 'Submitted' : activeTab === 'handled' ? 'Handled at' : 'Date';
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title="Your request history"
-      extraWide
-      stableHeight
-      headerExtra={
-        unreadCount > 0 ? (
+    <section
+      aria-labelledby="manager-request-history-heading"
+      className="relative overflow-hidden rounded-2xl border border-[var(--color-manager-border)] bg-[var(--color-manager-card)] shadow-[var(--shadow-manager-form)]"
+    >
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-[var(--color-brand-accent)]/80 via-[var(--color-brand-secondary)] to-[var(--color-brand-accent)]/80"
+        aria-hidden="true"
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-manager-border)] px-4 py-3 sm:px-6">
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <button
             type="button"
-            onClick={handleDismissAll}
-            className="rounded-lg px-2 py-1 text-[10px] font-semibold text-[var(--color-brand-primary)] transition-colors hover:bg-[var(--color-surface-highlight)] sm:px-2.5 sm:text-[11px]"
+            onClick={onBack}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-manager-panel)] hover:text-[var(--color-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/30"
           >
-            Dismiss all
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            Back
           </button>
-        ) : null
-      }
-    >
-      <div className="flex h-full min-h-0 flex-col gap-3">
-        <p className="shrink-0 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-          Browse by status below. Handled requests stay highlighted until you open them.
-        </p>
+          <div className="min-w-0">
+            <h1
+              id="manager-request-history-heading"
+              className="truncate text-base font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-lg"
+            >
+              Your requests
+            </h1>
+          </div>
+        </div>
 
+        {!loading && !error && requests.length > 0 && (
+          <p className="text-[11px] tabular-nums text-[var(--color-text-muted)]">
+            {tabCounts.new > 0 ? (
+              <>
+                <span className="font-semibold text-amber-700">{tabCounts.new}</span> pending
+                <span aria-hidden="true"> · </span>
+              </>
+            ) : null}
+            {tabCounts.handled} handled
+          </p>
+        )}
+      </div>
+
+      <ManagerRequestHistoryNotice unreadCount={unreadCount} onDismissAll={handleDismissAll} />
+
+      <div className="space-y-4 p-4 sm:space-y-5 sm:p-6">
         <ManagerRequestHistoryTabs
           activeTab={activeTab}
           onChange={handleTabChange}
@@ -188,35 +215,28 @@ export default function ManagerRequestHistoryModal({
           role="tabpanel"
           id={MANAGER_REQUEST_HISTORY_PANEL_ID}
           aria-labelledby={`manager-request-history-tab-${activeTab}`}
-          className="flex min-h-0 flex-1 flex-col"
         >
           {loading && (
-            <div className="flex flex-1 items-center justify-center gap-2 text-xs text-[var(--color-text-muted)]">
+            <div className="flex items-center justify-center gap-2 py-16 text-xs text-[var(--color-text-muted)]">
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               Loading your requests…
             </div>
           )}
 
           {!loading && error && (
-            <p className="flex flex-1 items-center justify-center text-center text-xs text-red-600" role="alert">
+            <p className="py-16 text-center text-xs text-red-600" role="alert">
               {error}
             </p>
           )}
 
           {!loading && !error && tabbedRequests.length === 0 && (
-            <p className="flex flex-1 items-center justify-center text-center text-xs text-[var(--color-text-muted)]">
-              {activeTab === 'handled'
-                ? 'No handled requests in this view yet.'
-                : activeTab === 'new'
-                  ? 'No pending requests right now.'
-                  : 'You have not submitted any requests yet.'}
-            </p>
+            <ManagerRequestHistoryEmpty activeTab={activeTab} />
           )}
 
           {hasList && (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--color-border-default)]">
+            <div className="overflow-hidden rounded-xl border border-[var(--color-manager-border)] bg-white">
               <div
-                className={`hidden shrink-0 sm:grid ${MANAGER_REQUEST_HISTORY_GRID} gap-x-4 border-b border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/60 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]`}
+                className={`hidden shrink-0 sm:grid ${MANAGER_REQUEST_HISTORY_GRID} gap-x-4 border-b border-[var(--color-manager-border)] bg-[var(--color-manager-panel)]/60 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]`}
                 aria-hidden="true"
               >
                 <span className="text-left">#</span>
@@ -228,7 +248,7 @@ export default function ManagerRequestHistoryModal({
 
               <ul
                 ref={listRef}
-                className="min-h-0 flex-1 divide-y divide-[var(--color-border-default)] overflow-y-auto overscroll-contain"
+                className="divide-y divide-[var(--color-manager-border)] overflow-y-auto overscroll-contain"
               >
                 {paged.items.map((request, index) => (
                   <ManagerRequestHistoryRow
@@ -245,47 +265,55 @@ export default function ManagerRequestHistoryModal({
           )}
         </div>
 
-        <div
-          className={`flex shrink-0 flex-col gap-2 border-t border-[var(--color-border-default)] pt-3 sm:h-10 sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${
-            hasList ? '' : 'invisible'
-          }`}
-          aria-hidden={!hasList}
-        >
-          <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
-            Showing {pageRangeStart}–{pageRangeEnd} of {tabbedRequests.length}
-            {pageCount > 1 ? ` · Page ${paged.page} of ${pageCount}` : ''}
-            {activeTab === 'new' && pendingOnPage > 0
-              ? ` · ${pendingOnPage} pending on this page`
-              : ''}
-          </p>
-          <div className="flex items-center gap-1.5">
-            <HoverTip label="Previous page">
-              <button
-                type="button"
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                disabled={page <= 1}
-                aria-label="Previous page"
-                tabIndex={hasList ? 0 : -1}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-            </HoverTip>
-            <HoverTip label="Next page">
-              <button
-                type="button"
-                onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
-                disabled={page >= pageCount}
-                aria-label="Next page"
-                tabIndex={hasList ? 0 : -1}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel)] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </HoverTip>
+        {hasList && (
+          <div
+            className={`flex flex-col gap-2 sm:flex-row sm:items-center ${
+              showPagination ? 'sm:justify-between' : 'sm:justify-start'
+            }`}
+          >
+            <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+              {tabbedRequests.length === 1
+                ? '1 request'
+                : `${tabbedRequests.length} requests`}
+              {pageCount > 1
+                ? ` · Showing ${pageRangeStart}–${pageRangeEnd}`
+                : ''}
+              {activeTab === 'new' && pendingOnPage > 0
+                ? ` · ${pendingOnPage} pending on this page`
+                : ''}
+            </p>
+            {showPagination && (
+              <div className="flex items-center gap-1.5">
+                <HoverTip label="Previous page">
+                  <button
+                    type="button"
+                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                    disabled={page <= 1}
+                    aria-label="Previous page"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-manager-border)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-manager-panel)] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                </HoverTip>
+                <span className="min-w-[4.5rem] text-center text-[11px] tabular-nums text-[var(--color-text-muted)]">
+                  {paged.page} / {pageCount}
+                </span>
+                <HoverTip label="Next page">
+                  <button
+                    type="button"
+                    onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+                    disabled={page >= pageCount}
+                    aria-label="Next page"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-manager-border)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-manager-panel)] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </HoverTip>
+              </div>
+            )}
           </div>
-        </div>
+        )}
       </div>
-    </Modal>
+    </section>
   );
 }

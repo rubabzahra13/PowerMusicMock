@@ -1,6 +1,10 @@
+import { createPortal } from 'react-dom';
 import { X, AlertCircle, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useToast } from './useToast';
 import HoverTip from './HoverTip';
+
+/** Above Modal (110), Drawer (101), and sidebar overlays. */
+const TOAST_Z_INDEX = 9999;
 
 const animationStyle = `
   @keyframes toastSlideIn {
@@ -44,12 +48,15 @@ const TOAST_VARIANTS = {
 export default function Toast() {
   const { toasts, dismissToast } = useToast();
 
-  if (!toasts || toasts.length === 0) return null;
+  if (!toasts || toasts.length === 0 || typeof document === 'undefined') return null;
 
-  return (
+  return createPortal(
     <>
       <style>{animationStyle}</style>
-      <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-3 pointer-events-none select-none">
+      <div
+        className="fixed bottom-6 right-6 flex flex-col gap-3 pointer-events-none select-none pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]"
+        style={{ zIndex: TOAST_Z_INDEX }}
+      >
         {toasts.map((toast) => {
           const variant = TOAST_VARIANTS[toast.type] || TOAST_VARIANTS.success;
           const { borderClass, Icon, iconColor } = variant;
@@ -79,6 +86,7 @@ export default function Toast() {
           );
         })}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

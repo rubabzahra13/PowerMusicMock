@@ -140,7 +140,9 @@ export default function RequestDetail() {
     sessionStorage.setItem('pm_directory_pending_tab', outcome === 'Added' ? 'Added' : 'Removed');
 
     showToast(
-      `${personName} marked as ${outcome}. They are now in the Directory.`,
+      outcome === 'Removed'
+        ? `${personName} marked as Removed. They are now moved to archive in Directory.`
+        : `${personName} marked as ${outcome}. They are now in the Directory.`,
       'success',
     );
     navigate('/new-requests');

@@ -1,7 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Menu } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import Sidebar from './Sidebar';
 import { HoverTip } from '../ui';
+import AdminPortalIntro, {
+  markAdminIntroSeen,
+  shouldShowAdminPortalIntro,
+} from '../admin/AdminPortalIntro';
 
 const SIDEBAR_EXPANDED_KEY = 'adminSidebarExpanded';
 
@@ -16,8 +21,35 @@ function readSidebarExpanded() {
 }
 
 export default function AppLayout({ children }) {
+  const { user, profile } = useAuth();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(readSidebarExpanded);
+  const [portalIntro, setPortalIntro] = useState(null);
+  const introCheckedRef = useRef(false);
+
+  const adminDetails = useMemo(() => {
+    const fullName = (profile?.full_name || '').trim();
+    const nameParts = fullName.split(/\s+/).filter(Boolean);
+    return {
+      firstName: nameParts[0] || '',
+      fullName,
+    };
+  }, [profile, user]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setPortalIntro(false);
+      return;
+    }
+    if (introCheckedRef.current) return;
+    introCheckedRef.current = true;
+    setPortalIntro(shouldShowAdminPortalIntro(user.id));
+  }, [user?.id]);
+
+  const handlePortalIntroComplete = () => {
+    if (user?.id) markAdminIntroSeen(user.id);
+    setPortalIntro(false);
+  };
 
   useEffect(() => {
     if (!mobileNavOpen) return undefined;
@@ -48,7 +80,20 @@ export default function AppLayout({ children }) {
   };
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-[var(--color-surface-bg)] text-[var(--color-text-primary)] antialiased font-sans">
+    <>
+      {portalIntro ? (
+        <AdminPortalIntro
+          firstName={adminDetails.firstName}
+          fullName={adminDetails.fullName}
+          onComplete={handlePortalIntroComplete}
+        />
+      ) : null}
+
+      <div
+        className={`h-[100dvh] overflow-hidden bg-[var(--color-surface-bg)] text-[var(--color-text-primary)] antialiased font-sans transition-opacity duration-[600ms] ${
+          portalIntro !== false ? 'pointer-events-none opacity-0' : 'opacity-100'
+        }`}
+      >
       {mobileNavOpen && (
         <button
           type="button"
@@ -92,5 +137,6 @@ export default function AppLayout({ children }) {
         </main>
       </div>
     </div>
+    </>
   );
 }
