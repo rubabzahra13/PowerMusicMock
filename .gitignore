@@ -30,6 +30,9 @@ dist-ssr
 !**/.env.example
 .venv/
 venv/
+.venv-mac/
+backend/.venv-mac/
+.claude/
 backend/.env
 frontend/.env.local
 backend/venv/

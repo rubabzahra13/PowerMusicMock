@@ -84,6 +84,41 @@ def update_partner_name(db: Session, partner_id: str, raw_name: str) -> models.P
     return partner
 
 
+def delete_partner(db: Session, partner_id: str) -> str:
+    partner = get_partner_or_404(db, partner_id)
+
+    inbox_count = (
+        db.query(models.EmailAccount)
+        .filter(models.EmailAccount.partner_id == partner_id)
+        .count()
+    )
+    if inbox_count:
+        raise HTTPException(
+            status_code=409,
+            detail="Disconnect or reassign connected inboxes before deleting this partner.",
+        )
+
+    db.query(models.ManagerAllowedDomain).filter(
+        models.ManagerAllowedDomain.partner_id == partner_id
+    ).delete(synchronize_session=False)
+    db.query(models.AutomatedRosterSource).filter(
+        models.AutomatedRosterSource.partner_id == partner_id
+    ).delete(synchronize_session=False)
+    db.query(models.PartnerCustomForm).filter(
+        models.PartnerCustomForm.partner_id == partner_id
+    ).delete(synchronize_session=False)
+    db.query(models.ManagerRequest).filter(
+        models.ManagerRequest.partner_id == partner_id
+    ).update({models.ManagerRequest.partner_id: None}, synchronize_session=False)
+    db.query(models.DuplicateGroup).filter(
+        models.DuplicateGroup.partner_id == partner_id
+    ).update({models.DuplicateGroup.partner_id: None}, synchronize_session=False)
+
+    db.delete(partner)
+    db.commit()
+    return partner_id
+
+
 def list_manager_domains(db: Session, partner_id: Optional[str] = None) -> List[models.ManagerAllowedDomain]:
     query = db.query(models.ManagerAllowedDomain)
     if partner_id:

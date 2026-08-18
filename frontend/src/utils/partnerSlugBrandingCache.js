@@ -240,11 +240,32 @@ export function readCachedPartnerSlugBranding(slug) {
   );
 }
 
+/**
+ * Merge into the slug branding cache. Only fields explicitly provided are
+ * updated; omitted fields (undefined) keep their existing cached value. Pass an
+ * explicit null to clear a field (e.g. logoDataUrl on remove).
+ */
 export function cachePartnerSlugBranding(slug, branding) {
-  if (!slug || !branding?.partnerName) return;
-  writeStorage(localStorage, slug, branding);
-  writeStorage(sessionStorage, slug, branding);
-  preloadLogo(branding.logoDataUrl ?? null);
+  if (!slug || !branding) return;
+  const existing = readCachedPartnerSlugBranding(slug);
+  const partnerName = branding.partnerName ?? existing?.partnerName;
+  if (!partnerName) return;
+
+  const merged = {
+    partnerName,
+    logoDataUrl:
+      branding.logoDataUrl !== undefined
+        ? branding.logoDataUrl
+        : existing?.logoDataUrl ?? null,
+    allowedDomains:
+      branding.allowedDomains !== undefined
+        ? branding.allowedDomains
+        : existing?.allowedDomains ?? [],
+  };
+
+  writeStorage(localStorage, slug, merged);
+  writeStorage(sessionStorage, slug, merged);
+  preloadLogo(merged.logoDataUrl ?? null);
 }
 
 function brandingFromApiResponse(data) {
@@ -270,6 +291,12 @@ export function prefetchPartnerSlugBranding(slugOrPath) {
     return Promise.resolve(cached);
   }
 
+  return fetchAndCachePartnerSlugBranding(slug);
+}
+
+// Always hits the network and refreshes the cache (deduped per slug).
+function fetchAndCachePartnerSlugBranding(slug) {
+  if (!slug) return Promise.resolve(null);
   if (inflight.has(slug)) return inflight.get(slug);
 
   const promise = getPublicCustomForm(slug)
@@ -296,9 +323,12 @@ export function prefetchPartnerSlugBrandingFromLocation() {
 export function ensurePartnerSlugBranding(slug) {
   if (!slug) return Promise.resolve(null);
   const cached = readCachedPartnerSlugBranding(slug);
-  // Old cache entries only stored name/logo — refetch when domains are missing.
+  // Complete cache entry: return it instantly, but revalidate in the background
+  // so admin edits (e.g. a removed domain) self-heal on the next visit.
   if (cached?.partnerName && cached.allowedDomains?.length) {
+    fetchAndCachePartnerSlugBranding(slug);
     return Promise.resolve(cached);
   }
+  // Old/partial cache entries only stored name/logo — refetch and wait.
   return prefetchPartnerSlugBranding(slug);
 }

@@ -341,19 +341,14 @@ export const updatePartnerCustomForm = (partnerId, payload) =>
     body: JSON.stringify(payload),
   });
 
-export async function uploadPartnerLogo(partnerId, blob) {
-  const form = new FormData();
-  form.append('file', blob, 'avatar.png');
-  const res = await authFetch(`/api/partners/${partnerId}/logo`, {
+export async function uploadPartnerLogo(partnerId, dataUrl) {
+  // Send the image as a base64 data URL in JSON. Vercel's Python serverless
+  // runtime does not reliably deliver multipart/form-data bodies, so a
+  // multipart upload surfaced as "Failed to fetch" in production.
+  return request(`/api/partners/${partnerId}/logo`, {
     method: 'POST',
-    body: form,
-    timeout: ADMIN_TIMEOUT_MS,
+    body: JSON.stringify({ logo_data_url: dataUrl }),
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data?.detail || 'Could not upload logo.');
-  }
-  return data;
 }
 
 export const deletePartnerLogo = (partnerId) =>

@@ -127,13 +127,20 @@ export default function PartnerBrandingProfile({
   if (previewing) {
     return (
       <div className="divide-y divide-[var(--color-border-default)]/70">
-        <div className="px-5 py-6 sm:px-8">
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="px-5 py-5 sm:px-8">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-[var(--color-border-default)]/70 pb-4">
+            <div className="justify-self-start">
+              <ActionButton onClick={onCancelPreview} className="flex-none px-4">
+                Back
+              </ActionButton>
+            </div>
+            <p className="text-sm font-semibold text-[var(--color-text-primary)]">Form preview</p>
+            <div className="justify-self-end" aria-hidden="true" />
+          </div>
+
+          <div className="mb-5 mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-base font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-lg">
-                Form preview
-              </h3>
-              <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              <p className="text-sm text-[var(--color-text-secondary)]">
                 How managers see the {displayName} submission form
               </p>
             </div>
@@ -145,12 +152,6 @@ export default function PartnerBrandingProfile({
             logoDataUrl={logoDataUrl}
             action={previewAction}
           />
-
-          <div className="mt-6 flex justify-end">
-            <ActionButton onClick={onCancelPreview} className="sm:flex-none sm:px-5">
-              Back
-            </ActionButton>
-          </div>
         </div>
       </div>
     );

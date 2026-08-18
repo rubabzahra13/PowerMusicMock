@@ -2,7 +2,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, case, func
 
@@ -55,6 +55,7 @@ from app.partner_allowlists import (
     create_manager_domain,
     delete_automated_source,
     delete_manager_domain,
+    delete_partner,
     get_partner_or_404,
     list_automated_sources,
     list_partners,
@@ -94,7 +95,6 @@ from app.partner_logo_storage import (
     migrate_inline_logo_to_storage,
     resolve_partner_logo,
     storage_enabled,
-    upload_partner_logo_bytes,
     upload_partner_logo_from_data_url,
 )
 
@@ -1425,6 +1425,17 @@ def update_partner_api(
     return update_partner_name(db, partner_id, payload.name)
 
 
+@router.delete("/api/partners/{partner_id}")
+def delete_partner_api(
+    partner_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),
+):
+    delete_partner_logo(partner_id)
+    deleted_id = delete_partner(db, partner_id)
+    return {"deleted": True, "partner_id": deleted_id}
+
+
 @router.delete("/api/admin/automated-sources/{source_id}")
 def admin_delete_automated_source(
     source_id: str,
@@ -1967,12 +1978,15 @@ def get_partner_custom_form(partner_id: str, db: Session = Depends(get_db), admi
 
 
 @router.post("/api/partners/{partner_id}/logo", response_model=schemas.PartnerLogoUploadOut)
-async def upload_partner_logo(
+def upload_partner_logo(
     partner_id: str,
-    file: UploadFile = File(...),
+    payload: schemas.PartnerLogoUploadIn,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
+    # Accept a base64 data URL as JSON rather than multipart/form-data: the
+    # Vercel Python (serverless ASGI) runtime does not reliably deliver
+    # multipart binary bodies, which surfaced as "Failed to fetch" in the client.
     get_partner_or_404(db, partner_id)
     if not storage_enabled():
         raise HTTPException(
@@ -1980,13 +1994,8 @@ async def upload_partner_logo(
             detail="Logo storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
         )
 
-    content = await file.read()
-    content_type = file.content_type or "image/png"
-    if not content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Upload a PNG, JPEG, or WebP image.")
-
     try:
-        logo_url = upload_partner_logo_bytes(partner_id, content, content_type=content_type)
+        logo_url = upload_partner_logo_from_data_url(partner_id, payload.logo_data_url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

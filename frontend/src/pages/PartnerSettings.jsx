@@ -42,7 +42,6 @@ import {
   readInstantPartnerLogoByPartnerId,
   resolvePartnerLogoSrc,
 } from '../utils/partnerSlugBrandingCache';
-import { dataUrlToBlob } from '../utils/cropPartnerLogo';
 
 const MAX_CONNECTED_INBOXES = 7;
 
@@ -307,9 +306,8 @@ export default function PartnerSettings() {
   const [previewAction, setPreviewAction] = useState('Add');
   const [formUrlCopied, setFormUrlCopied] = useState(false);
   const logoInputRef = useRef(null);
-  const pendingLogoBlobRef = useRef(null);
+  const pendingLogoDataUrlRef = useRef(null);
   const pendingLogoRemoveRef = useRef(false);
-  const previewObjectUrlRef = useRef(null);
 
   const connectedAccounts = useMemo(
     () => accounts.filter((account) => account.status === 'Connected'),
@@ -325,6 +323,19 @@ export default function PartnerSettings() {
   const inboxCacheKey = `inboxes:${selectedPartnerId || ''}`;
   const domainsCacheKey = `manager_domains:${selectedPartnerId || ''}`;
   const sourcesCacheKey = `automated_sources:${selectedPartnerId || ''}`;
+
+  // Keep the public signup slug cache's allowed domains in sync with edits made
+  // here so the manager signup page doesn't read a stale allow-list.
+  const syncSlugAllowedDomains = useCallback(
+    (rows) => {
+      if (!selectedPartner?.name) return;
+      cachePartnerSlugBranding(partnerSlugFromName(selectedPartner.name), {
+        partnerName: selectedPartner.name,
+        allowedDomains: (rows || []).map((row) => row.domain).filter(Boolean),
+      });
+    },
+    [selectedPartner?.name],
+  );
 
   const refreshInboxes = useCallback(() => {
     loadWithCache(inboxCacheKey, () => getInboxes(selectedPartnerId || ''), (rows) => {
@@ -424,7 +435,7 @@ export default function PartnerSettings() {
     const name = selectedPartner.name || '';
     setPartnerNameDraft(name);
     profileSnapshotRef.current = { name, logo: logoDataUrl };
-    pendingLogoBlobRef.current = null;
+    pendingLogoDataUrlRef.current = null;
     pendingLogoRemoveRef.current = false;
     setProfilePreviewing(false);
     setProfileEditing(true);
@@ -433,11 +444,7 @@ export default function PartnerSettings() {
   const cancelProfileEdit = () => {
     const { name, logo } = profileSnapshotRef.current;
     setPartnerNameDraft(name);
-    if (previewObjectUrlRef.current) {
-      URL.revokeObjectURL(previewObjectUrlRef.current);
-      previewObjectUrlRef.current = null;
-    }
-    pendingLogoBlobRef.current = null;
+    pendingLogoDataUrlRef.current = null;
     pendingLogoRemoveRef.current = false;
     setLogoDataUrl(logo);
     if (logoInputRef.current) logoInputRef.current.value = '';
@@ -570,6 +577,7 @@ export default function PartnerSettings() {
       setManagerDomains((prev) => {
         const next = [created, ...prev.filter((row) => row.id !== created.id)];
         writeCache(domainsCacheKey, next);
+        syncSlugAllowedDomains(next);
         return next;
       });
       setDomainInput('');
@@ -589,6 +597,7 @@ export default function PartnerSettings() {
       setManagerDomains((prev) => {
         const next = prev.filter((item) => item.id !== row.id);
         writeCache(domainsCacheKey, next);
+        syncSlugAllowedDomains(next);
         return next;
       });
       clearManagerAllowedDomainsCache();
@@ -648,7 +657,7 @@ export default function PartnerSettings() {
     && partnerNameDraft.trim().length > 0;
   const logoDirty =
     profileEditing
-    && (pendingLogoBlobRef.current !== null
+    && (pendingLogoDataUrlRef.current !== null
       || pendingLogoRemoveRef.current
       || logoDataUrl !== profileSnapshotRef.current.logo);
   const profileDirty = partnerDirty || logoDirty;
@@ -695,28 +704,16 @@ export default function PartnerSettings() {
     setLogoCropOpen(true);
   };
 
-  const handleLogoCropConfirm = async (cropped) => {
-    try {
-      pendingLogoRemoveRef.current = false;
-      pendingLogoBlobRef.current = await dataUrlToBlob(cropped);
-      if (previewObjectUrlRef.current) {
-        URL.revokeObjectURL(previewObjectUrlRef.current);
-      }
-      previewObjectUrlRef.current = URL.createObjectURL(pendingLogoBlobRef.current);
-      setLogoDataUrl(previewObjectUrlRef.current);
-      closeLogoCrop();
-    } catch (err) {
-      showToast(err.message || 'Could not prepare logo.', 'error');
-    }
+  const handleLogoCropConfirm = (cropped) => {
+    pendingLogoRemoveRef.current = false;
+    pendingLogoDataUrlRef.current = cropped;
+    setLogoDataUrl(cropped);
+    closeLogoCrop();
   };
 
   const handleRemoveLogo = () => {
-    pendingLogoBlobRef.current = null;
+    pendingLogoDataUrlRef.current = null;
     pendingLogoRemoveRef.current = true;
-    if (previewObjectUrlRef.current) {
-      URL.revokeObjectURL(previewObjectUrlRef.current);
-      previewObjectUrlRef.current = null;
-    }
     setLogoDataUrl(null);
     if (logoInputRef.current) logoInputRef.current.value = '';
     if (selectedPartnerId) cachePartnerLogo(selectedPartnerId, null);
@@ -751,15 +748,11 @@ export default function PartnerSettings() {
         nextLogo = null;
         applyLogoSrc(null);
         pendingLogoRemoveRef.current = false;
-      } else if (pendingLogoBlobRef.current) {
-        const uploaded = await uploadPartnerLogo(selectedPartnerId, pendingLogoBlobRef.current);
+      } else if (pendingLogoDataUrlRef.current) {
+        const uploaded = await uploadPartnerLogo(selectedPartnerId, pendingLogoDataUrlRef.current);
         nextLogo = uploaded.logo_url;
         applyLogoSrc(nextLogo);
-        pendingLogoBlobRef.current = null;
-        if (previewObjectUrlRef.current) {
-          URL.revokeObjectURL(previewObjectUrlRef.current);
-          previewObjectUrlRef.current = null;
-        }
+        pendingLogoDataUrlRef.current = null;
       }
 
       const slug = partnerSlugFromName(nextName);

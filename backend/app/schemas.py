@@ -762,6 +762,10 @@ class PartnerCustomFormIn(BaseModel):
     fields: list = Field(default_factory=list)
 
 
+class PartnerLogoUploadIn(BaseModel):
+    logo_data_url: str
+
+
 class PartnerLogoUploadOut(BaseModel):
     partner_id: str
     logo_url: str
