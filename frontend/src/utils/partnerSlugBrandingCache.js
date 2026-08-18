@@ -296,6 +296,9 @@ export function prefetchPartnerSlugBrandingFromLocation() {
 export function ensurePartnerSlugBranding(slug) {
   if (!slug) return Promise.resolve(null);
   const cached = readCachedPartnerSlugBranding(slug);
-  if (cached) return Promise.resolve(cached);
+  // Old cache entries only stored name/logo — refetch when domains are missing.
+  if (cached?.partnerName && cached.allowedDomains?.length) {
+    return Promise.resolve(cached);
+  }
   return prefetchPartnerSlugBranding(slug);
 }

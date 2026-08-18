@@ -113,7 +113,8 @@ export function resolveManagerAuthAllowedDomains({
 } = {}) {
   if (partnerSlug) {
     if (!partnerAccessReady) return null;
-    return partnerAllowedDomains ?? [];
+    if (partnerAllowedDomains === null) return null;
+    return partnerAllowedDomains;
   }
   return globalAllowedDomains;
 }

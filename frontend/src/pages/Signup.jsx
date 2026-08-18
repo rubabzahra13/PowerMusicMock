@@ -122,7 +122,10 @@ export default function Signup() {
     if (!partnerSlug) return null;
     return readCachedPartnerSlugBranding(partnerSlug)?.allowedDomains ?? null;
   });
-  const [partnerAccessReady, setPartnerAccessReady] = useState(true);
+  const [partnerAccessReady, setPartnerAccessReady] = useState(() => {
+    if (!partnerSlug) return true;
+    return Boolean(readCachedPartnerSlugBranding(partnerSlug)?.allowedDomains?.length);
+  });
   const [sessionBranding, setSessionBranding] = useState(() => readCachedManagerPortalBranding());
   const [sessionBrandingReady, setSessionBrandingReady] = useState(() =>
     Boolean(readCachedManagerPortalBranding()?.partnerName),
@@ -190,21 +193,28 @@ export default function Signup() {
     }
 
     let active = true;
-    setPartnerAccessReady(true);
+    setPartnerAccessReady(false);
 
     ensurePartnerSlugBranding(partnerSlug).then((branding) => {
-      if (!active || !branding) {
-        if (active) setPartnerAccessReady(true);
+      if (!active) return;
+      if (!branding) {
+        setPartnerAllowedDomains([]);
+        setPartnerAccessReady(true);
         return;
       }
       setSlugBranding((prev) => ({
         partnerName: branding.partnerName || prev?.partnerName,
         logoDataUrl: branding.logoDataUrl ?? prev?.logoDataUrl ?? null,
       }));
-      if (branding.allowedDomains?.length) {
-        setPartnerAllowedDomains(branding.allowedDomains);
-      }
+      setPartnerAllowedDomains(
+        Array.isArray(branding.allowedDomains) ? branding.allowedDomains : [],
+      );
       setPartnerAccessReady(true);
+    }).catch(() => {
+      if (active) {
+        setPartnerAllowedDomains([]);
+        setPartnerAccessReady(true);
+      }
     });
 
     return () => {
