@@ -509,8 +509,8 @@ export default function Signup() {
         replace: true,
         state: { prefilledEmail: emailResult.value, mode: intendedMode },
       });
-    } catch {
-      setErrorMsg('No partner portal is configured for this email domain.');
+    } catch (err) {
+      setErrorMsg(err?.message || 'No partner portal is configured for this email domain.');
     } finally {
       setEmailGateLoading(false);
     }

@@ -1079,7 +1079,7 @@ def check_person_duplicate(
         first_name=p_first,
         last_name=p_last,
         location=p_location,
-        partner_id=partner_id,
+        partner_id=resolved_partner_id,
     )
     if match:
         return _duplicate_response(match)
@@ -1114,7 +1114,7 @@ def match_person_candidates(
         first_name=p_first,
         last_name=p_last,
         location=p_location,
-        partner_id=partner_id,
+        partner_id=resolved_partner_id,
         limit=capped,
     )
 
@@ -1263,9 +1263,9 @@ def manager_person_directory(
     if outcome not in {"Added", "Removed"}:
         raise HTTPException(status_code=422, detail="outcome must be Added or Removed")
     if outcome == "Removed":
-        rows = removed_snapshot_rows(db, limit=1000, partner_id=partner_id)
+        rows = removed_snapshot_rows(db, limit=1000, partner_id=resolved_partner_id)
     else:
-        rows = roster_snapshot_rows(db, limit=1000, partner_id=partner_id)
+        rows = roster_snapshot_rows(db, limit=1000, partner_id=resolved_partner_id)
     return [_person_search_row(row) for row in rows]
 
 
@@ -1287,7 +1287,7 @@ def search_persons_for_manager(
         return []
 
     capped = min(max(limit, 1), 25)
-    people = _search_people(db, query, limit=capped, partner_id=partner_id)
+    people = _search_people(db, query, limit=capped, partner_id=resolved_partner_id)
     return [_person_search_row(person) for person in people]
 
 
@@ -1312,7 +1312,12 @@ def public_partner_branding(
         raise HTTPException(status_code=400, detail="Enter a valid email address.")
     try:
         resolved_partner_id = resolve_partner_for_manager_email(db, addr, partner_id=partner_id)
-    except HTTPException:
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            raise HTTPException(
+                status_code=409,
+                detail="This email domain is associated with multiple partners. Please use your partner's specific submission URL (e.g. /healthtech/submit).",
+            )
         resolved_partner_id = None
     if not resolved_partner_id:
         raise HTTPException(status_code=404, detail="No partner found for this email domain.")
@@ -1326,6 +1331,7 @@ def public_partner_branding(
         migrate_inline_logo_to_storage(db, form)
     logo = resolve_partner_logo(form)
     return {
+        "partnerId": partner.id,
         "partnerName": partner.name,
         "logoUrl": logo,
         "logoDataUrl": logo,
@@ -1962,6 +1968,7 @@ def manager_partner_branding(
         migrate_inline_logo_to_storage(db, form)
     logo = resolve_partner_logo(form)
     return {
+        "partnerId": partner.id,
         "partnerName": partner.name,
         "logoUrl": logo,
         "logoDataUrl": logo,

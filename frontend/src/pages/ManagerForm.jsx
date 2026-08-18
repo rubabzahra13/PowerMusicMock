@@ -548,6 +548,7 @@ export default function ManagerForm() {
         normalizedPeople.length === 1
           ? {
               submittedBy: managerDetails,
+              partnerId: partnerBranding?.partnerId || undefined,
               person: {
                 firstName: normalizedPeople[0].firstName,
                 lastName: normalizedPeople[0].lastName,
@@ -559,6 +560,7 @@ export default function ManagerForm() {
             }
           : {
               submittedBy: managerDetails,
+              partnerId: partnerBranding?.partnerId || undefined,
               people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
                 firstName,
                 lastName,
