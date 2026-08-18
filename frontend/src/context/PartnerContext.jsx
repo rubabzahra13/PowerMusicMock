@@ -6,10 +6,13 @@ import {
   getPartners,
   loadWithCache,
   updatePartner as updatePartnerApi,
+  writeCache,
 } from '../utils/pilot2Api';
 import {
   buildPartnerLogosSync,
   cachePartnerLogo,
+  partnerCustomFormCacheKey,
+  resolvePartnerLogoSrc,
 } from '../utils/partnerSlugBrandingCache';
 import { useAuth } from './AuthContext';
 
@@ -125,8 +128,11 @@ export function PartnerProvider({ children }) {
       missing.map(async (partner) => {
         try {
           const form = await getPartnerCustomForm(partner.id);
-          const logo = resolvePartnerLogoSrc(form?.logo_url, form?.logo_data_url) ?? null;
-          if (logo) cachePartnerLogo(partner.id, logo);
+          const logo = resolvePartnerLogoSrc(form?.logo_url, form?.logo_data_url);
+          if (logo) {
+            cachePartnerLogo(partner.id, logo);
+            writeCache(partnerCustomFormCacheKey(partner.id), form);
+          }
           return logo ? { id: partner.id, logo } : null;
         } catch {
           return null;
