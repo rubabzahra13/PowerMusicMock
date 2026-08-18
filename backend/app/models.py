@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, String, Text, Integer
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, String, Text, Integer, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -433,10 +433,13 @@ class ManagerAllowedDomain(Base):
     """Email domain allowed for manager portal login / signup / submit."""
 
     __tablename__ = "manager_allowed_domains"
+    __table_args__ = (
+        UniqueConstraint("partner_id", "domain", name="uq_manager_partner_domain"),
+    )
 
     id = Column(String, primary_key=True)
     partner_id = Column(String, ForeignKey("partners.id"), nullable=True, index=True)
-    domain = Column(String, nullable=False, unique=True)
+    domain = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 
@@ -444,6 +447,9 @@ class AutomatedRosterSource(Base):
     """Sender email or domain allowed to trigger automated add/remove intake."""
 
     __tablename__ = "automated_roster_sources"
+    __table_args__ = (
+        UniqueConstraint("partner_id", "kind", "pattern", name="uq_automated_roster_sources_partner_kind_pattern"),
+    )
 
     id = Column(String, primary_key=True)
     partner_id = Column(String, ForeignKey("partners.id"), nullable=True, index=True)

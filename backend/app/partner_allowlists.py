@@ -127,7 +127,7 @@ def list_manager_domains(db: Session, partner_id: Optional[str] = None) -> List[
 
 
 def list_manager_domain_strings(db: Session, partner_id: Optional[str] = None) -> List[str]:
-    return [row.domain for row in list_manager_domains(db, partner_id=partner_id)]
+    return list(dict.fromkeys(row.domain for row in list_manager_domains(db, partner_id=partner_id)))
 
 
 def email_matches_manager_domains(email: str, domains: Sequence[str]) -> bool:
@@ -137,27 +137,41 @@ def email_matches_manager_domains(email: str, domains: Sequence[str]) -> bool:
     return any(addr.endswith(f"@{domain.lower().lstrip('@')}") for domain in domains)
 
 
-def resolve_partner_for_manager_email(db: Session, email: str) -> Optional[str]:
+def resolve_partner_for_manager_email(
+    db: Session,
+    email: str,
+    partner_id: Optional[str] = None,
+) -> Optional[str]:
     addr = (email or "").strip().lower()
     if not addr or "@" not in addr:
         return None
     domain = addr.rsplit("@", 1)[1]
-    rows = (
+    query = (
         db.query(models.ManagerAllowedDomain)
         .filter(models.ManagerAllowedDomain.domain == domain)
-        .all()
     )
+    if partner_id:
+        query = query.filter(models.ManagerAllowedDomain.partner_id == partner_id)
+    rows = query.all()
     partner_ids = {row.partner_id for row in rows if row.partner_id}
+    if partner_id:
+        return partner_id if partner_id in partner_ids else None
+    if len(partner_ids) == 1:
+        return next(iter(partner_ids))
     if len(partner_ids) > 1:
         raise HTTPException(
             status_code=409,
             detail=f"Allowed domain @{domain} belongs to multiple partners. Resolve this configuration conflict.",
         )
-    return next(iter(partner_ids), None)
+    return None
 
 
-def assert_manager_email_allowed(db: Session, email: str) -> str:
-    domains = list_manager_domain_strings(db)
+def assert_manager_email_allowed(
+    db: Session,
+    email: str,
+    partner_id: Optional[str] = None,
+) -> str:
+    domains = list_manager_domain_strings(db, partner_id=partner_id)
     if not domains:
         raise HTTPException(
             status_code=403,
@@ -169,13 +183,13 @@ def assert_manager_email_allowed(db: Session, email: str) -> str:
             status_code=403,
             detail=f"Manager accounts must use an allowed partner domain ({labels}).",
         )
-    partner_id = resolve_partner_for_manager_email(db, email)
-    if partner_id is None:
+    resolved_partner_id = resolve_partner_for_manager_email(db, email, partner_id=partner_id)
+    if resolved_partner_id is None:
         raise HTTPException(
             status_code=409,
             detail="Manager domain is allowed but is not assigned to a partner.",
         )
-    return partner_id
+    return resolved_partner_id
 
 
 def create_manager_domain(db: Session, raw: str, partner_id: str) -> models.ManagerAllowedDomain:
@@ -186,11 +200,14 @@ def create_manager_domain(db: Session, raw: str, partner_id: str) -> models.Mana
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     existing = (
         db.query(models.ManagerAllowedDomain)
-        .filter(models.ManagerAllowedDomain.domain == domain)
+        .filter(
+            models.ManagerAllowedDomain.partner_id == partner_id,
+            models.ManagerAllowedDomain.domain == domain,
+        )
         .first()
     )
     if existing:
-        raise HTTPException(status_code=409, detail="That domain is already allowed.")
+        raise HTTPException(status_code=409, detail="That domain is already allowed for this partner.")
     row = models.ManagerAllowedDomain(
         id=next_id(db, models.ManagerAllowedDomain, "mad"),
         partner_id=partner_id,
@@ -288,13 +305,14 @@ def create_automated_source(db: Session, raw: str, partner_id: str) -> models.Au
     existing = (
         db.query(models.AutomatedRosterSource)
         .filter(
+            models.AutomatedRosterSource.partner_id == partner_id,
             models.AutomatedRosterSource.kind == kind,
             models.AutomatedRosterSource.pattern == pattern,
         )
         .first()
     )
     if existing:
-        raise HTTPException(status_code=409, detail="That sender is already allowed.")
+        raise HTTPException(status_code=409, detail="That sender is already allowed for this partner.")
 
     row = models.AutomatedRosterSource(
         id=next_id(db, models.AutomatedRosterSource, "ars"),

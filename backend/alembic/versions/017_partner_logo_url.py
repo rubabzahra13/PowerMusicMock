@@ -17,8 +17,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("partner_custom_forms", sa.Column("logo_url", sa.Text(), nullable=True))
+    op.execute(sa.text("ALTER TABLE partner_custom_forms ADD COLUMN IF NOT EXISTS logo_url TEXT"))
 
 
 def downgrade() -> None:
-    op.drop_column("partner_custom_forms", "logo_url")
+    op.execute(sa.text("ALTER TABLE partner_custom_forms DROP COLUMN IF EXISTS logo_url"))

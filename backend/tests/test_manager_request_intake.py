@@ -312,6 +312,4 @@ class TestManagerRequestIntake:
         )
         db.flush()
 
-        assert TAG_ALREADY_EXISTS not in row.tags
-        from app.manager_request_tags import TAG_POTENTIAL_DUPLICATE
-        assert TAG_POTENTIAL_DUPLICATE in row.tags
+        assert TAG_ALREADY_EXISTS in row.tags

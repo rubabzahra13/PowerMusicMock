@@ -250,11 +250,11 @@ def _search_people(
     return search_roster_rows(db, query, limit=limit, partner_id=partner_id)
 
 
-def _manager_partner_id(db: Session, manager_email: str) -> str:
-    partner_id = resolve_partner_for_manager_email(db, manager_email)
-    if not partner_id:
+def _manager_partner_id(db: Session, manager_email: str, partner_id: Optional[str] = None) -> str:
+    resolved_id = resolve_partner_for_manager_email(db, manager_email, partner_id=partner_id)
+    if not resolved_id:
         raise HTTPException(status_code=409, detail="Manager account is not assigned to a partner.")
-    return partner_id
+    return resolved_id
 
 @router.get("/api/requests", response_model=List[schemas.RequestOut])
 def get_requests(db: Session = Depends(get_db), _admin=Depends(require_admin)):
@@ -637,14 +637,19 @@ def get_activity(db: Session = Depends(get_db), _admin=Depends(require_admin)):
     return list_partner_activity(db, limit=10)
 
 
-def _assert_manager_submitter(submitted_by: schemas.SubmittedBy, manager, db: Session) -> str:
+def _assert_manager_submitter(
+    submitted_by: schemas.SubmittedBy,
+    manager,
+    db: Session,
+    partner_id: Optional[str] = None,
+) -> str:
     sub_email = (submitted_by.email or "").strip()
     if auth_is_required() and sub_email.lower() != manager.email.lower():
         raise HTTPException(
             status_code=403,
             detail="Submitter email must match your signed-in account.",
         )
-    return assert_manager_email_allowed(db, sub_email or manager.email)
+    return assert_manager_email_allowed(db, sub_email or manager.email, partner_id=partner_id)
 
 
 def _manager_id_for_submitter(
@@ -687,7 +692,7 @@ def create_request(
     db: Session = Depends(get_db),
     manager=Depends(_limit_submit),
 ):
-    partner_id = _assert_manager_submitter(req_in.submittedBy, manager, db)
+    partner_id = _assert_manager_submitter(req_in.submittedBy, manager, db, partner_id=req_in.partnerId)
 
     new_request = _create_manager_request_row(
         db,
@@ -718,7 +723,7 @@ def create_requests_batch(
     db: Session = Depends(get_db),
     manager=Depends(_limit_submit),
 ):
-    partner_id = _assert_manager_submitter(req_in.submittedBy, manager, db)
+    partner_id = _assert_manager_submitter(req_in.submittedBy, manager, db, partner_id=req_in.partnerId)
     req_in = req_in.model_copy(update={"partnerId": partner_id})
 
     job = enqueue_manager_batch(db, manager_id=manager.id, req_in=req_in)
@@ -1054,11 +1059,12 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
 @router.post("/api/persons/check-duplicate", response_model=schemas.DuplicateCheckOut)
 def check_person_duplicate(
     payload: schemas.DuplicateCheckIn,
+    partner_id: Optional[str] = None,
     db: Session = Depends(get_db),
     manager=Depends(_limit_duplicate),
 ):
     """Manager-portal helper — match by email, name, or name + location."""
-    partner_id = _manager_partner_id(db, manager.email)
+    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=payload.partnerId or partner_id)
     p_email = (payload.email or "").strip().lower()
     p_first = (payload.firstName or "").strip().lower()
     p_last = (payload.lastName or "").strip().lower()
@@ -1086,12 +1092,13 @@ def check_person_duplicate(
 )
 def match_person_candidates(
     payload: schemas.DuplicateCheckIn,
+    partner_id: Optional[str] = None,
     limit: int = 10,
     db: Session = Depends(get_db),
     manager=Depends(_limit_match),
 ):
     """All directory rows that share any person-form field (or field + location)."""
-    partner_id = _manager_partner_id(db, manager.email)
+    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=payload.partnerId or partner_id)
     p_email = (payload.email or "").strip().lower()
     p_first = (payload.firstName or "").strip().lower()
     p_last = (payload.lastName or "").strip().lower()
@@ -1247,11 +1254,12 @@ def mark_all_manager_requests_seen(
 @router.get("/api/manager/persons/directory", response_model=List[schemas.PersonSearchOut])
 def manager_person_directory(
     outcome: str = "Added",
+    partner_id: Optional[str] = None,
     db: Session = Depends(get_db),
     manager=Depends(_limit_directory),
 ):
     """Roster snapshot for instant client-side search (load in background)."""
-    partner_id = _manager_partner_id(db, manager.email)
+    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=partner_id)
     if outcome not in {"Added", "Removed"}:
         raise HTTPException(status_code=422, detail="outcome must be Added or Removed")
     if outcome == "Removed":
@@ -1264,12 +1272,13 @@ def manager_person_directory(
 @router.get("/api/manager/persons/search", response_model=List[schemas.PersonSearchOut])
 def search_persons_for_manager(
     q: str = "",
+    partner_id: Optional[str] = None,
     limit: int = 25,
     db: Session = Depends(get_db),
     manager=Depends(_limit_search),
 ):
     """Scoped search for the manager submit form — name, email, or location."""
-    partner_id = _manager_partner_id(db, manager.email)
+    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=partner_id)
     try:
         query = normalize_search_query(q, max_length=100).lower()
     except ValueError as exc:
@@ -1292,21 +1301,25 @@ def public_manager_allowed_domains(db: Session = Depends(get_db)):
 
 
 @router.get("/api/public/partner-branding")
-def public_partner_branding(email: str = "", db: Session = Depends(get_db)):
+def public_partner_branding(
+    email: str = "",
+    partner_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     """Resolve partner name/logo from a manager email domain (sign-in page branding)."""
     addr = (email or "").strip().lower()
     if not addr or "@" not in addr:
         raise HTTPException(status_code=400, detail="Enter a valid email address.")
     try:
-        partner_id = resolve_partner_for_manager_email(db, addr)
+        resolved_partner_id = resolve_partner_for_manager_email(db, addr, partner_id=partner_id)
     except HTTPException:
-        partner_id = None
-    if not partner_id:
+        resolved_partner_id = None
+    if not resolved_partner_id:
         raise HTTPException(status_code=404, detail="No partner found for this email domain.")
-    partner = get_partner_or_404(db, partner_id)
+    partner = get_partner_or_404(db, resolved_partner_id)
     form = (
         db.query(models.PartnerCustomForm)
-        .filter(models.PartnerCustomForm.partner_id == partner_id)
+        .filter(models.PartnerCustomForm.partner_id == resolved_partner_id)
         .first()
     )
     if form:
@@ -1933,15 +1946,16 @@ def resolve_group_mark_removed_api(
 
 @router.get("/api/manager/partner-branding")
 def manager_partner_branding(
+    partner_id: Optional[str] = None,
     db: Session = Depends(get_db),
     manager=Depends(require_manager),
 ):
     """Partner name and optional logo for the signed-in manager's submission form."""
-    partner_id = _manager_partner_id(db, manager.email)
-    partner = get_partner_or_404(db, partner_id)
+    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=partner_id)
+    partner = get_partner_or_404(db, resolved_partner_id)
     form = (
         db.query(models.PartnerCustomForm)
-        .filter(models.PartnerCustomForm.partner_id == partner_id)
+        .filter(models.PartnerCustomForm.partner_id == resolved_partner_id)
         .first()
     )
     if form:
