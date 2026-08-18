@@ -269,6 +269,9 @@ export default function Signup() {
     if (location.state?.mode === 'signin') {
       setMode('signin');
       navigate(location.pathname, { replace: true, state: {} });
+    } else if (location.state?.mode === 'signup') {
+      setMode('signup');
+      navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.pathname, location.state, navigate]);
 
@@ -472,8 +475,7 @@ export default function Signup() {
     switchMode('signin');
   };
 
-  const handleEmailGateSubmit = async (e) => {
-    e.preventDefault();
+  const submitEmailGate = async (intendedMode) => {
     setErrorMsg('');
 
     if (!emailGateEmail.trim()) {
@@ -505,7 +507,7 @@ export default function Signup() {
       }
       navigate(managerAuthSignupPath(slug), {
         replace: true,
-        state: { prefilledEmail: emailResult.value },
+        state: { prefilledEmail: emailResult.value, mode: intendedMode },
       });
     } catch {
       setErrorMsg('No partner portal is configured for this email domain.');
@@ -513,6 +515,13 @@ export default function Signup() {
       setEmailGateLoading(false);
     }
   };
+
+  const handleEmailGateSubmit = (e) => {
+    e.preventDefault();
+    submitEmailGate('signin');
+  };
+
+  const handleEmailGateCreate = () => submitEmailGate('signup');
 
   const showVerifyScreen = (email, { resent = false } = {}) => {
     setOtpCooldown(email);
@@ -813,6 +822,18 @@ export default function Signup() {
             )}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-sm text-[var(--color-text-secondary)]">
+          New to the portal?{' '}
+          <button
+            type="button"
+            onClick={handleEmailGateCreate}
+            disabled={emailGateLoading || (appConfig.enforceDomainCheck && !domainsReady)}
+            className="font-medium text-[var(--color-brand-accent)] hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Create account
+          </button>
+        </p>
       </ManagerAuthShell>
     );
   }

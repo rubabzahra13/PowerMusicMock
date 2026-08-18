@@ -329,6 +329,8 @@ export function ensurePartnerSlugBranding(slug) {
     fetchAndCachePartnerSlugBranding(slug);
     return Promise.resolve(cached);
   }
-  // Old/partial cache entries only stored name/logo — refetch and wait.
-  return prefetchPartnerSlugBranding(slug);
+  // Missing/empty domains (old or clobbered cache entries): always hit the
+  // network and wait. Do NOT fall back to prefetch here — prefetch returns the
+  // stale cached entry first, which would keep the empty domain list.
+  return fetchAndCachePartnerSlugBranding(slug);
 }

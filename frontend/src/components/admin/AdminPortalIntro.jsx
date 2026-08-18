@@ -7,19 +7,18 @@ const FADE_MS = 700;
 const brandMarkBoxClass =
   'flex h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/15 bg-white shadow-lg sm:h-16 sm:w-16';
 
+const DEFAULT_ADMIN_NAME = 'Andrea';
+
 function displayAdminWelcomeName(firstName, fullName) {
   const parts = (fullName || '').trim().split(/\s+/).filter(Boolean);
   const candidate = (firstName || parts[0] || '').trim();
 
-  if (parts.length > 1 && parts[parts.length - 1].toLowerCase() === 'admin') {
-    return parts[parts.length - 1];
-  }
-
-  if (candidate && !/^power$/i.test(candidate)) {
+  // Treat generic account labels as non-personal so we greet the admin by name.
+  if (candidate && !/^(power|admin)$/i.test(candidate)) {
     return candidate;
   }
 
-  return 'Admin';
+  return DEFAULT_ADMIN_NAME;
 }
 
 /**
