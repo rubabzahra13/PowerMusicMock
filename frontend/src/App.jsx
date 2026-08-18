@@ -14,6 +14,7 @@ import PartnerSettings from './pages/PartnerSettings';
 import AdminLogin from './pages/AdminLogin';
 import Signup from './pages/Signup';
 import AuthCallback from './pages/AuthCallback';
+import PartnerSubmitEntry from './pages/PartnerSubmitEntry';
 
 /** Admin pages that use the persistent sidebar shell. */
 function AdminShellLayout() {
@@ -35,6 +36,7 @@ export default function App() {
 
             <Route element={<ManagerGuestRoute />}>
               <Route path="/submit/signup" element={<Signup />} />
+              <Route path="/:partner/submit/signup" element={<Signup />} />
             </Route>
 
             {/* Legacy paths → canonical manager auth URL */}
@@ -45,6 +47,9 @@ export default function App() {
             <Route element={<ManagerRoute />}>
               <Route path="/submit" element={<ManagerForm />} />
             </Route>
+
+            {/* Partner-branded manager portal entry (shareable link per partner) */}
+            <Route path="/:partner/submit" element={<PartnerSubmitEntry />} />
 
             <Route element={<AdminRoute />}>
               <Route element={<AdminShellLayout />}>

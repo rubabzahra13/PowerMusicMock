@@ -57,19 +57,19 @@ const formCardClass =
 
 const workspaceShellClass = 'mx-auto w-full max-w-[1520px]';
 
-const workspaceOuterClass = 'flex flex-1 flex-col p-4 sm:p-5';
+const workspaceOuterClass = 'flex min-h-0 flex-1 flex-col overflow-hidden p-4 sm:p-5';
 
 const workspaceSplitClass =
   'flex min-h-0 flex-1 flex-col gap-5 sm:gap-6 lg:flex-row lg:items-stretch lg:gap-6';
 
 const workspaceFormColumnClass =
-  'flex min-h-full min-w-0 flex-1 flex-col rounded-xl border border-[var(--color-manager-border)] bg-white p-4 sm:p-5';
+  'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--color-manager-border)] bg-white p-4 sm:p-5';
 
 const workspaceDirectoryColumnClass =
-  'flex min-h-full min-w-0 flex-col rounded-xl border border-[var(--color-manager-border-strong)] bg-[var(--color-manager-directory)] p-5 sm:p-6 lg:w-[44%] xl:w-[42%] lg:min-w-[420px] lg:max-w-[620px]';
+  'flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--color-manager-border-strong)] bg-[var(--color-manager-directory)] p-5 sm:p-6 lg:w-[44%] xl:w-[42%] lg:min-w-[420px] lg:max-w-[620px]';
 
 const directorySectionClass =
-  'flex min-h-0 flex-1 flex-col gap-5 sm:gap-6 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto';
+  'flex min-h-0 flex-1 flex-col gap-5 overflow-hidden sm:gap-6';
 
 const directorySearchInputClass =
   'w-full h-11 rounded-xl border border-[var(--color-manager-border-strong)] bg-white px-3.5 pl-10 text-sm text-[var(--color-text-primary)] shadow-[0_1px_3px_rgba(26,26,46,0.05)] placeholder:text-[var(--color-text-muted)] transition-[border-color,box-shadow] focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/15 disabled:cursor-not-allowed disabled:bg-[var(--color-manager-panel)]';
@@ -236,11 +236,10 @@ export default function ManagerForm() {
   const { totalBadgeCount, ...requestPortal } =
     useManagerRequestPortal(requestRefreshToken, requestsOpen);
 
-  useEffect(() => {
-    if (requestsOpen) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  }, [requestsOpen]);
+  const closeRequestHistory = () => {
+    requestPortal.closeHistory();
+    setRequestsOpen(false);
+  };
 
   const managerDetails = useMemo(() => {
     const nameParts = (profile?.full_name || '').trim().split(/\s+/).filter(Boolean);
@@ -746,7 +745,7 @@ export default function ManagerForm() {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-[var(--color-manager-canvas)] font-sans antialiased">
+    <div className="relative flex h-[100dvh] flex-col overflow-hidden bg-[var(--color-manager-canvas)] font-sans antialiased">
       <div
         className="pointer-events-none fixed inset-x-0 top-0 z-0 h-72 bg-gradient-to-b from-[var(--color-manager-hero-from)]/20 via-[var(--color-manager-canvas-deep)]/40 to-transparent"
         aria-hidden="true"
@@ -762,7 +761,7 @@ export default function ManagerForm() {
       ) : null}
 
       <div
-        className={`flex min-h-screen flex-1 flex-col transition-opacity duration-[600ms] ${
+        className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-opacity duration-[600ms] ${
           portalIntro ? 'pointer-events-none opacity-0' : 'opacity-100'
         }`}
       >
@@ -786,39 +785,47 @@ export default function ManagerForm() {
         signingOut={signingOut}
       />
 
-      {!requestsOpen ? (
-        <ManagerPortalHero
-          firstName={managerDetails.firstName}
-          email={managerDetails.email}
-          partnerName={partnerBranding?.partnerName}
-          clubLocation={managerDetails.club}
-          pendingCount={requestPortal.pendingCount}
-          handledCount={Math.max(0, (requestPortal.summaryTotal || 0) - (requestPortal.pendingCount || 0))}
-          badgeCount={totalBadgeCount}
-          loading={requestPortal.summaryPending}
-          onOpenRequests={() => setRequestsOpen(true)}
-        />
-      ) : null}
+      <ManagerPortalHero
+        firstName={managerDetails.firstName}
+        email={managerDetails.email}
+        partnerName={partnerBranding?.partnerName}
+        clubLocation={managerDetails.club}
+        pendingCount={requestPortal.pendingCount}
+        handledCount={Math.max(0, (requestPortal.summaryTotal || 0) - (requestPortal.pendingCount || 0))}
+        totalCount={requestPortal.summaryTotal || 0}
+        badgeCount={totalBadgeCount}
+        loading={requestPortal.summaryPending}
+        onOpenRequests={() => setRequestsOpen(true)}
+      />
 
-      <main className="relative z-[1] mx-auto flex w-full max-w-[1520px] flex-1 flex-col gap-4 p-4 sm:gap-6 sm:p-6 md:p-8">
-        {requestsOpen ? (
-          <ManagerRequestHistoryPanel
-            onBack={() => {
-              requestPortal.closeHistory();
-              setRequestsOpen(false);
-            }}
-            requests={requestPortal.requests}
-            pendingUnseenCount={requestPortal.pendingUnseenCount}
-            loading={requestPortal.listLoading}
-            error={requestPortal.historyError}
-            highlightVersion={requestPortal.highlightVersion}
-            onHighlightChange={requestPortal.bumpHighlights}
-          />
-        ) : flowStep === 'choose' && !submitted ? (
+      <main className="relative z-[1] mx-auto flex min-h-0 w-full max-w-[1520px] flex-1 flex-col gap-3 overflow-hidden p-4 sm:gap-4 sm:p-5 md:p-6">
+        {flowStep === 'choose' && !submitted && !requestsOpen ? (
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <ManagerRequestChoice onSelect={handleSelectRequestType} />
+          </div>
         ) : (
-        <div className={`${workspaceShellClass} flex flex-1 flex-col`}>
-          {submitted ? (
+        <div className={`${workspaceShellClass} flex min-h-0 flex-1 flex-col overflow-hidden`}>
+          {requestsOpen ? (
+            <div
+              className={`${formCardClass} relative flex min-h-0 flex-1 flex-col overflow-hidden`}
+            >
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-gradient-to-r from-[var(--color-brand-accent)] via-[var(--color-brand-secondary)] to-[var(--color-brand-accent)]"
+                aria-hidden="true"
+              />
+              <ManagerRequestHistoryPanel
+                embedded
+                backLabel={flowStep === 'form' ? 'Back to form' : 'Back'}
+                onBack={closeRequestHistory}
+                requests={requestPortal.requests}
+                pendingUnseenCount={requestPortal.pendingUnseenCount}
+                loading={requestPortal.listLoading}
+                error={requestPortal.historyError}
+                highlightVersion={requestPortal.highlightVersion}
+                onHighlightChange={requestPortal.bumpHighlights}
+              />
+            </div>
+          ) : submitted ? (
             <div
               className={`${formCardClass} flex flex-1 flex-col items-center justify-center p-6 text-center sm:p-10`}
             >
@@ -846,7 +853,7 @@ export default function ManagerForm() {
             <form
               id="manager-request-form"
               onSubmit={handleSubmit}
-              className={`${formCardClass} relative flex min-h-[calc(100dvh-12rem)] flex-1 flex-col`}
+              className={`${formCardClass} relative flex min-h-0 flex-1 flex-col overflow-hidden`}
             >
               <div
                 className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-gradient-to-r from-[var(--color-brand-accent)] via-[var(--color-brand-secondary)] to-[var(--color-brand-accent)]"
@@ -865,7 +872,7 @@ export default function ManagerForm() {
 
                 <div className={`${workspaceSplitClass} mt-3 sm:mt-4`}>
                 <div className={workspaceFormColumnClass}>
-              <h1 className="text-base font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-lg">
+              <h1 className="shrink-0 text-base font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-lg">
                 {action === 'Add'
                   ? multipleUsers
                     ? 'Add users'
@@ -874,7 +881,8 @@ export default function ManagerForm() {
                     ? 'Remove users'
                     : 'Remove a user'}
               </h1>
-              <div className="mt-4 space-y-5 sm:mt-5 sm:space-y-6">
+              <div className="mt-4 flex min-h-0 flex-1 flex-col sm:mt-5">
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain sm:space-y-6">
               <FormSection title="Manager details">
                 <p className="-mt-1 text-[11px] text-[var(--color-text-secondary)]">
                   Taken from your signed-in account and cannot be changed here.
@@ -1134,9 +1142,10 @@ export default function ManagerForm() {
                   </button>
                 )}
               </FormSection>
+              </div>
 
               <div
-                className={`flex flex-col gap-3 border-t border-[var(--color-manager-border)] pt-5 sm:flex-row sm:items-center ${
+                className={`mt-5 flex shrink-0 flex-col gap-3 border-t border-[var(--color-manager-border)] pt-5 sm:flex-row sm:items-center ${
                   isFormValid ? 'sm:justify-end' : 'sm:justify-between'
                 }`}
               >
@@ -1165,7 +1174,7 @@ export default function ManagerForm() {
                   )}
                 </button>
               </div>
-                </div>
+              </div>
                 </div>
 
               {!submitted ? (
@@ -1175,6 +1184,7 @@ export default function ManagerForm() {
                   className={workspaceDirectoryColumnClass}
                 >
                 <section className={directorySectionClass}>
+                  <div className="shrink-0 space-y-5 sm:space-y-6">
                   <div>
                     <p className={directorySectionTitleClass} id="directory-search-heading">
                       {isRemoveAction ? 'Check removed users' : 'Check directory'}
@@ -1213,7 +1223,9 @@ export default function ManagerForm() {
                   {searchQueryHint}
                   </p>
                   )}
+                  </div>
 
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   <div className={`${directoryResultsClass} sm:hidden`}>
                   {!showDirectoryResults && !showInitialDirectoryLoading && !isSearchTooBroad && (
                   <p className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
@@ -1443,9 +1455,10 @@ export default function ManagerForm() {
                   </table>
                   </div>
                   </div>
+                  </div>
 
                   {showDirectoryResults && !directoryError && (
-                  <p className="text-[11px] text-[var(--color-text-muted)]">
+                  <p className="shrink-0 text-[11px] text-[var(--color-text-muted)]">
                   {displayResults.length === 0
                   ? 'No results to show yet.'
                   : `${displayResults.length} result${displayResults.length === 1 ? '' : 's'}`}
@@ -1460,10 +1473,10 @@ export default function ManagerForm() {
                   )}
 
                   {directoryError && displayResults.length > 0 && (
-                  <p className="text-[11px] text-red-600">{directoryError}</p>
+                  <p className="shrink-0 text-[11px] text-red-600">{directoryError}</p>
                   )}
 
-                  <p className="text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                  <p className="shrink-0 text-xs leading-relaxed text-[var(--color-text-secondary)]">
                   {directoryFooterText}
                   </p>
                 </section>

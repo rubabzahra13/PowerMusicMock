@@ -15,7 +15,7 @@ function displayFirstName(firstName, email) {
 }
 
 const requestsCardClass =
-  'flex shrink-0 flex-col rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.2)] backdrop-blur-md sm:px-5 sm:py-3.5';
+  'flex shrink-0 flex-col rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.2)] backdrop-blur-md sm:px-5 sm:py-3';
 
 /**
  * Personalized portal hero — bridges splash/auth drama into the work surface.
@@ -27,6 +27,7 @@ export default function ManagerPortalHero({
   clubLocation = null,
   pendingCount = 0,
   handledCount = 0,
+  totalCount = 0,
   badgeCount = 0,
   loading = false,
   onOpenRequests,
@@ -50,14 +51,19 @@ export default function ManagerPortalHero({
       Loading…
     </div>
   ) : (
-    <div className="flex items-stretch gap-4 sm:gap-5">
-      <div className="min-w-[3.5rem]">
-        <p className="text-2xl font-semibold tabular-nums leading-none text-white">{pendingCount}</p>
+    <div className="flex items-stretch gap-3 sm:gap-4">
+      <div className="min-w-[3rem]">
+        <p className="text-xl font-semibold tabular-nums leading-none text-white">{totalCount}</p>
+        <p className="mt-1 text-[11px] font-medium text-white/50">Total</p>
+      </div>
+      <div className="w-px shrink-0 bg-white/10" aria-hidden="true" />
+      <div className="min-w-[3rem]">
+        <p className="text-xl font-semibold tabular-nums leading-none text-white">{pendingCount}</p>
         <p className="mt-1 text-[11px] font-medium text-amber-300/90">Pending</p>
       </div>
       <div className="w-px shrink-0 bg-white/10" aria-hidden="true" />
-      <div className="min-w-[3.5rem]">
-        <p className="text-2xl font-semibold tabular-nums leading-none text-white">{handledCount}</p>
+      <div className="min-w-[3rem]">
+        <p className="text-xl font-semibold tabular-nums leading-none text-white">{handledCount}</p>
         <p className="mt-1 text-[11px] font-medium text-white/50">Handled</p>
       </div>
     </div>
@@ -85,7 +91,7 @@ export default function ManagerPortalHero({
             type="button"
             onClick={onOpenRequests}
             className="inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-white/15 bg-white/[0.08] px-2.5 py-1.5 text-[11px] font-semibold text-white/90 transition-colors hover:border-white/25 hover:bg-white/[0.12] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/40"
-            aria-label={`View your requests, ${pendingCount} pending, ${handledCount} handled${badgeCount > 0 ? `, ${badgeCount} to review` : ''}`}
+            aria-label={`View your requests, ${totalCount} total, ${pendingCount} pending, ${handledCount} handled${badgeCount > 0 ? `, ${badgeCount} to review` : ''}`}
           >
             View
             <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -113,19 +119,19 @@ export default function ManagerPortalHero({
         aria-hidden="true"
       />
 
-      <div className="relative mx-auto max-w-[1520px] px-4 py-5 sm:px-6 sm:py-6 md:px-8">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="relative mx-auto max-w-[1520px] px-4 py-3.5 sm:px-6 sm:py-4 md:px-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">
               {greeting}
             </p>
-            <h1 className="mt-1 text-xl font-semibold tracking-tight text-white sm:text-2xl">
+            <h1 className="mt-0.5 text-lg font-semibold tracking-tight text-white sm:text-xl">
               Welcome back,{' '}
               <span className="bg-gradient-to-r from-white to-white/85 bg-clip-text text-transparent">
                 {name}
               </span>
             </h1>
-            <p className="mt-1.5 text-sm text-white/55">{contextLine}</p>
+            <p className="mt-1 text-sm text-white/55">{contextLine}</p>
           </div>
 
           <div className={requestsCardClass}>{requestsCard}</div>

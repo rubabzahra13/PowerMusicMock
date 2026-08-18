@@ -1,5 +1,5 @@
 import { useState, useEffect, useId, useRef } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import {
@@ -30,6 +30,7 @@ import ManagerAuthEmailNotice from '../components/auth/ManagerAuthEmailNotice';
 import { getAuthLinkExpiryLabel } from '../utils/authRedirect';
 import { queueManagerPortalIntro, prefetchManagerPortalBranding } from '../components/manager/ManagerPortalIntro';
 import { usePartnerBrandingFromEmail } from '../hooks/usePartnerBrandingFromEmail';
+import { getPublicCustomForm } from '../utils/pilot2Api';
 
 export default function Signup() {
   const {
@@ -79,6 +80,9 @@ export default function Signup() {
   const [allowedDomains, setAllowedDomains] = useState(() => getCachedManagerAllowedDomains());
   const [domainsReady, setDomainsReady] = useState(() => Boolean(getCachedManagerAllowedDomains()));
 
+  const { partner: partnerSlug } = useParams();
+  const [slugBranding, setSlugBranding] = useState(null);
+
   const brandingEmail = verifySent
     ? registeredEmail
     : resetSent
@@ -88,7 +92,32 @@ export default function Signup() {
         : mode === 'forgot'
           ? forgotEmail
           : signInEmail;
-  const partnerBranding = usePartnerBrandingFromEmail(brandingEmail);
+  const emailBranding = usePartnerBrandingFromEmail(brandingEmail);
+  const partnerBranding = emailBranding || slugBranding;
+
+  useEffect(() => {
+    if (!partnerSlug) {
+      setSlugBranding(null);
+      return undefined;
+    }
+
+    let active = true;
+    getPublicCustomForm(partnerSlug)
+      .then((data) => {
+        if (!active) return;
+        setSlugBranding({
+          partnerName: data.partnerName,
+          logoDataUrl: data.logoDataUrl,
+        });
+      })
+      .catch(() => {
+        if (active) setSlugBranding(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [partnerSlug]);
 
   useEffect(() => {
     let active = true;

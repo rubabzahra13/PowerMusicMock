@@ -1,4 +1,3 @@
-import { forwardRef } from 'react';
 import { Tag } from '../ui';
 import {
   MANAGER_UPDATE_HIGHLIGHT_CLASS,
@@ -6,9 +5,7 @@ import {
   personName,
   requestStatusMeta,
 } from '../../utils/managerRequestHistory';
-
-export const MANAGER_REQUEST_HISTORY_GRID =
-  'grid-cols-[1.75rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)]';
+import { formatPersonEmail, formatPersonLocation } from '../../utils/personDisplay';
 
 function highlightKind(request) {
   if (request.status === 'handled') return 'handled';
@@ -46,97 +43,62 @@ function rowAriaLabel(request, meta, highlighted, kind, rowNumber) {
 const rowInteractionClass =
   'w-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand-primary)]/35';
 
-const ManagerRequestHistoryRow = forwardRef(function ManagerRequestHistoryRow(
-  { request, onOpen, showAsNew = false, rowNumber = 1 },
-  ref,
-) {
+/** Mobile-only row card for manager request history. */
+export default function ManagerRequestHistoryRow({
+  request,
+  onOpen,
+  showAsNew = false,
+  rowNumber = 1,
+}) {
   const meta = requestStatusMeta(request);
   const kind = highlightKind(request);
   const highlighted = showAsNew;
   const isAdd = request.action === 'Add';
-  const contactLine = [request.person?.email, request.person?.location].filter(Boolean).join(' · ');
+  const name = personName(request.person);
+  const email = formatPersonEmail(request.person, { empty: '' });
+  const location = formatPersonLocation(request.person, { empty: '' });
+  const contactLine = [email, location].filter(Boolean).join(' · ');
   const highlightClass = highlighted
     ? MANAGER_UPDATE_HIGHLIGHT_CLASS
-    : 'hover:bg-[var(--color-surface-panel)]/50';
+    : 'hover:bg-[#f9fafb]';
   const ariaLabel = rowAriaLabel(request, meta, highlighted, kind, rowNumber);
   const handleOpen = () => onOpen?.(request);
 
   return (
-    <li ref={ref} className="list-none">
+    <li className="list-none">
       <button
         type="button"
         onClick={handleOpen}
         title={contactLine || undefined}
         aria-label={ariaLabel}
-        className={`${rowInteractionClass} flex flex-col gap-2 px-4 py-3 text-left sm:hidden ${highlightClass}`}
+        className={`${rowInteractionClass} flex flex-col gap-2 px-4 py-3 text-left ${highlightClass}`}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
-              {personName(request.person)}
-            </p>
-            {contactLine && (
-              <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">{contactLine}</p>
+            <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{name}</p>
+            {email && (
+              <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{email}</p>
+            )}
+            {location && (
+              <p className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">{location}</p>
             )}
           </div>
-          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[var(--color-text-secondary)]">
-            #{rowNumber}
+          <span className="shrink-0 text-sm font-semibold tabular-nums text-[var(--color-text-primary)]">
+            {rowNumber}
           </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={isAdd ? 'Add' : 'Remove'} compact />
-          <Tag variant={statusTagVariant(request)} label={meta.label} compact />
+          <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={isAdd ? 'Add' : 'Remove'} />
+          <Tag variant={statusTagVariant(request)} label={meta.label} />
           {highlighted && (
             <span className="inline-flex rounded-full bg-[var(--color-brand-primary)] px-1.5 py-px text-[10px] font-semibold leading-none text-white">
               New
             </span>
           )}
-          <span className="text-[11px] tabular-nums text-[var(--color-text-muted)]">{rowTimestamp(request)}</span>
+          <span className="text-xs tabular-nums text-[var(--color-text-muted)]">{rowTimestamp(request)}</span>
         </div>
-      </button>
-
-      <button
-        type="button"
-        onClick={handleOpen}
-        title={contactLine || undefined}
-        aria-label={ariaLabel}
-        className={`${rowInteractionClass} hidden sm:grid ${MANAGER_REQUEST_HISTORY_GRID} items-center gap-x-4 px-3 py-2.5 ${highlightClass}`}
-      >
-        <span className="text-left text-[11px] font-semibold tabular-nums text-[var(--color-text-secondary)]">
-          {rowNumber}
-        </span>
-
-        <span className="flex justify-center">
-          <Tag variant={isAdd ? 'add-action' : 'remove-action'} label={isAdd ? 'Add' : 'Remove'} compact />
-        </span>
-
-        <span className="truncate text-center text-[11px] tabular-nums leading-tight text-[var(--color-text-muted)]">
-          {rowTimestamp(request)}
-        </span>
-
-        <span className="min-w-0 text-left">
-          <span className="block truncate text-sm font-semibold leading-tight text-[var(--color-text-primary)]">
-            {personName(request.person)}
-          </span>
-          {contactLine && (
-            <span className="mt-0.5 block truncate text-[10px] leading-tight text-[var(--color-text-muted)]">
-              {contactLine}
-            </span>
-          )}
-        </span>
-
-        <span className="flex items-center justify-center gap-1">
-          {highlighted && (
-            <span className="inline-flex rounded-full bg-[var(--color-brand-primary)] px-1.5 py-px text-[10px] font-semibold leading-none text-white">
-              New
-            </span>
-          )}
-          <Tag variant={statusTagVariant(request)} label={meta.label} compact />
-        </span>
       </button>
     </li>
   );
-});
-
-export default ManagerRequestHistoryRow;
+}

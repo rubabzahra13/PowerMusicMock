@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AtSign,
+  Check,
+  Copy,
   Eye,
   Loader2,
   Mail,
@@ -36,6 +38,15 @@ import {
 } from '../utils/pilot2Api';
 
 const MAX_CONNECTED_INBOXES = 7;
+
+function partnerSlugFromName(name) {
+  return (name || 'partner').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+}
+
+function partnerFormSignupUrl(partnerName) {
+  const slug = partnerSlugFromName(partnerName);
+  return `${window.location.origin}/${slug}/submit/signup`;
+}
 
 const SETTINGS_TABS = [
   {
@@ -284,6 +295,7 @@ export default function PartnerSettings() {
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [formPreviewOpen, setFormPreviewOpen] = useState(false);
   const [previewAction, setPreviewAction] = useState('Add');
+  const [formUrlCopied, setFormUrlCopied] = useState(false);
 
   useEffect(() => {
     if (formPreviewOpen) setPreviewAction('Add');
@@ -618,6 +630,16 @@ export default function PartnerSettings() {
   const previewPartnerName = partnerNameEditing
     ? partnerNameDraft.trim() || partnerLabel
     : (selectedPartner?.name || partnerLabel);
+
+  const partnerFormUrl = previewPartnerName ? partnerFormSignupUrl(previewPartnerName) : '';
+
+  const handleCopyFormUrl = () => {
+    if (!partnerFormUrl) return;
+    navigator.clipboard.writeText(partnerFormUrl).then(() => {
+      setFormUrlCopied(true);
+      window.setTimeout(() => setFormUrlCopied(false), 2000);
+    });
+  };
 
   return (
     <AdminPageScroll dataPage="partner-settings" contentClassName="min-w-0 select-none pb-16">
@@ -978,6 +1000,35 @@ export default function PartnerSettings() {
                   </button>
                 )}
                 <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+              </SettingsSection>
+
+              <SettingsSection
+                id="form-url"
+                title="Partner Form URL"
+                hint="Share this link with managers. They sign up once, then use the same portal for add and remove requests."
+              >
+                <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 p-4 sm:p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <code className="block min-w-0 flex-1 break-all rounded-lg border border-[var(--color-border-default)] bg-white px-3 py-2.5 text-xs text-[var(--color-text-primary)]">
+                      {partnerFormUrl || 'Save a partner name to generate the URL.'}
+                    </code>
+                    <FilledButton
+                      type="button"
+                      onClick={handleCopyFormUrl}
+                      disabled={!partnerFormUrl}
+                      className="shrink-0"
+                    >
+                      {formUrlCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      {formUrlCopied ? 'Copied!' : 'Copy URL'}
+                    </FilledButton>
+                  </div>
+                  <p className="mt-3 text-[11px] text-[var(--color-text-muted)]">
+                    Generic entry (any partner):{' '}
+                    <span className="font-medium text-[var(--color-text-secondary)]">
+                      {window.location.origin}/submit/signup
+                    </span>
+                  </p>
+                </div>
               </SettingsSection>
 
               <SettingsSection

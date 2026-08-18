@@ -329,6 +329,9 @@ export const getManagerPartnerBranding = () =>
 export const getPublicPartnerBranding = (email) =>
   request(`/api/public/partner-branding?email=${encodeURIComponent(email)}`);
 
+export const getPublicCustomForm = (partnerSlug) =>
+  request(`/api/public/custom-form/${encodeURIComponent(partnerSlug)}`);
+
 export const getPartnerCustomForm = (partnerId) =>
   request(`/api/partners/${partnerId}/custom-form`);
 
