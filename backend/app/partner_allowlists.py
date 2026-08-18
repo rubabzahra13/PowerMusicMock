@@ -137,15 +137,42 @@ def email_matches_manager_domains(email: str, domains: Sequence[str]) -> bool:
     return any(addr.endswith(f"@{domain.lower().lstrip('@')}") for domain in domains)
 
 
+import re
+
+
+def partner_slug_from_name(name: str) -> str:
+    return re.sub(r'[^a-z0-9-]', '', re.sub(r'\s+', '-', (name or "").lower().strip()))
+
+
+def get_partner_by_slug(db: Session, slug: str) -> Optional[models.Partner]:
+    norm_slug = (slug or "").strip().lower()
+    if not norm_slug:
+        return None
+    partners = list_partners(db)
+    for p in partners:
+        if partner_slug_from_name(p.name) == norm_slug:
+            return p
+    return None
+
+
 def resolve_partner_for_manager_email(
     db: Session,
     email: str,
     partner_id: Optional[str] = None,
+    partner_slug: Optional[str] = None,
+    manager_user_id: Optional[str] = None,
 ) -> Optional[str]:
     addr = (email or "").strip().lower()
     if not addr or "@" not in addr:
         return None
     domain = addr.rsplit("@", 1)[1]
+
+    # If partner_slug was provided and partner_id wasn't:
+    if not partner_id and partner_slug:
+        partner_obj = get_partner_by_slug(db, partner_slug)
+        if partner_obj:
+            partner_id = partner_obj.id
+
     query = (
         db.query(models.ManagerAllowedDomain)
         .filter(models.ManagerAllowedDomain.domain == domain)
@@ -159,10 +186,36 @@ def resolve_partner_for_manager_email(
     if len(partner_ids) == 1:
         return next(iter(partner_ids))
     if len(partner_ids) > 1:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Allowed domain @{domain} belongs to multiple partners. Resolve this configuration conflict.",
+        # Check if the manager user has previous submissions for one of these partners
+        if manager_user_id and manager_user_id != "dev-bypass":
+            try:
+                import uuid
+                m_uuid = uuid.UUID(str(manager_user_id))
+                recent_req = (
+                    db.query(models.ManagerRequest)
+                    .filter(
+                        models.ManagerRequest.manager_id == m_uuid,
+                        models.ManagerRequest.partner_id.in_(partner_ids),
+                    )
+                    .order_by(models.ManagerRequest.received_at.desc())
+                    .first()
+                )
+                if recent_req and recent_req.partner_id:
+                    return recent_req.partner_id
+            except Exception:
+                pass
+
+        # Fallback to the latest configured partner domain instead of raising 409
+        latest_match = (
+            db.query(models.ManagerAllowedDomain)
+            .filter(models.ManagerAllowedDomain.domain == domain, models.ManagerAllowedDomain.partner_id.isnot(None))
+            .order_by(models.ManagerAllowedDomain.created_at.desc())
+            .first()
         )
+        if latest_match and latest_match.partner_id:
+            return latest_match.partner_id
+
+        return next(iter(partner_ids))
     return None
 
 
@@ -170,8 +223,18 @@ def assert_manager_email_allowed(
     db: Session,
     email: str,
     partner_id: Optional[str] = None,
+    partner_slug: Optional[str] = None,
+    manager_user_id: Optional[str] = None,
 ) -> str:
-    domains = list_manager_domain_strings(db, partner_id=partner_id)
+    effective_partner_id = partner_id
+    if not effective_partner_id and partner_slug:
+        p_obj = get_partner_by_slug(db, partner_slug)
+        if p_obj:
+            effective_partner_id = p_obj.id
+
+    domains = list_manager_domain_strings(db, partner_id=effective_partner_id)
+    if not domains:
+        domains = list_manager_domain_strings(db)
     if not domains:
         raise HTTPException(
             status_code=403,
@@ -183,7 +246,13 @@ def assert_manager_email_allowed(
             status_code=403,
             detail=f"Manager accounts must use an allowed partner domain ({labels}).",
         )
-    resolved_partner_id = resolve_partner_for_manager_email(db, email, partner_id=partner_id)
+    resolved_partner_id = resolve_partner_for_manager_email(
+        db,
+        email,
+        partner_id=effective_partner_id,
+        partner_slug=partner_slug,
+        manager_user_id=manager_user_id,
+    )
     if resolved_partner_id is None:
         raise HTTPException(
             status_code=409,

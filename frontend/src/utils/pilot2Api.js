@@ -323,11 +323,16 @@ export const updatePartner = (id, name) =>
 
 // --- Custom Manager Form API ---
 
-export const getManagerPartnerBranding = () =>
-  request('/api/manager/partner-branding');
+export const getManagerPartnerBranding = (partnerId = null) => {
+  const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+  return request(`/api/manager/partner-branding${query}`);
+};
 
-export const getPublicPartnerBranding = (email) =>
-  request(`/api/public/partner-branding?email=${encodeURIComponent(email)}`);
+export const getPublicPartnerBranding = (email, partnerSlug = null) => {
+  const params = new URLSearchParams({ email });
+  if (partnerSlug) params.set('partner_slug', partnerSlug);
+  return request(`/api/public/partner-branding?${params}`);
+};
 
 export const getPublicCustomForm = (partnerSlug) =>
   request(`/api/public/custom-form/${encodeURIComponent(partnerSlug)}`);

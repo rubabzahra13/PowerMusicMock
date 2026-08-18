@@ -14,7 +14,7 @@ function directoryErrorMessage(err) {
   return msg;
 }
 
-export function useManagerDirectory(userId, accessToken, { enabled = true, outcome = 'Added' } = {}) {
+export function useManagerDirectory(userId, accessToken, { enabled = true, outcome = 'Added', partnerId = null } = {}) {
   const [people, setPeople] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -37,6 +37,9 @@ export function useManagerDirectory(userId, accessToken, { enabled = true, outco
 
       try {
         const params = new URLSearchParams({ outcome });
+        if (partnerId) {
+          params.set('partner_id', partnerId);
+        }
         const data = await fetchJson(`/api/manager/persons/directory?${params}`);
         const normalized = Array.isArray(data)
           ? data.map(normalizeDirectoryPerson).filter(Boolean)

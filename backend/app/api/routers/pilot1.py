@@ -2,7 +2,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Header, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, case, func
 
@@ -250,8 +250,23 @@ def _search_people(
     return search_roster_rows(db, query, limit=limit, partner_id=partner_id)
 
 
-def _manager_partner_id(db: Session, manager_email: str, partner_id: Optional[str] = None) -> str:
-    resolved_id = resolve_partner_for_manager_email(db, manager_email, partner_id=partner_id)
+def _manager_partner_id(
+    db: Session,
+    manager_email: str,
+    partner_id: Optional[str] = None,
+    manager_user_id: Optional[str] = None,
+    header_partner_id: Optional[str] = None,
+    header_partner_slug: Optional[str] = None,
+) -> str:
+    effective_partner_id = partner_id or header_partner_id
+    effective_partner_slug = header_partner_slug
+    resolved_id = resolve_partner_for_manager_email(
+        db,
+        manager_email,
+        partner_id=effective_partner_id,
+        partner_slug=effective_partner_slug,
+        manager_user_id=manager_user_id,
+    )
     if not resolved_id:
         raise HTTPException(status_code=409, detail="Manager account is not assigned to a partner.")
     return resolved_id
@@ -642,6 +657,8 @@ def _assert_manager_submitter(
     manager,
     db: Session,
     partner_id: Optional[str] = None,
+    header_partner_id: Optional[str] = None,
+    header_partner_slug: Optional[str] = None,
 ) -> str:
     sub_email = (submitted_by.email or "").strip()
     if auth_is_required() and sub_email.lower() != manager.email.lower():
@@ -649,7 +666,15 @@ def _assert_manager_submitter(
             status_code=403,
             detail="Submitter email must match your signed-in account.",
         )
-    return assert_manager_email_allowed(db, sub_email or manager.email, partner_id=partner_id)
+    effective_partner_id = partner_id or header_partner_id
+    effective_partner_slug = header_partner_slug
+    return assert_manager_email_allowed(
+        db,
+        sub_email or manager.email,
+        partner_id=effective_partner_id,
+        partner_slug=effective_partner_slug,
+        manager_user_id=manager.id if manager else None,
+    )
 
 
 def _manager_id_for_submitter(
@@ -691,8 +716,17 @@ def create_request(
     req_in: schemas.RequestIn,
     db: Session = Depends(get_db),
     manager=Depends(_limit_submit),
+    x_partner_id: Optional[str] = Header(None, alias="X-Partner-Id"),
+    x_partner_slug: Optional[str] = Header(None, alias="X-Partner-Slug"),
 ):
-    partner_id = _assert_manager_submitter(req_in.submittedBy, manager, db, partner_id=req_in.partnerId)
+    partner_id = _assert_manager_submitter(
+        req_in.submittedBy,
+        manager,
+        db,
+        partner_id=req_in.partnerId,
+        header_partner_id=x_partner_id,
+        header_partner_slug=x_partner_slug,
+    )
 
     new_request = _create_manager_request_row(
         db,
@@ -722,8 +756,17 @@ def create_requests_batch(
     req_in: schemas.ManagerBatchRequestIn,
     db: Session = Depends(get_db),
     manager=Depends(_limit_submit),
+    x_partner_id: Optional[str] = Header(None, alias="X-Partner-Id"),
+    x_partner_slug: Optional[str] = Header(None, alias="X-Partner-Slug"),
 ):
-    partner_id = _assert_manager_submitter(req_in.submittedBy, manager, db, partner_id=req_in.partnerId)
+    partner_id = _assert_manager_submitter(
+        req_in.submittedBy,
+        manager,
+        db,
+        partner_id=req_in.partnerId,
+        header_partner_id=x_partner_id,
+        header_partner_slug=x_partner_slug,
+    )
     req_in = req_in.model_copy(update={"partnerId": partner_id})
 
     job = enqueue_manager_batch(db, manager_id=manager.id, req_in=req_in)
@@ -1060,11 +1103,21 @@ def create_manual_requests(req_in: schemas.ManualRequestIn, db: Session = Depend
 def check_person_duplicate(
     payload: schemas.DuplicateCheckIn,
     partner_id: Optional[str] = None,
+    partner_slug: Optional[str] = None,
     db: Session = Depends(get_db),
     manager=Depends(_limit_duplicate),
+    x_partner_id: Optional[str] = Header(None, alias="X-Partner-Id"),
+    x_partner_slug: Optional[str] = Header(None, alias="X-Partner-Slug"),
 ):
     """Manager-portal helper — match by email, name, or name + location."""
-    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=payload.partnerId or partner_id)
+    resolved_partner_id = _manager_partner_id(
+        db,
+        manager.email,
+        partner_id=payload.partnerId or partner_id,
+        manager_user_id=manager.id if manager else None,
+        header_partner_id=x_partner_id,
+        header_partner_slug=partner_slug or x_partner_slug,
+    )
     p_email = (payload.email or "").strip().lower()
     p_first = (payload.firstName or "").strip().lower()
     p_last = (payload.lastName or "").strip().lower()
@@ -1093,12 +1146,22 @@ def check_person_duplicate(
 def match_person_candidates(
     payload: schemas.DuplicateCheckIn,
     partner_id: Optional[str] = None,
+    partner_slug: Optional[str] = None,
     limit: int = 10,
     db: Session = Depends(get_db),
     manager=Depends(_limit_match),
+    x_partner_id: Optional[str] = Header(None, alias="X-Partner-Id"),
+    x_partner_slug: Optional[str] = Header(None, alias="X-Partner-Slug"),
 ):
     """All directory rows that share any person-form field (or field + location)."""
-    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=payload.partnerId or partner_id)
+    resolved_partner_id = _manager_partner_id(
+        db,
+        manager.email,
+        partner_id=payload.partnerId or partner_id,
+        manager_user_id=manager.id if manager else None,
+        header_partner_id=x_partner_id,
+        header_partner_slug=partner_slug or x_partner_slug,
+    )
     p_email = (payload.email or "").strip().lower()
     p_first = (payload.firstName or "").strip().lower()
     p_last = (payload.lastName or "").strip().lower()
@@ -1255,11 +1318,21 @@ def mark_all_manager_requests_seen(
 def manager_person_directory(
     outcome: str = "Added",
     partner_id: Optional[str] = None,
+    partner_slug: Optional[str] = None,
     db: Session = Depends(get_db),
     manager=Depends(_limit_directory),
+    x_partner_id: Optional[str] = Header(None, alias="X-Partner-Id"),
+    x_partner_slug: Optional[str] = Header(None, alias="X-Partner-Slug"),
 ):
     """Roster snapshot for instant client-side search (load in background)."""
-    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=partner_id)
+    resolved_partner_id = _manager_partner_id(
+        db,
+        manager.email,
+        partner_id=partner_id,
+        manager_user_id=manager.id if manager else None,
+        header_partner_id=x_partner_id,
+        header_partner_slug=partner_slug or x_partner_slug,
+    )
     if outcome not in {"Added", "Removed"}:
         raise HTTPException(status_code=422, detail="outcome must be Added or Removed")
     if outcome == "Removed":
@@ -1273,12 +1346,22 @@ def manager_person_directory(
 def search_persons_for_manager(
     q: str = "",
     partner_id: Optional[str] = None,
+    partner_slug: Optional[str] = None,
     limit: int = 25,
     db: Session = Depends(get_db),
     manager=Depends(_limit_search),
+    x_partner_id: Optional[str] = Header(None, alias="X-Partner-Id"),
+    x_partner_slug: Optional[str] = Header(None, alias="X-Partner-Slug"),
 ):
     """Scoped search for the manager submit form — name, email, or location."""
-    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=partner_id)
+    resolved_partner_id = _manager_partner_id(
+        db,
+        manager.email,
+        partner_id=partner_id,
+        manager_user_id=manager.id if manager else None,
+        header_partner_id=x_partner_id,
+        header_partner_slug=partner_slug or x_partner_slug,
+    )
     try:
         query = normalize_search_query(q, max_length=100).lower()
     except ValueError as exc:
@@ -1304,21 +1387,19 @@ def public_manager_allowed_domains(db: Session = Depends(get_db)):
 def public_partner_branding(
     email: str = "",
     partner_id: Optional[str] = None,
+    partner_slug: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """Resolve partner name/logo from a manager email domain (sign-in page branding)."""
     addr = (email or "").strip().lower()
     if not addr or "@" not in addr:
         raise HTTPException(status_code=400, detail="Enter a valid email address.")
-    try:
-        resolved_partner_id = resolve_partner_for_manager_email(db, addr, partner_id=partner_id)
-    except HTTPException as exc:
-        if exc.status_code == 409:
-            raise HTTPException(
-                status_code=409,
-                detail="This email domain is associated with multiple partners. Please use your partner's specific submission URL (e.g. /healthtech/submit).",
-            )
-        resolved_partner_id = None
+    resolved_partner_id = resolve_partner_for_manager_email(
+        db,
+        addr,
+        partner_id=partner_id,
+        partner_slug=partner_slug,
+    )
     if not resolved_partner_id:
         raise HTTPException(status_code=404, detail="No partner found for this email domain.")
     partner = get_partner_or_404(db, resolved_partner_id)
@@ -1953,11 +2034,21 @@ def resolve_group_mark_removed_api(
 @router.get("/api/manager/partner-branding")
 def manager_partner_branding(
     partner_id: Optional[str] = None,
+    partner_slug: Optional[str] = None,
     db: Session = Depends(get_db),
     manager=Depends(require_manager),
+    x_partner_id: Optional[str] = Header(None, alias="X-Partner-Id"),
+    x_partner_slug: Optional[str] = Header(None, alias="X-Partner-Slug"),
 ):
     """Partner name and optional logo for the signed-in manager's submission form."""
-    resolved_partner_id = _manager_partner_id(db, manager.email, partner_id=partner_id)
+    resolved_partner_id = _manager_partner_id(
+        db,
+        manager.email,
+        partner_id=partner_id,
+        manager_user_id=manager.id if manager else None,
+        header_partner_id=x_partner_id,
+        header_partner_slug=partner_slug or x_partner_slug,
+    )
     partner = get_partner_or_404(db, resolved_partner_id)
     form = (
         db.query(models.PartnerCustomForm)

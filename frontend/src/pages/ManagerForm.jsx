@@ -239,6 +239,7 @@ export default function ManagerForm() {
     useManagerDirectory(user?.id, session?.access_token, {
       enabled: formActive && !submitted && Boolean(user?.id && session?.access_token),
       outcome: directoryOutcome,
+      partnerId: partnerBranding?.partnerId,
     });
   const [searchInput, setSearchInput] = useState('');
 
@@ -377,7 +378,8 @@ export default function ManagerForm() {
       setPartnerBrandingReady(true);
       return;
     }
-    getManagerPartnerBranding()
+    const partnerIdParam = partnerBranding?.partnerId || undefined;
+    getManagerPartnerBranding(partnerIdParam)
       .then((data) => {
         if (data?.partnerName) {
           setPartnerBranding(data);

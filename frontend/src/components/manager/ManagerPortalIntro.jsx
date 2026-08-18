@@ -169,6 +169,7 @@ export function cacheManagerPortalBranding(branding) {
     sessionStorage.setItem(
       BRANDING_CACHE_KEY,
       JSON.stringify({
+        partnerId: branding.partnerId ?? null,
         partnerName: branding.partnerName,
         logoDataUrl: branding.logoDataUrl ?? null,
       }),

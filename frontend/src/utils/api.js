@@ -37,8 +37,44 @@ export const getApiUrl = (path) => {
 
 import { readStoredSession } from './authBootstrap';
 
+function getActivePartnerContext() {
+  if (typeof window === 'undefined') return {};
+  try {
+    const rawIntro = sessionStorage.getItem('manager-portal-intro-branding');
+    if (rawIntro) {
+      const parsed = JSON.parse(rawIntro);
+      if (parsed?.partnerId) {
+        return { partnerId: parsed.partnerId };
+      }
+    }
+    const slug = sessionStorage.getItem('manager-intended-partner-slug');
+    if (slug) {
+      const slugKey = `pm_cache_partner_branding_${slug}`;
+      const slugCached = sessionStorage.getItem(slugKey) || (typeof localStorage !== 'undefined' ? localStorage.getItem(slugKey) : null);
+      if (slugCached) {
+        const parsedSlug = JSON.parse(slugCached);
+        if (parsedSlug?.partnerId) {
+          return { partnerId: parsedSlug.partnerId, partnerSlug: slug };
+        }
+      }
+      return { partnerSlug: slug };
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
 async function buildAuthHeaders(extraHeaders = {}) {
   const headers = { ...extraHeaders };
+
+  const partnerCtx = getActivePartnerContext();
+  if (partnerCtx.partnerId && !headers['X-Partner-Id']) {
+    headers['X-Partner-Id'] = partnerCtx.partnerId;
+  }
+  if (partnerCtx.partnerSlug && !headers['X-Partner-Slug']) {
+    headers['X-Partner-Slug'] = partnerCtx.partnerSlug;
+  }
 
   if (accessTokenProvider) {
     try {
