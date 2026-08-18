@@ -4,10 +4,14 @@ import { useAuth } from '../context/AuthContext';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { useToast } from '../components/ui';
 import AdminAuthShell from '../components/auth/AdminAuthShell';
+import RolePortalConflict from '../components/auth/RolePortalConflict';
+import { readCachedManagerPortalBranding } from '../components/manager/ManagerPortalIntro';
 import { queueAdminPortalIntro } from '../components/admin/AdminPortalIntro';
 import { AUTH_PAGE_CANVAS, useAuthPageCanvas } from '../components/auth/useAuthPageCanvas';
 import { FlowGradientBackground } from '../components/ui/flow-gradient-hero-section';
 import PasswordInput from '../components/auth/PasswordInput';
+import { isManagerOnAdminPortal } from '../utils/rolePortalAccess';
+import { signOutToAdminAuth } from '../utils/managerPartnerConflictSignOut';
 
 const inputClass =
   'w-full h-11 px-3.5 bg-white text-sm rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] transition-colors focus:outline-none focus-visible:border-[var(--color-brand-primary)] focus-visible:ring-2 focus-visible:ring-[var(--color-brand-primary)]/20 disabled:opacity-60 disabled:cursor-not-allowed';
@@ -40,6 +44,7 @@ export default function AdminLogin() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     clearToasts();
@@ -50,15 +55,28 @@ export default function AdminLogin() {
   useEffect(() => {
     if (redirectingAdmin) {
       navigate(from, { replace: true });
-      return;
     }
+  }, [user, role, navigate, from, redirectingAdmin]);
 
-    if (user && role && role !== 'admin') {
-      logout().then(() => {
-        setErrorMsg('This sign-in page is for administrators only.');
-      });
-    }
-  }, [user, role, navigate, logout, from, redirectingAdmin]);
+  if (user && isManagerOnAdminPortal(user, role)) {
+    return (
+      <RolePortalConflict
+        variant="manager-on-admin"
+        sessionPartnerBranding={readCachedManagerPortalBranding()}
+        signingOut={signingOut}
+        onGoToPortal={() => navigate('/submit')}
+        onLogout={async () => {
+          if (signingOut) return;
+          setSigningOut(true);
+          try {
+            await signOutToAdminAuth({ logout, navigate });
+          } finally {
+            setSigningOut(false);
+          }
+        }}
+      />
+    );
+  }
 
   if (redirectingAdmin) {
     return (

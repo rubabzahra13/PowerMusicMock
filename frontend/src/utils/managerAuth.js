@@ -69,6 +69,9 @@ export const MANAGER_ACCOUNT_NOT_FOUND_MESSAGE =
 export const MANAGER_DOMAINS_UNAVAILABLE_MESSAGE =
   'Could not verify allowed email domains. Check that the server is running and try again.';
 
+export const MANAGER_EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE =
+  'This email or domain is not allowed to sign in or sign up.';
+
 export function isManagerAccountExistsMessage(message) {
   const msg = (message || '').toLowerCase();
   return (
@@ -99,6 +102,20 @@ export function managerEmailDomainHint(allowedDomains = cachedManagerDomains) {
   if (labels.length === 0) return 'allowed partner';
   if (labels.length === 1) return labels[0];
   return `${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}`;
+}
+
+/** Partner links use that partner's domains once loaded; generic signup uses the global list. */
+export function resolveManagerAuthAllowedDomains({
+  partnerSlug = '',
+  partnerAllowedDomains = null,
+  globalAllowedDomains = null,
+  partnerAccessReady = false,
+} = {}) {
+  if (partnerSlug) {
+    if (!partnerAccessReady) return null;
+    return partnerAllowedDomains ?? [];
+  }
+  return globalAllowedDomains;
 }
 
 function stripControlChars(value) {
@@ -145,7 +162,7 @@ export function validateManagerEmail(raw, { enforceDomain = true, allowedDomains
     if (!isAllowedManagerEmailDomain(email, allowedDomains)) {
       return {
         ok: false,
-        error: `Manager accounts must use a ${managerEmailDomainHint(allowedDomains)} email address.`,
+        error: MANAGER_EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
       };
     }
   }
@@ -158,6 +175,19 @@ export function validateManagerEmail(raw, { enforceDomain = true, allowedDomains
   }
 
   return { ok: true, value: email };
+}
+
+export function managerEmailDomainError(email, allowedDomains) {
+  const normalized = normalizeManagerEmail(email);
+  if (!normalized.ok) return '';
+  if (!allowedDomains?.length) return '';
+  if (isAllowedManagerEmailDomain(normalized.value, allowedDomains)) return '';
+  return MANAGER_EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE;
+}
+
+/** @deprecated Use managerEmailDomainError */
+export function partnerLinkEmailDomainError(email, allowedDomains) {
+  return managerEmailDomainError(email, allowedDomains);
 }
 
 /** Very common passwords — blocked like most major sites (without forcing symbols). */

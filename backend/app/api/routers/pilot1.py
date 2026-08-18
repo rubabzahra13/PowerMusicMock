@@ -1979,5 +1979,6 @@ def get_public_custom_form(partner_slug: str, db: Session = Depends(get_db)):
     return {
         "partnerName": target_partner.name,
         "logoDataUrl": form.logo_data_url if form else None,
-        "fields": form.fields if form else []
+        "fields": form.fields if form else [],
+        "allowedDomains": list_manager_domain_strings(db, partner_id=target_partner.id),
     }

@@ -69,8 +69,9 @@ export default function PartnerConnectionBranding({
               src="/image.png"
               alt=""
               className="h-full w-full object-cover"
-              width={52}
-              height={52}
+              loading="eager"
+              fetchPriority="high"
+              decoding="sync"
             />
           </div>
           <p className="max-w-full truncate text-center text-[11px] font-semibold text-[var(--color-text-primary)] sm:text-xs">
@@ -83,7 +84,14 @@ export default function PartnerConnectionBranding({
         <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
           <div className={brandMarkBoxClass}>
             {logoDataUrl ? (
-              <img src={logoDataUrl} alt="" className="h-full w-full object-cover" />
+              <img
+                src={logoDataUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="eager"
+                fetchPriority="high"
+                decoding="sync"
+              />
             ) : (
               <span className="flex h-full w-full items-center justify-center bg-[var(--color-surface-panel)] text-[11px] font-bold text-[var(--color-text-primary)] sm:text-xs">
                 {partnerInitials(partnerName)}

@@ -18,17 +18,30 @@ const formGridClass = 'grid grid-cols-1 gap-3 sm:grid-cols-2';
 
 export { inputClass, labelClass, buttonClass, errorClass, formGridClass };
 
-/** Auth check placeholder — plain canvas, no spinner/text, so routes never
- *  flash a "loading screen" (or a white one) while the session resolves. */
-export function ManagerAuthLoading() {
+/** Auth placeholder — gradient canvas so partner auth screens never flash flat blank. */
+export function ManagerAuthLoading({ partnerBranding = null }) {
   useAuthPageCanvas();
 
   return (
     <div
       className="fixed inset-0 z-0 overflow-hidden overscroll-y-none"
       style={{ backgroundColor: AUTH_PAGE_CANVAS }}
-      aria-hidden="true"
-    />
+      aria-busy="true"
+      aria-label="Loading"
+    >
+      <FlowGradientBackground className="pointer-events-none fixed inset-0" interactive />
+      <div className="relative z-10 flex min-h-[100dvh] items-center justify-center px-6">
+        <div className="w-full max-w-[420px] overflow-hidden rounded-xl border border-white/10 bg-white shadow-[0_24px_64px_rgba(0,0,0,0.35)] sm:rounded-2xl">
+          <div className="border-b border-[var(--color-border-default)] bg-gradient-to-b from-white to-[var(--color-surface-panel)]/40 px-5 pb-6 pt-7 text-center sm:px-8 sm:pb-7 sm:pt-8">
+            <AuthBrandingHeader partnerBranding={partnerBranding} />
+          </div>
+          <div className="px-5 py-8 sm:px-8">
+            <div className="mx-auto h-4 w-40 animate-pulse rounded bg-[var(--color-surface-panel)]" />
+            <div className="mx-auto mt-3 h-4 w-56 animate-pulse rounded bg-[var(--color-surface-panel)]" />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

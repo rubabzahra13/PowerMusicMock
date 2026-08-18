@@ -32,7 +32,7 @@ export function PartnerProfileChip({ partnerName, logoDataUrl = null, className 
     >
       <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white ring-1 ring-[var(--color-border-default)]/80">
         {logoDataUrl ? (
-          <img src={logoDataUrl} alt="" className="h-full w-full object-contain p-0.5" />
+          <img src={logoDataUrl} alt="" className="h-full w-full object-cover object-center" />
         ) : (
           <span className="flex h-full w-full items-center justify-center bg-[var(--color-surface-panel)] text-[10px] font-bold text-[var(--color-text-primary)]">
             {partnerInitials(partnerName)}

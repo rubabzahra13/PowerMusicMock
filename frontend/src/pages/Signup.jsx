@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useId, useRef, useMemo } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
@@ -13,6 +13,8 @@ import {
   MANAGER_DOMAINS_UNAVAILABLE_MESSAGE,
   isManagerAccountNotFoundMessage,
   isPasswordStrongEnough,
+  resolveManagerAuthAllowedDomains,
+  managerEmailDomainError,
 } from '../utils/managerAuth';
 import { formatCooldown, getOtpCooldownRemaining, setOtpCooldown } from '../utils/otpCooldown';
 import { requestManagerPasswordReset, resendManagerSignupConfirmation } from '../utils/managerAuthEmail';
@@ -30,7 +32,35 @@ import ManagerAuthEmailNotice from '../components/auth/ManagerAuthEmailNotice';
 import { getAuthLinkExpiryLabel } from '../utils/authRedirect';
 import { queueManagerPortalIntro, prefetchManagerPortalBranding } from '../components/manager/ManagerPortalIntro';
 import { usePartnerBrandingFromEmail } from '../hooks/usePartnerBrandingFromEmail';
-import { getPublicCustomForm } from '../utils/pilot2Api';
+import {
+  ensurePartnerSlugBranding,
+  partnerSlugFromName,
+  readCachedPartnerSlugBranding,
+} from '../utils/partnerSlugBrandingCache';
+import {
+  instantPartnerBrandingFromSlug,
+  managerAuthCreateAccountLink,
+  managerAuthHeading,
+  managerAuthSignupPath,
+  managerAuthSubmitLabel,
+  resolveManagerAuthPartnerBranding,
+} from '../utils/managerAuthBranding';
+import { getManagerPartnerBranding, getPublicPartnerBranding } from '../utils/pilot2Api';
+import {
+  readCachedManagerPortalBranding,
+} from '../components/manager/ManagerPortalIntro';
+import ManagerPartnerLinkConflict from '../components/auth/ManagerPartnerLinkConflict';
+import RolePortalConflict from '../components/auth/RolePortalConflict';
+import {
+  clearManagerIntendedPartnerSlug,
+  setManagerIntendedPartnerSlug,
+} from '../utils/managerPartnerLinkIntent';
+import {
+  getManagerPartnerLinkConflict,
+  isLikelyManagerPartnerLinkConflict,
+} from '../utils/managerPartnerLinkConflict';
+import { isAdminOnManagerPortal, isLikelyManagerSession } from '../utils/rolePortalAccess';
+import { signOutToManagerAuth } from '../utils/managerPartnerConflictSignOut';
 
 export default function Signup() {
   const {
@@ -41,6 +71,7 @@ export default function Signup() {
     role,
     loading: authLoading,
     appConfig,
+    logout,
   } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -48,6 +79,7 @@ export default function Signup() {
   const signInEmailId = `${formId}-signin-email`;
   const signInPasswordId = `${formId}-signin-password`;
   const forgotEmailId = `${formId}-forgot-email`;
+  const emailGateEmailId = `${formId}-email-gate`;
 
   const [mode, setMode] = useState('signin');
   const [formData, setFormData] = useState({
@@ -79,9 +111,23 @@ export default function Signup() {
   const resendInFlightRef = useRef(false);
   const [allowedDomains, setAllowedDomains] = useState(() => getCachedManagerAllowedDomains());
   const [domainsReady, setDomainsReady] = useState(() => Boolean(getCachedManagerAllowedDomains()));
+  const [emailGateEmail, setEmailGateEmail] = useState('');
+  const [emailGateLoading, setEmailGateLoading] = useState(false);
 
   const { partner: partnerSlug } = useParams();
-  const [slugBranding, setSlugBranding] = useState(null);
+  const [slugBranding, setSlugBranding] = useState(() =>
+    partnerSlug ? instantPartnerBrandingFromSlug(partnerSlug) : null,
+  );
+  const [partnerAllowedDomains, setPartnerAllowedDomains] = useState(() => {
+    if (!partnerSlug) return null;
+    return readCachedPartnerSlugBranding(partnerSlug)?.allowedDomains ?? null;
+  });
+  const [partnerAccessReady, setPartnerAccessReady] = useState(true);
+  const [sessionBranding, setSessionBranding] = useState(() => readCachedManagerPortalBranding());
+  const [sessionBrandingReady, setSessionBrandingReady] = useState(() =>
+    Boolean(readCachedManagerPortalBranding()?.partnerName),
+  );
+  const [signingOut, setSigningOut] = useState(false);
 
   const brandingEmail = verifySent
     ? registeredEmail
@@ -93,31 +139,103 @@ export default function Signup() {
           ? forgotEmail
           : signInEmail;
   const emailBranding = usePartnerBrandingFromEmail(brandingEmail);
-  const partnerBranding = emailBranding || slugBranding;
+  const partnerBranding = useMemo(
+    () =>
+      resolveManagerAuthPartnerBranding({
+        emailBranding,
+        slugBranding,
+        partnerSlug,
+      }),
+    [emailBranding, slugBranding, partnerSlug],
+  );
+  const partnerLabel = partnerBranding?.partnerName || '';
+  const authAllowedDomains = useMemo(
+    () =>
+      resolveManagerAuthAllowedDomains({
+        partnerSlug,
+        partnerAllowedDomains,
+        globalAllowedDomains: allowedDomains,
+        partnerAccessReady,
+      }),
+    [partnerSlug, partnerAllowedDomains, allowedDomains, partnerAccessReady],
+  );
+  const activeAuthEmail =
+    mode === 'signup'
+      ? formData.email
+      : mode === 'forgot'
+        ? forgotEmail
+        : signInEmail;
+  const emailDomainError = useMemo(() => {
+    if (!partnerSlug || !appConfig.enforceDomainCheck || !partnerAccessReady) return '';
+    if (!authAllowedDomains) return '';
+    return managerEmailDomainError(activeAuthEmail, authAllowedDomains);
+  }, [
+    partnerSlug,
+    appConfig.enforceDomainCheck,
+    partnerAccessReady,
+    authAllowedDomains,
+    activeAuthEmail,
+  ]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (partnerSlug) setManagerIntendedPartnerSlug(partnerSlug);
+  }, [partnerSlug]);
+
+  useLayoutEffect(() => {
     if (!partnerSlug) {
       setSlugBranding(null);
+      setPartnerAllowedDomains(null);
+      setPartnerAccessReady(true);
       return undefined;
     }
 
     let active = true;
-    getPublicCustomForm(partnerSlug)
-      .then((data) => {
-        if (!active) return;
-        setSlugBranding({
-          partnerName: data.partnerName,
-          logoDataUrl: data.logoDataUrl,
-        });
-      })
-      .catch(() => {
-        if (active) setSlugBranding(null);
-      });
+    setPartnerAccessReady(true);
+
+    ensurePartnerSlugBranding(partnerSlug).then((branding) => {
+      if (!active || !branding) {
+        if (active) setPartnerAccessReady(true);
+        return;
+      }
+      setSlugBranding((prev) => ({
+        partnerName: branding.partnerName || prev?.partnerName,
+        logoDataUrl: branding.logoDataUrl ?? prev?.logoDataUrl ?? null,
+      }));
+      if (branding.allowedDomains?.length) {
+        setPartnerAllowedDomains(branding.allowedDomains);
+      }
+      setPartnerAccessReady(true);
+    });
 
     return () => {
       active = false;
     };
   }, [partnerSlug]);
+
+  useLayoutEffect(() => {
+    if (!user || role !== 'manager') {
+      setSessionBrandingReady(true);
+      return undefined;
+    }
+
+    let active = true;
+    const cached = readCachedManagerPortalBranding();
+    if (cached?.partnerName) setSessionBranding(cached);
+
+    getManagerPartnerBranding()
+      .then((data) => {
+        if (!active || !data?.partnerName) return;
+        setSessionBranding(data);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setSessionBrandingReady(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user, role]);
 
   useEffect(() => {
     let active = true;
@@ -138,6 +256,13 @@ export default function Signup() {
   }, []);
 
   useEffect(() => {
+    if (location.state?.mode === 'signin') {
+      setMode('signin');
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.pathname, location.state, navigate]);
+
+  useEffect(() => {
     if (location.state?.passwordUpdated) {
       const email = typeof location.state.email === 'string' ? location.state.email : '';
       if (email) setSignInEmail(email);
@@ -145,6 +270,14 @@ export default function Signup() {
       setSuccessMsg('Your password was updated. Sign in with your new password.');
       navigate(location.pathname, { replace: true, state: {} });
     }
+  }, [location.pathname, location.state, navigate]);
+
+  useEffect(() => {
+    const email = typeof location.state?.prefilledEmail === 'string' ? location.state.prefilledEmail.trim() : '';
+    if (!email) return;
+    setSignInEmail(email);
+    setFormData((prev) => ({ ...prev, email }));
+    navigate(location.pathname, { replace: true, state: {} });
   }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
@@ -167,13 +300,124 @@ export default function Signup() {
     return true;
   };
 
-  if (authLoading) return <ManagerAuthLoading />;
+  const cachedPartnerConflict = partnerSlug ? getManagerPartnerLinkConflict(partnerSlug) : null;
+  const isSignedInManager = isLikelyManagerSession(user, role);
+
+  const renderAdminOnManagerConflict = () => (
+    <RolePortalConflict
+      variant="admin-on-manager"
+      partnerBranding={slugBranding || cachedPartnerConflict?.urlBranding}
+      partnerSlug={partnerSlug || ''}
+      signingOut={signingOut}
+      onGoToDashboard={() => navigate('/')}
+      onLogout={async () => {
+        if (signingOut) return;
+        setSigningOut(true);
+        try {
+          await signOutToManagerAuth(partnerSlug, { logout, navigate });
+        } finally {
+          setSigningOut(false);
+        }
+      }}
+    />
+  );
+
+  const renderPartnerLinkConflict = (conflict = cachedPartnerConflict) => {
+    if (!conflict || !partnerSlug) return null;
+    return (
+      <ManagerPartnerLinkConflict
+        urlPartnerBranding={slugBranding || conflict.urlBranding}
+        urlPartnerSlug={partnerSlug}
+        sessionPartnerBranding={sessionBranding || conflict.sessionBranding}
+        signingOut={signingOut}
+        onGoToPortal={() => {
+          clearManagerIntendedPartnerSlug();
+          navigate('/submit');
+        }}
+        onLogout={async () => {
+          if (signingOut) return;
+          setSigningOut(true);
+          try {
+            await signOutToManagerAuth(partnerSlug, { logout, navigate });
+          } finally {
+            setSigningOut(false);
+          }
+        }}
+      />
+    );
+  };
+
+  if (user && isAdminOnManagerPortal(user, role)) {
+    return renderAdminOnManagerConflict();
+  }
+
+  if (user && isSignedInManager && cachedPartnerConflict) {
+    return renderPartnerLinkConflict();
+  }
+
+  if (authLoading) {
+    return (
+      <ManagerAuthLoading
+        partnerBranding={slugBranding || cachedPartnerConflict?.urlBranding}
+      />
+    );
+  }
+  if (partnerSlug && !partnerAccessReady) {
+    return (
+      <ManagerAuthLoading partnerBranding={slugBranding || cachedPartnerConflict?.urlBranding} />
+    );
+  }
+
+  const normalizedUrlSlug = partnerSlug?.toLowerCase() ?? '';
+  const sessionPartnerSlug = sessionBranding?.partnerName
+    ? partnerSlugFromName(sessionBranding.partnerName)
+    : '';
+  const partnerLinkMismatch = Boolean(
+    user &&
+      role === 'manager' &&
+      normalizedUrlSlug &&
+      (!sessionPartnerSlug || normalizedUrlSlug !== sessionPartnerSlug),
+  );
 
   // Don't force-logout non-managers here — that raced with role hydration and
   // bounced managers back to this page. Route guards handle redirects.
-  if (user && role === 'manager') return <Navigate to="/submit" replace />;
-  if (user && role === 'admin') return <Navigate to="/" replace />;
-  if (user && !role) return <ManagerAuthLoading />;
+  if (user && role === 'manager') {
+    if (!sessionBrandingReady && !cachedPartnerConflict) {
+      return (
+        <ManagerAuthLoading partnerBranding={slugBranding || cachedPartnerConflict?.urlBranding} />
+      );
+    }
+
+    if (partnerSlug && sessionPartnerSlug && normalizedUrlSlug === sessionPartnerSlug) {
+      clearManagerIntendedPartnerSlug();
+      return <Navigate to="/submit" replace />;
+    }
+
+    if (partnerLinkMismatch) {
+      return renderPartnerLinkConflict(
+        cachedPartnerConflict || {
+          urlSlug: normalizedUrlSlug,
+          urlBranding: slugBranding,
+          sessionBranding,
+          sessionSlug: sessionPartnerSlug,
+        },
+      );
+    }
+
+    clearManagerIntendedPartnerSlug();
+    return <Navigate to="/submit" replace />;
+  }
+  if (user && !role) {
+    if (isAdminOnManagerPortal(user, role)) {
+      return renderAdminOnManagerConflict();
+    }
+    if (isLikelyManagerPartnerLinkConflict(partnerSlug, user.id, role)) {
+      return renderPartnerLinkConflict();
+    }
+    return (
+      <ManagerAuthLoading partnerBranding={slugBranding || cachedPartnerConflict?.urlBranding} />
+    );
+  }
 
   const handleChange = (field, val) => {
     setFormData((prev) => ({ ...prev, [field]: val }));
@@ -181,6 +425,25 @@ export default function Signup() {
   };
 
   const switchMode = (next) => {
+    const trimmedSignInEmail = signInEmail.trim();
+    const trimmedSignupEmail = formData.email.trim();
+
+    if (next === 'signup' && trimmedSignInEmail) {
+      setFormData((prev) => ({ ...prev, email: trimmedSignInEmail }));
+    }
+    if (next === 'signin' && trimmedSignupEmail) {
+      setSignInEmail(trimmedSignupEmail);
+    }
+
+    const brandingSlug =
+      partnerSlug ||
+      (slugBranding?.partnerName ? partnerSlugFromName(slugBranding.partnerName) : '') ||
+      (emailBranding?.partnerName ? partnerSlugFromName(emailBranding.partnerName) : '');
+    const targetPath = managerAuthSignupPath(brandingSlug);
+    if (location.pathname !== targetPath) {
+      navigate(targetPath, { replace: true, state: location.state });
+    }
+
     setMode(next);
     setErrorMsg('');
     setSuccessMsg('');
@@ -189,14 +452,56 @@ export default function Signup() {
     setLoading(false);
     setResendError('');
     setResendNotice('');
-    if (next === 'forgot' && signInEmail.trim()) {
-      setForgotEmail(signInEmail.trim());
+    if (next === 'forgot' && trimmedSignInEmail) {
+      setForgotEmail(trimmedSignInEmail);
     }
   };
 
   const goToSignIn = (email = formData.email) => {
     setSignInEmail(email.trim());
     switchMode('signin');
+  };
+
+  const handleEmailGateSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+
+    if (!emailGateEmail.trim()) {
+      setErrorMsg('Please enter your email address.');
+      return;
+    }
+
+    if (appConfig.enforceDomainCheck && !domainsReady) {
+      setErrorMsg(MANAGER_DOMAINS_UNAVAILABLE_MESSAGE);
+      return;
+    }
+
+    const emailResult = validateManagerEmail(emailGateEmail, {
+      enforceDomain: appConfig.enforceDomainCheck,
+      allowedDomains,
+    });
+    if (!emailResult.ok) {
+      setErrorMsg(emailResult.error);
+      return;
+    }
+
+    setEmailGateLoading(true);
+    try {
+      const branding = await getPublicPartnerBranding(emailResult.value);
+      const slug = partnerSlugFromName(branding?.partnerName);
+      if (!slug) {
+        setErrorMsg('No partner portal is configured for this email domain.');
+        return;
+      }
+      navigate(managerAuthSignupPath(slug), {
+        replace: true,
+        state: { prefilledEmail: emailResult.value },
+      });
+    } catch {
+      setErrorMsg('No partner portal is configured for this email domain.');
+    } finally {
+      setEmailGateLoading(false);
+    }
   };
 
   const showVerifyScreen = (email, { resent = false } = {}) => {
@@ -212,9 +517,14 @@ export default function Signup() {
     e.preventDefault();
     setErrorMsg('');
 
+    if (emailDomainError) {
+      setErrorMsg(emailDomainError);
+      return;
+    }
+
     const validated = validateManagerSignupFields(formData, {
       enforceDomain: appConfig.enforceDomainCheck,
-      allowedDomains,
+      allowedDomains: authAllowedDomains,
     });
     if (!validated.ok) {
       setErrorMsg(validated.error);
@@ -331,10 +641,15 @@ export default function Signup() {
 
     const emailResult = validateManagerEmail(signInEmail, {
       enforceDomain: appConfig.enforceDomainCheck,
-      allowedDomains,
+      allowedDomains: authAllowedDomains,
     });
     if (!emailResult.ok) {
       setErrorMsg(emailResult.error);
+      return;
+    }
+
+    if (emailDomainError) {
+      setErrorMsg(emailDomainError);
       return;
     }
 
@@ -384,10 +699,15 @@ export default function Signup() {
 
     const emailResult = validateManagerEmail(forgotEmail, {
       enforceDomain: appConfig.enforceDomainCheck,
-      allowedDomains,
+      allowedDomains: authAllowedDomains,
     });
     if (!emailResult.ok) {
       setErrorMsg(emailResult.error);
+      return;
+    }
+
+    if (emailDomainError) {
+      setErrorMsg(emailDomainError);
       return;
     }
 
@@ -425,6 +745,67 @@ export default function Signup() {
       setLoading(false);
     }
   };
+
+  if (!partnerSlug) {
+    return (
+      <ManagerAuthShell partnerBranding={null}>
+        <h2 className="text-center text-base font-semibold text-[var(--color-text-primary)]">
+          Enter your work email
+        </h2>
+        <p className="mt-1 mb-6 text-center text-sm text-[var(--color-text-secondary)]">
+          Use the email domain your partner has approved for portal access.
+        </p>
+
+        {errorMsg && (
+          <div role="alert" className={errorClass}>
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleEmailGateSubmit} className="space-y-4" noValidate>
+          <div>
+            <label htmlFor={emailGateEmailId} className={labelClass}>
+              Email
+            </label>
+            <input
+              id={emailGateEmailId}
+              name="email"
+              type="email"
+              autoComplete="email"
+              inputMode="email"
+              spellCheck={false}
+              placeholder="you@partner.com"
+              value={emailGateEmail}
+              onChange={(e) => {
+                setEmailGateEmail(e.target.value);
+                if (errorMsg) setErrorMsg('');
+              }}
+              disabled={emailGateLoading}
+              className={inputClass}
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={emailGateLoading || (appConfig.enforceDomainCheck && !domainsReady)}
+            aria-busy={emailGateLoading}
+            className={buttonClass}
+          >
+            {emailGateLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                <span>Checking email…</span>
+              </>
+            ) : (
+              'Continue'
+            )}
+          </button>
+        </form>
+      </ManagerAuthShell>
+    );
+  }
 
   if (verifySent) {
     return (
@@ -537,12 +918,12 @@ export default function Signup() {
           Enter your email and we will send you a link to choose a new password.
         </p>
 
-        {errorMsg && (
+        {(errorMsg || emailDomainError) && (
           <div role="alert" className={errorClass}>
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
             <span>
-              {errorMsg}
-              {showCreateAccountHint && (
+              {errorMsg || emailDomainError}
+              {showCreateAccountHint && errorMsg && (
                 <>
                   {' '}
                   <button
@@ -550,7 +931,7 @@ export default function Signup() {
                     onClick={() => switchMode('signup')}
                     className="font-medium underline"
                   >
-                    Create an account
+                    {managerAuthCreateAccountLink(partnerLabel)}
                   </button>
                 </>
               )}
@@ -582,7 +963,11 @@ export default function Signup() {
             />
           </div>
 
-          <button type="submit" disabled={loading || cooldownMs > 0} className={buttonClass}>
+          <button
+            type="submit"
+            disabled={loading || cooldownMs > 0 || Boolean(emailDomainError)}
+            className={buttonClass}
+          >
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -615,8 +1000,10 @@ export default function Signup() {
 
     return (
       <ManagerAuthShell partnerBranding={partnerBranding}>
-        <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Sign in</h2>
-        <p className="mt-1 mb-6 text-sm text-[var(--color-text-secondary)]">
+        <h2 className="text-center text-base font-semibold text-[var(--color-text-primary)]">
+          {managerAuthHeading(partnerLabel, 'signin')}
+        </h2>
+        <p className="mt-1 mb-6 text-center text-sm text-[var(--color-text-secondary)]">
           Use the email and password you chose when you signed up.
         </p>
 
@@ -630,12 +1017,12 @@ export default function Signup() {
           </div>
         )}
 
-        {errorMsg && (
+        {(errorMsg || emailDomainError) && (
           <div role="alert" className={errorClass}>
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
             <span>
-              {errorMsg}
-              {showCreateAccountHint && (
+              {errorMsg || emailDomainError}
+              {showCreateAccountHint && errorMsg && (
                 <>
                   {' '}
                   <button
@@ -643,7 +1030,7 @@ export default function Signup() {
                     onClick={() => switchMode('signup')}
                     className="font-medium underline"
                   >
-                    Create an account
+                    {managerAuthCreateAccountLink(partnerLabel)}
                   </button>
                 </>
               )}
@@ -704,14 +1091,19 @@ export default function Signup() {
             />
           </div>
 
-          <button type="submit" disabled={loading} aria-busy={loading} className={buttonClass}>
+          <button
+            type="submit"
+            disabled={loading || Boolean(emailDomainError)}
+            aria-busy={loading}
+            className={buttonClass}
+          >
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                <span>Signing in…</span>
+                <span>{managerAuthSubmitLabel(partnerLabel, 'signin', { loading: true })}</span>
               </>
             ) : (
-              'Sign in'
+              managerAuthSubmitLabel(partnerLabel, 'signin')
             )}
           </button>
         </form>
@@ -723,7 +1115,7 @@ export default function Signup() {
             onClick={() => switchMode('signup')}
             className="font-medium text-[var(--color-brand-accent)] hover:underline"
           >
-            Create an account
+            {managerAuthCreateAccountLink(partnerLabel)}
           </button>
         </p>
       </ManagerAuthShell>
@@ -732,8 +1124,10 @@ export default function Signup() {
 
   return (
     <ManagerAuthShell wide partnerBranding={partnerBranding}>
-      <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Create account</h2>
-      <p className="mt-1 mb-6 text-sm text-[var(--color-text-secondary)]">
+      <h2 className="text-center text-base font-semibold text-[var(--color-text-primary)]">
+        {managerAuthHeading(partnerLabel, 'signup')}
+      </h2>
+      <p className="mt-1 mb-6 text-center text-sm text-[var(--color-text-secondary)]">
         Fill in your details and choose a password. You may need to confirm your email once.
       </p>
 
@@ -752,6 +1146,13 @@ export default function Signup() {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {emailDomainError && !errorMsg && (
+        <div role="alert" className={errorClass}>
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
+          <span>{emailDomainError}</span>
         </div>
       )}
 
@@ -864,6 +1265,7 @@ export default function Signup() {
           type="submit"
           disabled={
             loading ||
+            Boolean(emailDomainError) ||
             !formData.firstName.trim() ||
             !formData.lastName.trim() ||
             !formData.email.trim() ||
@@ -878,10 +1280,10 @@ export default function Signup() {
           {loading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              <span>Creating account…</span>
+              <span>{managerAuthSubmitLabel(partnerLabel, 'signup', { loading: true })}</span>
             </>
           ) : (
-            'Create account'
+            managerAuthSubmitLabel(partnerLabel, 'signup')
           )}
         </button>
       </form>

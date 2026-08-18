@@ -51,6 +51,19 @@ import ManagerPortalIntro, {
 import { getPublicPartnerBranding } from '../utils/pilot2Api';
 import { FlowGradientBackground } from '../components/ui/flow-gradient-hero-section';
 import { useManagerDirectory } from '../hooks/useManagerDirectory';
+import ManagerPartnerLinkConflict from '../components/auth/ManagerPartnerLinkConflict';
+import { ManagerAuthLoading } from '../components/auth/ManagerAuthShell';
+import {
+  partnerSlugFromName,
+  readCachedPartnerSlugBranding,
+} from '../utils/partnerSlugBrandingCache';
+import { instantPartnerBrandingFromSlug } from '../utils/managerAuthBranding';
+import {
+  clearManagerIntendedPartnerSlug,
+  readManagerIntendedPartnerSlug,
+} from '../utils/managerPartnerLinkIntent';
+import { signOutToManagerAuth } from '../utils/managerPartnerConflictSignOut';
+import { getManagerPartnerLinkConflict } from '../utils/managerPartnerLinkConflict';
 
 const formCardClass =
   'overflow-hidden rounded-2xl border border-[var(--color-manager-border)] bg-[var(--color-manager-panel)] shadow-[var(--shadow-manager-form)]';
@@ -213,6 +226,8 @@ export default function ManagerForm() {
   const [submitting, setSubmitting] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [partnerBranding, setPartnerBranding] = useState(() => readCachedManagerPortalBranding());
+  const [partnerBrandingReady, setPartnerBrandingReady] = useState(false);
+  const [partnerConflictDismissed, setPartnerConflictDismissed] = useState(false);
   const [portalIntro, setPortalIntro] = useState(null);
   const [requestsOpen, setRequestsOpen] = useState(false);
   const [flowStep, setFlowStep] = useState('choose');
@@ -358,7 +373,10 @@ export default function ManagerForm() {
   }, [user?.id, profile?.email, user?.email]);
 
   useEffect(() => {
-    if (!session?.access_token) return;
+    if (!session?.access_token) {
+      setPartnerBrandingReady(true);
+      return;
+    }
     getManagerPartnerBranding()
       .then((data) => {
         if (data?.partnerName) {
@@ -366,8 +384,27 @@ export default function ManagerForm() {
           cacheManagerPortalBranding(data);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        setPartnerBrandingReady(true);
+      });
   }, [session?.access_token]);
+
+  useEffect(() => {
+    const intended = readManagerIntendedPartnerSlug();
+    const sessionSlug = partnerBranding?.partnerName
+      ? partnerSlugFromName(partnerBranding.partnerName)
+      : '';
+    if (intended && sessionSlug && intended === sessionSlug) {
+      clearManagerIntendedPartnerSlug();
+    }
+  }, [partnerBranding?.partnerName]);
+
+  useEffect(() => {
+    if (portalIntro !== null) return undefined;
+    const timer = window.setTimeout(() => setPortalIntro(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [portalIntro]);
 
   const handlePortalIntroComplete = () => {
     if (user?.id) markManagerIntroSeen(user.id);
@@ -735,6 +772,58 @@ export default function ManagerForm() {
   const directoryFooterText = isRemoveAction
     ? 'Rows that share any name, email, or location detail with your form are also listed here from removed users.'
     : 'Rows that share any name, email, or location detail with your form are also listed here.';
+
+  const intendedPartnerSlug = readManagerIntendedPartnerSlug();
+  const cachedPartnerConflict = intendedPartnerSlug
+    ? getManagerPartnerLinkConflict(intendedPartnerSlug)
+    : null;
+  const sessionPartnerSlug = partnerBranding?.partnerName
+    ? partnerSlugFromName(partnerBranding.partnerName)
+    : '';
+  const partnerLinkConflict = Boolean(
+    !partnerConflictDismissed &&
+      (cachedPartnerConflict ||
+        (intendedPartnerSlug &&
+          (!sessionPartnerSlug || intendedPartnerSlug !== sessionPartnerSlug))),
+  );
+  const conflictUrlBranding =
+    cachedPartnerConflict?.urlBranding ||
+    readCachedPartnerSlugBranding(intendedPartnerSlug) ||
+    instantPartnerBrandingFromSlug(intendedPartnerSlug);
+
+  if (partnerLinkConflict) {
+    if (!partnerBrandingReady && !cachedPartnerConflict) return <ManagerAuthLoading />;
+    return (
+      <ManagerPartnerLinkConflict
+        urlPartnerBranding={conflictUrlBranding}
+        urlPartnerSlug={intendedPartnerSlug || cachedPartnerConflict?.urlSlug}
+        sessionPartnerBranding={partnerBranding || cachedPartnerConflict?.sessionBranding}
+        signingOut={signingOut}
+        onGoToPortal={() => {
+          clearManagerIntendedPartnerSlug();
+          setPartnerConflictDismissed(true);
+        }}
+        onLogout={async () => {
+          if (signingOut) return;
+          setSigningOut(true);
+          try {
+            if (user?.id) {
+              clearManagerFormDraft(user.id);
+              clearManagerIntroSeen(user.id);
+            }
+            const targetSlug =
+              intendedPartnerSlug || cachedPartnerConflict?.urlSlug || '';
+            await signOutToManagerAuth(targetSlug, { logout, navigate });
+          } catch (err) {
+            console.error(err);
+            showToast('Could not sign out. Please try again.', 'error');
+          } finally {
+            setSigningOut(false);
+          }
+        }}
+      />
+    );
+  }
 
   if (portalIntro === null) {
     return (

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import HoverTip from './HoverTip';
+import DottedScroll from './DottedScroll';
 
 let bodyScrollLockCount = 0;
 let lockedScrollY = 0;
@@ -103,6 +104,7 @@ export default function Modal({
   if (!isOpen || typeof document === 'undefined') return null;
 
   const shellStyle = belowDrawer ? belowDrawerShellStyle : fullScreenShellStyle;
+  const useFixedHeight = stableHeight || flushBody;
 
   const backdrop = (
     <div
@@ -167,8 +169,10 @@ export default function Modal({
       <div
         role="dialog"
         aria-modal="true"
-        className={`relative z-[1] flex w-full max-h-[100dvh] flex-col overflow-hidden border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-modal)] rounded-none sm:rounded-2xl ${
-          stableHeight ? 'h-[100dvh] sm:h-[min(90dvh,calc(100dvh-2rem))]' : 'max-h-[100dvh] sm:max-h-[min(90dvh,calc(100dvh-2rem))]'
+        className={`relative z-[1] flex w-full min-h-0 flex-col overflow-hidden border border-[var(--color-border-default)] bg-white shadow-[var(--shadow-modal)] rounded-none sm:rounded-2xl ${
+          useFixedHeight
+            ? 'h-[100dvh] sm:h-[min(90dvh,calc(100dvh-2rem))]'
+            : 'max-h-[100dvh] sm:max-h-[min(90dvh,calc(100dvh-2rem))]'
         } ${
           extraWide ? 'sm:max-w-[840px]' : wide ? 'sm:max-w-[560px]' : 'sm:max-w-[480px]'
         }`}
@@ -206,13 +210,23 @@ export default function Modal({
           </div>
         </div>
 
-        <div
-          className={`flex min-h-0 flex-1 flex-col overscroll-contain text-sm leading-relaxed text-[var(--color-text-primary)] ${
-            flushBody ? 'bg-[#f6f3ee] p-0' : 'bg-white p-4 sm:p-6'
-          } ${stableHeight ? 'overflow-hidden' : 'overflow-y-auto'}`}
-        >
-          {children}
-        </div>
+        {flushBody ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#f6f3ee]">
+            <DottedScroll
+              className="min-h-0 flex-1"
+              scrollClassName="h-full overflow-y-scroll scrollbar-hide overscroll-contain"
+              contentClassName="flex flex-col text-sm leading-relaxed text-[var(--color-text-primary)]"
+            >
+              {children}
+            </DottedScroll>
+          </div>
+        ) : (
+          <div
+            className={`flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain text-sm leading-relaxed text-[var(--color-text-primary)] bg-white p-4 sm:p-6`}
+          >
+            {children}
+          </div>
+        )}
 
         {footer && (
           <div

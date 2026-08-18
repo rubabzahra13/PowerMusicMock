@@ -2,23 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   AtSign,
-  Check,
   Copy,
-  Eye,
   Loader2,
   Mail,
   Plus,
   Shield,
   Trash2,
-  Upload,
   LayoutTemplate,
 } from 'lucide-react';
 import { AdminPageScroll, Toast, useToast, CardListSkeleton, Modal, HoverTip } from '../components/ui';
-import ManagerFormPreview, { PreviewFormActionToggle } from '../components/partner/ManagerFormPreview';
+import PartnerBrandingProfile from '../components/partner/PartnerBrandingProfile';
+import PartnerLogoCropModal from '../components/partner/PartnerLogoCropModal';
 import { getUserTimeZoneLabel, formatShortDate } from '../utils/dateTime';
 import { clearManagerAllowedDomainsCache } from '../utils/managerAuth';
 import { usePartners } from '../context/PartnerContext';
 import {
+  loadWithCache,
+  writeCache,
   clearCache,
   connectInbox,
   createAutomatedSource,
@@ -30,12 +30,17 @@ import {
   getAutomatedSources,
   getInboxes,
   getManagerDomains,
-  loadWithCache,
   updateInbox,
-  writeCache,
   getPartnerCustomForm,
   updatePartnerCustomForm,
 } from '../utils/pilot2Api';
+import {
+  cachePartnerSlugBranding,
+  downscalePartnerLogoDataUrl,
+  LARGE_PARTNER_LOGO_DATA_URL_LENGTH,
+  partnerCustomFormCacheKey,
+  readInstantPartnerLogoByPartnerId,
+} from '../utils/partnerSlugBrandingCache';
 
 const MAX_CONNECTED_INBOXES = 7;
 
@@ -274,8 +279,9 @@ export default function PartnerSettings() {
   const [sourceAdding, setSourceAdding] = useState(false);
   const [pendingSourceRemove, setPendingSourceRemove] = useState(null);
   const [partnerNameDraft, setPartnerNameDraft] = useState('');
-  const [partnerRenameBusy, setPartnerRenameBusy] = useState(false);
-  const [partnerNameEditing, setPartnerNameEditing] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileEditing, setProfileEditing] = useState(false);
+  const profileSnapshotRef = useRef({ name: '', logo: null });
   const [settingsTab, setSettingsTab] = useState('access');
 
   useEffect(() => {
@@ -292,14 +298,12 @@ export default function PartnerSettings() {
 
   // ── Partner Form branding ───────────────────────────────────────────────
   const [logoDataUrl, setLogoDataUrl] = useState(null);
-  const [brandingSaving, setBrandingSaving] = useState(false);
-  const [formPreviewOpen, setFormPreviewOpen] = useState(false);
+  const [logoCropOpen, setLogoCropOpen] = useState(false);
+  const [logoCropSrc, setLogoCropSrc] = useState(null);
+  const logoLoadRef = useRef(0);
+  const [profilePreviewing, setProfilePreviewing] = useState(false);
   const [previewAction, setPreviewAction] = useState('Add');
   const [formUrlCopied, setFormUrlCopied] = useState(false);
-
-  useEffect(() => {
-    if (formPreviewOpen) setPreviewAction('Add');
-  }, [formPreviewOpen]);
   const logoInputRef = useRef(null);
 
   const connectedAccounts = useMemo(
@@ -355,49 +359,85 @@ export default function PartnerSettings() {
     return () => window.removeEventListener('focus', refreshInboxes);
   }, [refreshInboxes, refreshDomains, refreshSources]);
 
+  const partnerBrandingCacheKey = selectedPartnerId
+    ? partnerCustomFormCacheKey(selectedPartnerId)
+    : '';
+
   useEffect(() => {
     setPartnerNameDraft(selectedPartner?.name || '');
-    setPartnerNameEditing(false);
-    
-    if (selectedPartnerId) {
-      getPartnerCustomForm(selectedPartnerId).then((res) => {
-        setLogoDataUrl(res?.logo_data_url || null);
-      }).catch((err) => {
-        console.error('Could not load manager form branding', err);
-      });
-    } else {
+    setProfileEditing(false);
+    setProfilePreviewing(false);
+
+    if (!selectedPartnerId) {
+      logoLoadRef.current += 1;
       setLogoDataUrl(null);
+      return undefined;
     }
-  }, [selectedPartner?.name, selectedPartnerId]);
 
-  const startPartnerRename = () => {
+    const loadId = ++logoLoadRef.current;
+    const partnerName = selectedPartner?.name;
+    const cacheKey = partnerBrandingCacheKey;
+
+    setLogoDataUrl(readInstantPartnerLogoByPartnerId(selectedPartnerId));
+
+    const commitLogo = (logo, resForCache = null) => {
+      if (loadId !== logoLoadRef.current) return;
+      setLogoDataUrl((prev) => (prev === logo ? prev : logo));
+      if (logo && partnerName) {
+        cachePartnerSlugBranding(partnerSlugFromName(partnerName), {
+          partnerName,
+          logoDataUrl: logo,
+        });
+      }
+      if (resForCache && cacheKey) {
+        writeCache(cacheKey, resForCache);
+      }
+    };
+
+    const processBrandingResponse = (res) => {
+      if (loadId !== logoLoadRef.current) return;
+      const logo = res?.logo_data_url ?? null;
+      commitLogo(logo, res);
+    };
+
+    loadWithCache(
+      cacheKey,
+      () => getPartnerCustomForm(selectedPartnerId),
+      (res) => {
+        processBrandingResponse(res);
+      },
+    ).catch((err) => {
+      console.error('Could not load manager form branding', err);
+    });
+
+    return undefined;
+  }, [selectedPartnerId, selectedPartner?.name, partnerBrandingCacheKey]);
+
+  const startProfileEdit = () => {
     if (!selectedPartner) return;
-    setPartnerNameDraft(selectedPartner.name || '');
-    setPartnerNameEditing(true);
+    const name = selectedPartner.name || '';
+    setPartnerNameDraft(name);
+    profileSnapshotRef.current = { name, logo: logoDataUrl };
+    setProfilePreviewing(false);
+    setProfileEditing(true);
   };
 
-  const cancelPartnerRename = () => {
-    setPartnerNameDraft(selectedPartner?.name || '');
-    setPartnerNameEditing(false);
+  const cancelProfileEdit = () => {
+    const { name, logo } = profileSnapshotRef.current;
+    setPartnerNameDraft(name);
+    setLogoDataUrl(logo);
+    if (logoInputRef.current) logoInputRef.current.value = '';
+    setProfileEditing(false);
   };
 
-  const handleRenamePartner = async () => {
-    if (!selectedPartner) return;
-    const nextName = partnerNameDraft.trim();
-    if (!nextName) {
-      showToast(`${partnerLabel} Name cannot be empty.`, 'error');
-      return;
-    }
-    setPartnerRenameBusy(true);
-    try {
-      await updatePartner(selectedPartner.id, nextName);
-      setPartnerNameEditing(false);
-      showToast(`${partnerLabel} renamed.`, 'success');
-    } catch (err) {
-      showToast(err.message || `Could not rename ${partnerLabel.toLowerCase()}.`, 'error');
-    } finally {
-      setPartnerRenameBusy(false);
-    }
+  const startProfilePreview = () => {
+    setProfileEditing(false);
+    setPreviewAction('Add');
+    setProfilePreviewing(true);
+  };
+
+  const cancelProfilePreview = () => {
+    setProfilePreviewing(false);
   };
 
   const handleAddAccount = async () => {
@@ -592,42 +632,122 @@ export default function PartnerSettings() {
   const partnerDirty = Boolean(selectedPartner)
     && partnerNameDraft.trim() !== (selectedPartner?.name || '')
     && partnerNameDraft.trim().length > 0;
+  const logoDirty = profileEditing && logoDataUrl !== profileSnapshotRef.current.logo;
+  const profileDirty = partnerDirty || logoDirty;
 
   // ── Manager form branding helpers ───────────────────────────────────────
+  const closeLogoCrop = () => {
+    setLogoCropOpen(false);
+    setLogoCropSrc(null);
+    if (logoInputRef.current) logoInputRef.current.value = '';
+  };
+
+  const applyLogoDataUrl = async (raw) => {
+    let next = raw;
+    if (next && next.length > LARGE_PARTNER_LOGO_DATA_URL_LENGTH) {
+      next = await downscalePartnerLogoDataUrl(next);
+    }
+    setLogoDataUrl(next);
+    if (selectedPartnerId) {
+      writeCache(partnerBrandingCacheKey, {
+        logo_data_url: next,
+        fields: [],
+      });
+    }
+    if (selectedPartner?.name) {
+      cachePartnerSlugBranding(partnerSlugFromName(selectedPartner.name), {
+        partnerName: selectedPartner.name,
+        logoDataUrl: next,
+      });
+    }
+  };
+
   const handleLogoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      setLogoDataUrl(ev.target.result);
+      setLogoCropSrc(ev.target.result);
+      setLogoCropOpen(true);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleAdjustLogoCrop = () => {
+    if (!logoDataUrl) return;
+    setLogoCropSrc(logoDataUrl);
+    setLogoCropOpen(true);
+  };
+
+  const handleLogoCropConfirm = async (cropped) => {
+    await applyLogoDataUrl(cropped);
+    closeLogoCrop();
   };
 
   const handleRemoveLogo = () => {
     setLogoDataUrl(null);
     if (logoInputRef.current) logoInputRef.current.value = '';
-  };
-
-  const handleSaveBranding = async () => {
-    setBrandingSaving(true);
-    try {
-      await updatePartnerCustomForm(selectedPartnerId, {
-        logo_data_url: logoDataUrl,
-        fields: [],
+    if (partnerBrandingCacheKey) {
+      writeCache(partnerBrandingCacheKey, { logo_data_url: null, fields: [] });
+    }
+    if (selectedPartner?.name) {
+      cachePartnerSlugBranding(partnerSlugFromName(selectedPartner.name), {
+        partnerName: selectedPartner.name,
+        logoDataUrl: null,
       });
-      showToast(
-        logoDataUrl ? 'Partner Form Branding saved.' : 'Partner Form Branding removed.',
-        'success',
-      );
-    } catch (err) {
-      showToast(`Could not save Branding: ${err.message}`, 'error');
-    } finally {
-      setBrandingSaving(false);
     }
   };
 
-  const previewPartnerName = partnerNameEditing
+  const handleSaveProfile = async () => {
+    if (!selectedPartner || !selectedPartnerId) return;
+    const nextName = partnerNameDraft.trim();
+    if (!nextName) {
+      showToast(`${partnerLabel} Name cannot be empty.`, 'error');
+      return;
+    }
+
+    const nameChanged = nextName !== (selectedPartner.name || '');
+    const logoChanged = logoDataUrl !== profileSnapshotRef.current.logo;
+    if (!nameChanged && !logoChanged) return;
+
+    setProfileSaving(true);
+    try {
+      // Persist the photo (server + cache) BEFORE the name change so the
+      // branding-load effect (re-triggered by the rename) reads the fresh logo.
+      if (logoChanged) {
+        await updatePartnerCustomForm(selectedPartnerId, {
+          logo_data_url: logoDataUrl,
+          fields: [],
+        });
+        writeCache(partnerBrandingCacheKey, {
+          logo_data_url: logoDataUrl,
+          fields: [],
+        });
+      }
+
+      const slug = partnerSlugFromName(nextName);
+      if (slug) {
+        cachePartnerSlugBranding(slug, {
+          partnerName: nextName,
+          logoDataUrl: logoDataUrl,
+        });
+      }
+
+      if (nameChanged) {
+        await updatePartner(selectedPartner.id, nextName);
+      }
+
+      profileSnapshotRef.current = { name: nextName, logo: logoDataUrl };
+      setProfileEditing(false);
+      showToast('Profile saved.', 'success');
+    } catch (err) {
+      showToast(err.message || 'Could not save profile.', 'error');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const previewPartnerName = profileEditing
     ? partnerNameDraft.trim() || partnerLabel
     : (selectedPartner?.name || partnerLabel);
 
@@ -918,149 +1038,32 @@ export default function PartnerSettings() {
             </SettingsPage>
           ) : (
             <SettingsPage>
-              <SettingsSection
-                id="form-partner"
-                title="Partner Name"
-                hint="Shown on the Partner Form header and across the admin app."
-              >
-                {partnerNameEditing ? (
-                  <div className="space-y-3">
-                    <input
-                      id="partner-name"
-                      type="text"
-                      value={partnerNameDraft}
-                      onChange={(event) => setPartnerNameDraft(event.target.value)}
-                      placeholder="Partner Name"
-                      disabled={!selectedPartner || partnerRenameBusy}
-                      autoFocus
-                      className={fieldStandaloneClass}
-                      aria-label="Partner Name"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <TextButton onClick={cancelPartnerRename} disabled={partnerRenameBusy}>
-                        Cancel
-                      </TextButton>
-                      <FilledButton
-                        onClick={handleRenamePartner}
-                        disabled={partnerRenameBusy || !partnerDirty}
-                      >
-                        {partnerRenameBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        Save
-                      </FilledButton>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/40 px-3.5 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-[var(--color-text-primary)]">
-                        {selectedPartner?.name || 'No Partner Selected'}
-                      </p>
-                    </div>
-                    <TextButton onClick={startPartnerRename} disabled={!selectedPartner}>
-                      Edit
-                    </TextButton>
-                  </div>
-                )}
-              </SettingsSection>
-
-              <SettingsSection
-                id="form-logo"
-                title="Partner Logo"
-                hint="Optional logo shown on the Partner Form header next to the Partner Name."
-              >
-                {logoDataUrl ? (
-                  <div className="flex items-center gap-4">
-                    <img
-                      src={logoDataUrl}
-                      alt="Partner Logo"
-                      className="h-16 w-16 rounded-lg border border-[var(--color-border-default)] bg-white object-contain p-1.5"
-                    />
-                    <div className="space-y-1">
-                      <TextButton onClick={() => logoInputRef.current?.click()}>Replace Logo</TextButton>
-                      <div>
-                        <button
-                          type="button"
-                          onClick={handleRemoveLogo}
-                          className="block rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => logoInputRef.current?.click()}
-                    className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 px-4 py-8 text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand-primary)]/40 hover:bg-[var(--color-surface-highlight)] hover:text-[var(--color-text-primary)]"
-                  >
-                    <Upload className="h-5 w-5" />
-                    <span className="font-medium">Upload Logo</span>
-                    <span className="text-xs text-[var(--color-text-muted)]">PNG, JPG, SVG, or WEBP</span>
-                  </button>
-                )}
-                <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
-              </SettingsSection>
-
-              <SettingsSection
-                id="form-url"
-                title="Partner Form URL"
-                hint="Share this link with managers. They sign up once, then use the same portal for add and remove requests."
-              >
-                <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-panel)]/50 p-4 sm:p-5">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <code className="block min-w-0 flex-1 break-all rounded-lg border border-[var(--color-border-default)] bg-white px-3 py-2.5 text-xs text-[var(--color-text-primary)]">
-                      {partnerFormUrl || 'Save a partner name to generate the URL.'}
-                    </code>
-                    <FilledButton
-                      type="button"
-                      onClick={handleCopyFormUrl}
-                      disabled={!partnerFormUrl}
-                      className="shrink-0"
-                    >
-                      {formUrlCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                      {formUrlCopied ? 'Copied!' : 'Copy URL'}
-                    </FilledButton>
-                  </div>
-                  <p className="mt-3 text-[11px] text-[var(--color-text-muted)]">
-                    Generic entry (any partner):{' '}
-                    <span className="font-medium text-[var(--color-text-secondary)]">
-                      {window.location.origin}/submit/signup
-                    </span>
-                  </p>
-                </div>
-              </SettingsSection>
-
-              <SettingsSection
-                id="form-preview"
-                title="Partner Form Preview"
-                hint="How the live Partner Form looks with your Name and Logo. Field layout matches the manager portal."
-              >
-                <button
-                  type="button"
-                  onClick={() => setFormPreviewOpen(true)}
-                  className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[var(--color-brand-secondary-border)] bg-[var(--color-brand-secondary-muted)]/40 px-4 py-8 text-left transition-colors hover:bg-[var(--color-brand-secondary-muted)]/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand-secondary)]/30 sm:flex-row sm:justify-between sm:gap-4 sm:px-5 sm:py-6"
-                >
-                  <div className="min-w-0 text-center sm:text-left">
-                    <p className="text-sm font-semibold text-[var(--color-brand-secondary)]">
-                      Open Partner Form preview
-                    </p>
-                    <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
-                      See a read-only mockup with your current Name and Logo.
-                    </p>
-                  </div>
-                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--color-brand-secondary)] shadow-sm ring-1 ring-[var(--color-brand-secondary-border)]/60">
-                    <Eye className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                </button>
-              </SettingsSection>
-
-              <section className="px-5 py-5 sm:px-6">
-                <FilledButton onClick={handleSaveBranding} disabled={brandingSaving}>
-                  {brandingSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  Save Branding
-                </FilledButton>
-              </section>
+              <PartnerBrandingProfile
+                partnerName={selectedPartner?.name}
+                logoDataUrl={logoDataUrl}
+                formUrl={partnerFormUrl}
+                formUrlCopied={formUrlCopied}
+                onCopyFormUrl={handleCopyFormUrl}
+                previewing={profilePreviewing}
+                previewAction={previewAction}
+                onPreviewActionChange={setPreviewAction}
+                onStartPreview={startProfilePreview}
+                onCancelPreview={cancelProfilePreview}
+                editing={profileEditing}
+                onStartEdit={startProfileEdit}
+                onCancelEdit={cancelProfileEdit}
+                nameDraft={partnerNameDraft}
+                onNameDraftChange={setPartnerNameDraft}
+                onSaveProfile={handleSaveProfile}
+                profileSaving={profileSaving}
+                profileDirty={profileDirty}
+                onLogoUpload={handleLogoUpload}
+                onAdjustLogoCrop={handleAdjustLogoCrop}
+                onRemoveLogo={handleRemoveLogo}
+                logoInputRef={logoInputRef}
+                disabled={!selectedPartner}
+                fieldClass={fieldStandaloneClass}
+              />
             </SettingsPage>
           )}
         </div>
@@ -1169,25 +1172,13 @@ export default function PartnerSettings() {
         <p>Stop treating messages from <strong>{pendingSourceRemove ? formatSourcePattern(pendingSourceRemove) : ''}</strong> as automated add/remove requests.</p>
       </Modal>
 
-      <Modal
-        isOpen={formPreviewOpen}
-        onClose={() => setFormPreviewOpen(false)}
-        title="Partner Form Preview"
-        headerExtra={(
-          <PreviewFormActionToggle
-            action={previewAction}
-            onChange={setPreviewAction}
-          />
-        )}
-        extraWide
-        flushBody
-      >
-        <ManagerFormPreview
-          partnerName={previewPartnerName}
-          logoDataUrl={logoDataUrl}
-          action={previewAction}
-        />
-      </Modal>
+      <PartnerLogoCropModal
+        isOpen={logoCropOpen}
+        imageSrc={logoCropSrc}
+        onCancel={closeLogoCrop}
+        onConfirm={handleLogoCropConfirm}
+        busy={profileSaving}
+      />
     </AdminPageScroll>
   );
 }

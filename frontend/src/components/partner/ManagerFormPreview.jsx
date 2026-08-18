@@ -115,7 +115,7 @@ export default function ManagerFormPreview({
 
   return (
     <div
-      className="pointer-events-none select-none overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-bg)]"
+      className="pointer-events-none select-none rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-bg)]"
       aria-label={`Read-only preview of the partner ${action === 'Remove' ? 'remove' : 'add'} form`}
     >
       <ManagerFormHeader
@@ -127,7 +127,7 @@ export default function ManagerFormPreview({
         preview
       />
 
-      <div className="p-4 sm:p-5">
+      <div className="px-4 pt-4 pb-6 sm:px-5 sm:pt-5 sm:pb-8">
         <div className={formCardClass}>
           <div className="p-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
