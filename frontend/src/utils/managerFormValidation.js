@@ -12,13 +12,15 @@ export const PERSON_FIELD_LIMITS = {
   lastName: 100,
   email: 254,
   location: 200,
+  supervisor: 200,
+  hospital: 200,
   notes: 5000,
 };
 
 export const MIN_ROSTER_NAME_LENGTH = 2;
 export const MIN_ROSTER_LOCATION_LENGTH = 2;
 
-const PERSON_FIELDS = ['firstName', 'lastName', 'email', 'location', 'notes'];
+const PERSON_FIELDS = ['firstName', 'lastName', 'email', 'location', 'supervisor', 'hospital', 'notes'];
 
 /** Strip invalid characters as the user types. */
 export function sanitizePersonFieldInput(field, value) {
@@ -31,6 +33,9 @@ export function sanitizePersonFieldInput(field, value) {
   }
   if (field === 'location') {
     return raw.replace(LOCATION_CHARS, '').slice(0, PERSON_FIELD_LIMITS.location);
+  }
+  if (field === 'supervisor' || field === 'hospital') {
+    return raw.slice(0, PERSON_FIELD_LIMITS[field]);
   }
   const max = PERSON_FIELD_LIMITS[field] ?? 5000;
   return raw.slice(0, max);
@@ -96,6 +101,40 @@ export function validatePersonLocation(raw) {
   return { ok: true, value: cleaned };
 }
 
+export function validatePersonSupervisor(raw, required = true) {
+  const cleaned = sanitizePersonFieldInput('supervisor', raw).trim();
+  if (!cleaned) {
+    if (required) return { ok: false, error: 'User supervisor is required.' };
+    return { ok: true, value: '' };
+  }
+  if (cleaned.length < MIN_ROSTER_NAME_LENGTH) {
+    return { ok: false, error: `User supervisor must be at least ${MIN_ROSTER_NAME_LENGTH} characters.` };
+  }
+  if (cleaned.length > PERSON_FIELD_LIMITS.supervisor) {
+    return { ok: false, error: 'User supervisor must be at most 200 characters.' };
+  }
+  const htmlError = rejectHtml(cleaned, 'User supervisor');
+  if (htmlError) return { ok: false, error: htmlError };
+  return { ok: true, value: cleaned };
+}
+
+export function validatePersonHospital(raw, required = true) {
+  const cleaned = sanitizePersonFieldInput('hospital', raw).trim();
+  if (!cleaned) {
+    if (required) return { ok: false, error: 'User hospital is required.' };
+    return { ok: true, value: '' };
+  }
+  if (cleaned.length < MIN_ROSTER_NAME_LENGTH) {
+    return { ok: false, error: `User hospital must be at least ${MIN_ROSTER_NAME_LENGTH} characters.` };
+  }
+  if (cleaned.length > PERSON_FIELD_LIMITS.hospital) {
+    return { ok: false, error: 'User hospital must be at most 200 characters.' };
+  }
+  const htmlError = rejectHtml(cleaned, 'User hospital');
+  if (htmlError) return { ok: false, error: htmlError };
+  return { ok: true, value: cleaned };
+}
+
 export function validatePersonNotes(raw) {
   const cleaned = sanitizePersonFieldInput('notes', raw).trim();
   if (!cleaned) {
@@ -109,7 +148,8 @@ export function validatePersonNotes(raw) {
   return { ok: true, value: cleaned };
 }
 
-export function validatePersonFormFields(person) {
+export function validatePersonFormFields(person, options = {}) {
+  const isHealthTech = Boolean(options?.isHealthTech);
   const errors = {};
   const values = {};
 
@@ -128,6 +168,31 @@ export function validatePersonFormFields(person) {
   const location = validatePersonLocation(person.location);
   if (!location.ok) errors.location = location.error;
   else values.location = location.value;
+
+  if (isHealthTech) {
+    const supervisor = validatePersonSupervisor(person.supervisor, true);
+    if (!supervisor.ok) errors.supervisor = supervisor.error;
+    else values.supervisor = supervisor.value;
+
+    const hospital = validatePersonHospital(person.hospital, true);
+    if (!hospital.ok) errors.hospital = hospital.error;
+    else values.hospital = hospital.value;
+  } else {
+    if (person.supervisor?.trim()) {
+      const supervisor = validatePersonSupervisor(person.supervisor, false);
+      if (!supervisor.ok) errors.supervisor = supervisor.error;
+      else values.supervisor = supervisor.value;
+    } else {
+      values.supervisor = '';
+    }
+    if (person.hospital?.trim()) {
+      const hospital = validatePersonHospital(person.hospital, false);
+      if (!hospital.ok) errors.hospital = hospital.error;
+      else values.hospital = hospital.value;
+    } else {
+      values.hospital = '';
+    }
+  }
 
   const notes = validatePersonNotes(person.notes);
   if (!notes.ok) errors.notes = notes.error;
@@ -163,8 +228,8 @@ function applyDuplicateEmailErrors(forms, rowResults) {
 }
 
 /** Validate every person row, including duplicate emails in a batch. */
-export function validatePersonForms(forms) {
-  const rowResults = forms.map((person) => validatePersonFormFields(person));
+export function validatePersonForms(forms, options = {}) {
+  const rowResults = forms.map((person) => validatePersonFormFields(person, options));
   applyDuplicateEmailErrors(forms, rowResults);
 
   const errorsByRow = rowResults.map((result) => result.errors);
@@ -178,13 +243,15 @@ export function validatePersonForms(forms) {
       lastName: result.values.lastName ?? forms[index].lastName,
       email: result.values.email ?? forms[index].email,
       location: result.values.location ?? forms[index].location,
+      supervisor: result.values.supervisor ?? forms[index].supervisor ?? '',
+      hospital: result.values.hospital ?? forms[index].hospital ?? '',
       notes: result.values.notes ?? forms[index].notes ?? '',
     })),
   };
 }
 
-export function isPersonFormValid(person) {
-  return validatePersonFormFields(person).ok;
+export function isPersonFormValid(person, options = {}) {
+  return validatePersonFormFields(person, options).ok;
 }
 
 export function firstInvalidPersonField(errorsByRow) {

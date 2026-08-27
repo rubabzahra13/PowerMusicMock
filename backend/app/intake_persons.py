@@ -166,6 +166,8 @@ def sync_display_person(req: models.ManagerRequest) -> None:
     req.person_last_name = chosen.lastName or ""
     req.person_email = chosen.email or ""
     req.person_location = chosen.location or ""
+    req.person_supervisor = chosen.supervisor or None
+    req.person_hospital = chosen.hospital or None
 
 
 def bootstrap_intake_persons(req: models.ManagerRequest) -> None:
@@ -178,6 +180,8 @@ def bootstrap_intake_persons(req: models.ManagerRequest) -> None:
         lastName=req.person_last_name,
         email=req.person_email,
         location=req.person_location,
+        supervisor=getattr(req, "person_supervisor", None) or getattr(req, "supervisor", None),
+        hospital=getattr(req, "person_hospital", None) or getattr(req, "hospital", None),
     )
     tags = req.tags or []
     current: Dict[str, Any] = {}

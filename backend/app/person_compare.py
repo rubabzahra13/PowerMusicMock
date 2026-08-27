@@ -27,6 +27,8 @@ def person_from_mapping(data: Optional[Dict[str, Any]]) -> Optional[schemas.Pers
         lastName=data.get("lastName") or "",
         email=data.get("email") or "",
         location=data.get("location") or "",
+        supervisor=data.get("supervisor") or None,
+        hospital=data.get("hospital") or None,
     )
 
 
@@ -37,12 +39,16 @@ def person_to_mapping(person: Union[schemas.PersonInfo, models.ManagerRequest]) 
             "lastName": person.person_last_name or "",
             "email": person.person_email or "",
             "location": person.person_location or "",
+            "supervisor": getattr(person, "person_supervisor", None) or getattr(person, "supervisor", None) or "",
+            "hospital": getattr(person, "person_hospital", None) or getattr(person, "hospital", None) or "",
         }
     return {
         "firstName": person.firstName or "",
         "lastName": person.lastName or "",
         "email": person.email or "",
         "location": person.location or "",
+        "supervisor": person.supervisor or "",
+        "hospital": person.hospital or "",
     }
 
 
@@ -96,6 +102,32 @@ def compare_person_fields(
             "rightLabel": right_label,
         },
     ]
+
+    sup_l = _norm(getattr(left, "supervisor", None))
+    sup_r = _norm(getattr(right, "supervisor", None))
+    if getattr(left, "supervisor", None) or getattr(right, "supervisor", None):
+        fields.append({
+            "field": "supervisor",
+            "label": "Supervisor",
+            "status": "same" if sup_l == sup_r else "differs",
+            "leftValue": getattr(left, "supervisor", None) or "",
+            "rightValue": getattr(right, "supervisor", None) or "",
+            "leftLabel": left_label,
+            "rightLabel": right_label,
+        })
+
+    hosp_l = _norm(getattr(left, "hospital", None))
+    hosp_r = _norm(getattr(right, "hospital", None))
+    if getattr(left, "hospital", None) or getattr(right, "hospital", None):
+        fields.append({
+            "field": "hospital",
+            "label": "Hospital",
+            "status": "same" if hosp_l == hosp_r else "differs",
+            "leftValue": getattr(left, "hospital", None) or "",
+            "rightValue": getattr(right, "hospital", None) or "",
+            "leftLabel": left_label,
+            "rightLabel": right_label,
+        })
 
     all_match = all(item["status"] == "same" for item in fields)
     summary = "All same" if all_match else _build_summary(fields)

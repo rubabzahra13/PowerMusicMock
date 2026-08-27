@@ -301,6 +301,22 @@ export default function RequestDetailView({
                       <span className="text-[var(--color-text-primary)]">{personLocation}</span>
                     </span>
                   </p>
+                  {(request.person?.supervisor || request.person?.hospital) ? (
+                    <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[var(--color-text-secondary)] border-t border-[var(--color-border-default)]/60 pt-2">
+                      {request.person?.supervisor ? (
+                        <div>
+                          <span className="font-semibold text-[var(--color-text-secondary)]">Supervisor:</span>{' '}
+                          <span className="text-[var(--color-text-primary)]">{request.person.supervisor}</span>
+                        </div>
+                      ) : null}
+                      {request.person?.hospital ? (
+                        <div>
+                          <span className="font-semibold text-[var(--color-text-secondary)]">Hospital:</span>{' '}
+                          <span className="text-[var(--color-text-primary)]">{request.person.hospital}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
 
                 <Tag

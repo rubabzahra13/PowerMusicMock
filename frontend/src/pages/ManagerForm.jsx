@@ -268,17 +268,38 @@ export default function ManagerForm() {
     };
   }, [profile, user]);
 
+  const intendedSlug = readManagerIntendedPartnerSlug();
+  const activePartnerSlug = partnerBranding?.partnerName
+    ? partnerSlugFromName(partnerBranding.partnerName)
+    : '';
+
+  const isHealthTech = useMemo(() => {
+    const name = (partnerBranding?.partnerName || '').toLowerCase();
+    return (
+      activePartnerSlug === 'health-tech' ||
+      intendedSlug === 'health-tech' ||
+      name.includes('healthtech') ||
+      name.includes('health tech')
+    );
+  }, [partnerBranding, activePartnerSlug, intendedSlug]);
+
+  const managerGridClass = isHealthTech
+    ? 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3'
+    : 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4';
+
   const personFieldIds = (index) => ({
     first: `${formId}-person-${index}-first`,
     last: `${formId}-person-${index}-last`,
     email: `${formId}-person-${index}-email`,
     location: `${formId}-person-${index}-location`,
+    supervisor: `${formId}-person-${index}-supervisor`,
+    hospital: `${formId}-person-${index}-hospital`,
     notes: `${formId}-person-${index}-notes`,
   });
 
   const personValidation = useMemo(
-    () => validatePersonForms(personForms),
-    [personForms],
+    () => validatePersonForms(personForms, { isHealthTech }),
+    [personForms, isHealthTech],
   );
 
   const touchKey = (index, field) => `${index}.${field}`;
@@ -518,7 +539,7 @@ export default function ManagerForm() {
     e.preventDefault();
     setSubmitAttempted(true);
 
-    const validation = validatePersonForms(personForms);
+    const validation = validatePersonForms(personForms, { isHealthTech });
     if (
       !managerDetails.firstName.trim() ||
       !managerDetails.lastName.trim() ||
@@ -556,6 +577,8 @@ export default function ManagerForm() {
                 lastName: normalizedPeople[0].lastName,
                 email: normalizedPeople[0].email,
                 location: normalizedPeople[0].location,
+                supervisor: normalizedPeople[0].supervisor || undefined,
+                hospital: normalizedPeople[0].hospital || undefined,
               },
               action,
               notes: normalizedPeople[0].notes?.trim() || undefined,
@@ -563,11 +586,13 @@ export default function ManagerForm() {
           : {
               submittedBy: managerDetails,
               partnerId: partnerBranding?.partnerId || undefined,
-              people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
+              people: normalizedPeople.map(({ firstName, lastName, email, location, supervisor, hospital, notes }) => ({
                 firstName,
                 lastName,
                 email,
                 location,
+                supervisor: supervisor || undefined,
+                hospital: hospital || undefined,
                 notes: notes?.trim() || undefined,
               })),
               action,
@@ -1170,6 +1195,62 @@ export default function ManagerForm() {
                               />
                             )}
                           </Field>
+
+                          {isHealthTech && (
+                            <>
+                              <Field
+                                id={rowIds.supervisor}
+                                label="Supervisor"
+                                required
+                                error={getFieldError(index, 'supervisor')}
+                              >
+                                {({ describedBy, invalid }) => (
+                                  <input
+                                    ref={(node) => setPersonFieldRef(index, 'supervisor', node)}
+                                    id={rowIds.supervisor}
+                                    type="text"
+                                    required
+                                    autoComplete="off"
+                                    maxLength={PERSON_FIELD_LIMITS.supervisor}
+                                    value={personForm.supervisor || ''}
+                                    onChange={(e) =>
+                                      handlePersonChange(index, 'supervisor', e.target.value)
+                                    }
+                                    onBlur={() => handlePersonBlur(index, 'supervisor')}
+                                    aria-invalid={invalid || undefined}
+                                    aria-describedby={describedBy}
+                                    className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                                  />
+                                )}
+                              </Field>
+
+                              <Field
+                                id={rowIds.hospital}
+                                label="Hospital"
+                                required
+                                error={getFieldError(index, 'hospital')}
+                              >
+                                {({ describedBy, invalid }) => (
+                                  <input
+                                    ref={(node) => setPersonFieldRef(index, 'hospital', node)}
+                                    id={rowIds.hospital}
+                                    type="text"
+                                    required
+                                    autoComplete="off"
+                                    maxLength={PERSON_FIELD_LIMITS.hospital}
+                                    value={personForm.hospital || ''}
+                                    onChange={(e) =>
+                                      handlePersonChange(index, 'hospital', e.target.value)
+                                    }
+                                    onBlur={() => handlePersonBlur(index, 'hospital')}
+                                    aria-invalid={invalid || undefined}
+                                    aria-describedby={describedBy}
+                                    className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                                  />
+                                )}
+                              </Field>
+                            </>
+                          )}
                         </div>
 
                         {rowMatches.length > 0 && (

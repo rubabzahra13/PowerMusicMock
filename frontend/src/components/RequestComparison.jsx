@@ -47,6 +47,8 @@ const PERSON_FIELD_ROWS = [
   { key: 'name', label: 'Name' },
   { key: 'email', label: 'Email', mono: true },
   { key: 'location', label: 'Location' },
+  { key: 'supervisor', label: 'Supervisor' },
+  { key: 'hospital', label: 'Hospital' },
 ];
 
 /**
@@ -361,6 +363,8 @@ function personValuesFromRequest(requestPerson) {
     name,
     email: (requestPerson.email || '').trim(),
     location: (requestPerson.location || '').trim(),
+    supervisor: (requestPerson.supervisor || '').trim(),
+    hospital: (requestPerson.hospital || '').trim(),
   };
 }
 
@@ -495,6 +499,8 @@ export default function RequestComparison({
             name: intakeField('name', 'leftValue') || requestPersonValues?.name || '',
             email: intakeField('email', 'leftValue') || requestPersonValues?.email || '',
             location: intakeField('location', 'leftValue') || requestPersonValues?.location || '',
+            supervisor: intakeField('supervisor', 'leftValue') || requestPersonValues?.supervisor || '',
+            hospital: intakeField('hospital', 'leftValue') || requestPersonValues?.hospital || '',
             manager: requestManagerValue,
           },
         }
@@ -508,6 +514,8 @@ export default function RequestComparison({
             name: adminPersonValues?.name || '',
             email: adminPersonValues?.email || '',
             location: adminPersonValues?.location || '',
+            supervisor: adminPersonValues?.supervisor || '',
+            hospital: adminPersonValues?.hospital || '',
             manager: adminSenderValue,
           },
         }
@@ -534,6 +542,14 @@ export default function RequestComparison({
               || directoryRecord?.location
               || requestPersonValues?.location
               || '',
+            supervisor: intakeField('supervisor', 'rightValue')
+              || directoryRecord?.supervisor
+              || requestPersonValues?.supervisor
+              || '',
+            hospital: intakeField('hospital', 'rightValue')
+              || directoryRecord?.hospital
+              || requestPersonValues?.hospital
+              || '',
             manager: autoSenderValue,
           },
         }
@@ -550,6 +566,8 @@ export default function RequestComparison({
                 name: `${directoryRecord.firstName || ''} ${directoryRecord.lastName || ''}`.trim(),
                 email: directoryRecord.email,
                 location: directoryRecord.location,
+                supervisor: directoryRecord.supervisor || '',
+                hospital: directoryRecord.hospital || '',
                 manager: directoryManager,
               }
             : {
@@ -557,6 +575,10 @@ export default function RequestComparison({
                 email: directoryMatch?.fields?.find((f) => f.field === 'email')?.rightValue || '',
                 location:
                   directoryMatch?.fields?.find((f) => f.field === 'location')?.rightValue || '',
+                supervisor:
+                  directoryMatch?.fields?.find((f) => f.field === 'supervisor')?.rightValue || '',
+                hospital:
+                  directoryMatch?.fields?.find((f) => f.field === 'hospital')?.rightValue || '',
                 manager: directoryManager,
               },
         }

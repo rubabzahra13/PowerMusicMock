@@ -186,12 +186,29 @@ export default function GroupResolutionView({
       )
       : null;
 
+  const isHealthTech = Boolean(
+    (group?.partnerId && (group.partnerId.includes('health') || group.partnerId.includes('ht'))) ||
+    group.members?.some(
+      (m) =>
+        m.person?.supervisor != null ||
+        m.person?.hospital != null ||
+        m.person?.person_supervisor != null ||
+        m.person?.person_hospital != null
+    ) ||
+    dirPerson?.supervisor != null ||
+    dirPerson?.hospital != null ||
+    dirPerson?.person_supervisor != null ||
+    dirPerson?.person_hospital != null
+  );
+
   // Final values form state — pre-filled from representative
   const [form, setForm] = useState({
     firstName: repMember?.person?.firstName || '',
     lastName: repMember?.person?.lastName || '',
     email: repMember?.person?.email || '',
     location: repMember?.person?.location || '',
+    supervisor: repMember?.person?.supervisor || '',
+    hospital: repMember?.person?.hospital || '',
   });
   const [isEditing, setIsEditing] = useState(false);
   const [draftForm, setDraftForm] = useState(form);
@@ -235,6 +252,8 @@ export default function GroupResolutionView({
       lastName: info.lastName || '',
       email: info.email || '',
       location: info.location || '',
+      supervisor: info.supervisor || '',
+      hospital: info.hospital || '',
     };
     setUnlinkForm(initForm);
     setUnlinkDraft(initForm);
@@ -342,6 +361,8 @@ export default function GroupResolutionView({
             lastName: values.lastName.trim(),
             email: (values.email || '').trim(),
             location: (values.location || '').trim(),
+            supervisor: (values.supervisor || '').trim(),
+            hospital: (values.hospital || '').trim(),
           },
           adminNote: adminNote.trim() || null,
           sourceRequestId: currentSourceRequestId,
@@ -353,6 +374,8 @@ export default function GroupResolutionView({
             lastName: values.lastName.trim(),
             email: (values.email || '').trim(),
             location: (values.location || '').trim(),
+            supervisor: (values.supervisor || '').trim(),
+            hospital: (values.hospital || '').trim(),
           },
           adminNote: adminNote.trim() || null,
           sourceRequestId: currentSourceRequestId,
@@ -379,6 +402,8 @@ export default function GroupResolutionView({
           lastName: values.lastName.trim(),
           email: (values.email || '').trim(),
           location: (values.location || '').trim(),
+          supervisor: (values.supervisor || '').trim(),
+          hospital: (values.hospital || '').trim(),
         },
         adminNote: adminNote.trim() || null,
         sourceRequestId: currentSourceRequestId,
@@ -406,6 +431,8 @@ export default function GroupResolutionView({
           lastName: values.lastName.trim(),
           email: (values.email || '').trim(),
           location: (values.location || '').trim(),
+          supervisor: (values.supervisor || '').trim(),
+          hospital: (values.hospital || '').trim(),
         },
         adminNote: adminNote.trim() || null,
         sourceRequestId: currentSourceRequestId,
@@ -846,6 +873,12 @@ export default function GroupResolutionView({
                             <MetaItem label="Last Name" value={member.person.lastName || '—'} />
                             <MetaItem label="Email" value={member.person.email || '—'} />
                             <MetaItem label="Location" value={member.person.location || '—'} />
+                            {(isHealthTech || member.person?.supervisor || member.person?.person_supervisor) ? (
+                              <MetaItem label="Supervisor" value={member.person?.supervisor || member.person?.person_supervisor || '—'} />
+                            ) : null}
+                            {(isHealthTech || member.person?.hospital || member.person?.person_hospital) ? (
+                              <MetaItem label="Hospital" value={member.person?.hospital || member.person?.person_hospital || '—'} />
+                            ) : null}
                             <MetaItem label="Manager name" value={managerName || '—'} />
                             <MetaItem label="Manager email" value={managerEmail || '—'} />
                             <MetaItem label="Manager location" value={managerClub || '—'} />
@@ -920,6 +953,12 @@ export default function GroupResolutionView({
               <MetaItem label="Last Name" value={dirPerson.lastName} />
               <MetaItem label="Email" value={dirPerson.email} />
               <MetaItem label="Location" value={dirPerson.location} />
+              {(isHealthTech || dirPerson.supervisor || dirPerson.person_supervisor) ? (
+                <MetaItem label="Supervisor" value={dirPerson.supervisor || dirPerson.person_supervisor || '—'} />
+              ) : null}
+              {(isHealthTech || dirPerson.hospital || dirPerson.person_hospital) ? (
+                <MetaItem label="Hospital" value={dirPerson.hospital || dirPerson.person_hospital || '—'} />
+              ) : null}
               {dirPerson.status && <MetaItem label="Status" value={dirPerson.status} />}
             </dl>
           ) : (
@@ -955,6 +994,12 @@ export default function GroupResolutionView({
             <MetaItem label="Last Name" value={currentRequest.person?.lastName} />
             <MetaItem label="Email" value={currentRequest.person?.email} />
             <MetaItem label="Location" value={currentRequest.person?.location} />
+            {(isHealthTech || currentRequest.person?.supervisor || currentRequest.person?.person_supervisor) ? (
+              <MetaItem label="Supervisor" value={currentRequest.person?.supervisor || currentRequest.person?.person_supervisor || '—'} />
+            ) : null}
+            {(isHealthTech || currentRequest.person?.hospital || currentRequest.person?.person_hospital) ? (
+              <MetaItem label="Hospital" value={currentRequest.person?.hospital || currentRequest.person?.person_hospital || '—'} />
+            ) : null}
             <MetaItem label="Manager name" value={currentManager.managerName} />
             <MetaItem label="Manager email" value={currentManager.managerEmail} />
             <MetaItem label="Manager location" value={currentManager.managerClub} />
@@ -1039,6 +1084,12 @@ export default function GroupResolutionView({
               <MetaItem label="Last Name" value={member.person?.lastName} />
               <MetaItem label="Email" value={member.person?.email} />
               <MetaItem label="Location" value={member.person?.location} />
+              {(isHealthTech || member.person?.supervisor || member.person?.person_supervisor) ? (
+                <MetaItem label="Supervisor" value={member.person?.supervisor || member.person?.person_supervisor || '—'} />
+              ) : null}
+              {(isHealthTech || member.person?.hospital || member.person?.person_hospital) ? (
+                <MetaItem label="Hospital" value={member.person?.hospital || member.person?.person_hospital || '—'} />
+              ) : null}
               <MetaItem label="Manager name" value={mgr.managerName} />
               <MetaItem label="Manager email" value={mgr.managerEmail} />
               <MetaItem label="Manager location" value={mgr.managerClub} />
@@ -1156,6 +1207,8 @@ export default function GroupResolutionView({
               <MetaItem label="Last Name" value={form.lastName || '—'} />
               <MetaItem label="Email" value={form.email || '—'} />
               <MetaItem label="Location" value={form.location || '—'} />
+              {form.supervisor ? <MetaItem label="Supervisor" value={form.supervisor} /> : null}
+              {form.hospital ? <MetaItem label="Hospital" value={form.hospital} /> : null}
             </dl>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1197,6 +1250,26 @@ export default function GroupResolutionView({
                   onChange={(e) => updateDraftField('location', e.target.value)}
                   className={INPUT_CLASS}
                   placeholder="Location"
+                />
+              </div>
+              <div>
+                <label className={LABEL_CLASS}>Supervisor</label>
+                <input
+                  type="text"
+                  value={draftForm.supervisor || ''}
+                  onChange={(e) => updateDraftField('supervisor', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="Supervisor"
+                />
+              </div>
+              <div>
+                <label className={LABEL_CLASS}>Hospital</label>
+                <input
+                  type="text"
+                  value={draftForm.hospital || ''}
+                  onChange={(e) => updateDraftField('hospital', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="Hospital"
                 />
               </div>
             </div>
@@ -1370,6 +1443,8 @@ export default function GroupResolutionView({
                       <MetaItem label="Last Name" value={unlinkForm.lastName || '—'} />
                       <MetaItem label="Email" value={unlinkForm.email || '—'} />
                       <MetaItem label="Location" value={unlinkForm.location || '—'} />
+                      {unlinkForm.supervisor ? <MetaItem label="Supervisor" value={unlinkForm.supervisor} /> : null}
+                      {unlinkForm.hospital ? <MetaItem label="Hospital" value={unlinkForm.hospital} /> : null}
                     </dl>
                   ) : (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1411,6 +1486,26 @@ export default function GroupResolutionView({
                           onChange={(e) => setUnlinkDraft((f) => ({ ...f, location: e.target.value }))}
                           className={INPUT_CLASS}
                           placeholder="Location"
+                        />
+                      </div>
+                      <div>
+                        <label className={LABEL_CLASS}>Supervisor</label>
+                        <input
+                          type="text"
+                          value={unlinkDraft.supervisor || ''}
+                          onChange={(e) => setUnlinkDraft((f) => ({ ...f, supervisor: e.target.value }))}
+                          className={INPUT_CLASS}
+                          placeholder="Supervisor"
+                        />
+                      </div>
+                      <div>
+                        <label className={LABEL_CLASS}>Hospital</label>
+                        <input
+                          type="text"
+                          value={unlinkDraft.hospital || ''}
+                          onChange={(e) => setUnlinkDraft((f) => ({ ...f, hospital: e.target.value }))}
+                          className={INPUT_CLASS}
+                          placeholder="Hospital"
                         />
                       </div>
                     </div>

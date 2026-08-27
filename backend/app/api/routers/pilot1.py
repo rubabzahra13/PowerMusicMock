@@ -134,6 +134,8 @@ def _person_search_row(row: models.ManagerRequest) -> dict:
         "lastName": row.person_last_name,
         "email": row.person_email,
         "location": row.person_location,
+        "supervisor": getattr(row, "person_supervisor", None),
+        "hospital": getattr(row, "person_hospital", None),
         "status": row.outcome,
         "dateAdded": row.handled_at,
         "partnerId": getattr(row, "partner_id", None),
@@ -150,6 +152,8 @@ def _duplicate_response(row: models.ManagerRequest) -> dict:
         "status": row.outcome,
         "dateAdded": row.handled_at,
         "location": row.person_location,
+        "supervisor": getattr(row, "person_supervisor", None),
+        "hospital": getattr(row, "person_hospital", None),
         "partnerId": getattr(row, "partner_id", None),
     }
 
@@ -164,6 +168,8 @@ def _no_duplicate_response() -> dict:
         "status": None,
         "dateAdded": None,
         "location": None,
+        "supervisor": None,
+        "hospital": None,
         "partnerId": None,
     }
 
@@ -175,6 +181,8 @@ def _find_duplicate_person(
     first_name: str,
     last_name: str,
     location: str,
+    supervisor: Optional[str] = None,
+    hospital: Optional[str] = None,
     partner_id: Optional[str] = None,
 ) -> models.ManagerRequest | None:
     probe = schemas.PersonInfo(
@@ -182,6 +190,8 @@ def _find_duplicate_person(
         lastName=last_name,
         email=email,
         location=location,
+        supervisor=supervisor,
+        hospital=hospital,
     )
     return find_roster_person(db, probe, partner_id=partner_id)
 
@@ -193,6 +203,8 @@ def _find_related_people(
     first_name: str,
     last_name: str,
     location: str,
+    supervisor: Optional[str] = None,
+    hospital: Optional[str] = None,
     partner_id: Optional[str] = None,
 ) -> list[tuple[models.ManagerRequest, set[str]]]:
     probe = schemas.PersonInfo(
@@ -200,6 +212,8 @@ def _find_related_people(
         lastName=last_name,
         email=email,
         location=location,
+        supervisor=supervisor,
+        hospital=hospital,
     )
     return [(row, {"Match"}) for row in roster_match_candidates(db, probe, partner_id=partner_id)]
 
@@ -314,6 +328,8 @@ def update_person(
     req.person_last_name = payload.lastName
     req.person_email = payload.email
     req.person_location = payload.location
+    req.person_supervisor = payload.supervisor or None
+    req.person_hospital = payload.hospital or None
 
     if req.intake_persons and isinstance(req.intake_persons, dict):
         updated_dict = dict(req.intake_persons)
@@ -322,6 +338,8 @@ def update_person(
             "lastName": payload.lastName,
             "email": payload.email,
             "location": payload.location,
+            "supervisor": payload.supervisor or None,
+            "hospital": payload.hospital or None,
         }
         for key in ("partner", "autoMail", "admin"):
             if key in updated_dict and isinstance(updated_dict[key], dict):
@@ -876,8 +894,13 @@ def mark_request_handled(
     was_new = req.status == "new"
 
     req.status = "handled"
-    req.handled_at = datetime.now(timezone.utc)
+    now_ts = datetime.now(timezone.utc)
+    req.handled_at = now_ts
     req.outcome = outcome
+    if outcome == "Removed":
+        req.archived_at = now_ts
+    else:
+        req.archived_at = None
     if admin.id != "dev-bypass":
         req.handled_by_admin_id = admin.id
     if payload.adminNote:
@@ -888,6 +911,10 @@ def mark_request_handled(
         req.person_last_name = (payload.finalValues.lastName or "").strip()
         req.person_email = (payload.finalValues.email or "").strip()
         req.person_location = (payload.finalValues.location or "").strip()
+        if payload.finalValues.supervisor is not None:
+            req.person_supervisor = payload.finalValues.supervisor.strip() or None
+        if payload.finalValues.hospital is not None:
+            req.person_hospital = payload.finalValues.hospital.strip() or None
 
     if was_new:
         decrement_manager_pending_stat(db, req)
@@ -1132,6 +1159,8 @@ def check_person_duplicate(
         first_name=p_first,
         last_name=p_last,
         location=p_location,
+        supervisor=payload.supervisor,
+        hospital=payload.hospital,
         partner_id=resolved_partner_id,
     )
     if match:
@@ -1608,6 +1637,8 @@ def list_duplicate_groups(
                 "lastName": rep.person_last_name,
                 "email": rep.person_email,
                 "location": rep.person_location,
+                "supervisor": getattr(rep, "person_supervisor", None),
+                "hospital": getattr(rep, "person_hospital", None),
             }
         result.append({
             "id": group.id,
@@ -1652,6 +1683,8 @@ def get_duplicate_group_details(
                 "lastName": m.person_last_name,
                 "email": m.person_email,
                 "location": m.person_location,
+                "supervisor": getattr(m, "person_supervisor", None),
+                "hospital": getattr(m, "person_hospital", None),
             },
             "action": m.action,
             "status": m.status,

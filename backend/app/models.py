@@ -52,6 +52,24 @@ class ManagerRequest(Base):
     person_last_name = Column(String, nullable=False)
     person_email = Column(String, nullable=False)
     person_location = Column(String, nullable=False)
+    person_supervisor = Column("supervisor", String, nullable=True)
+    person_hospital = Column("hospital", String, nullable=True)
+
+    @property
+    def supervisor(self):
+        return self.person_supervisor
+
+    @supervisor.setter
+    def supervisor(self, value):
+        self.person_supervisor = value
+
+    @property
+    def hospital(self):
+        return self.person_hospital
+
+    @hospital.setter
+    def hospital(self, value):
+        self.person_hospital = value
 
     action = Column(String, nullable=False)
     manager_notes = Column(Text, nullable=True)

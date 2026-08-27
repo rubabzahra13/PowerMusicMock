@@ -47,18 +47,30 @@ export const EMPTY_PERSON_FORM = {
   lastName: '',
   email: '',
   location: '',
+  supervisor: '',
+  hospital: '',
   notes: '',
 };
 
 export const MAX_MANAGER_PERSON_ROWS = 10;
 
-export function isPersonFormComplete(personForm) {
-  // Kept for backwards compatibility — delegates to strict validation.
+export function isPersonFormComplete(personForm, options = {}) {
+  const isHealthTech = Boolean(options?.isHealthTech);
+  if (isHealthTech) {
+    return (
+      (personForm.firstName || '').trim() !== '' &&
+      (personForm.lastName || '').trim() !== '' &&
+      (personForm.email || '').trim() !== '' &&
+      (personForm.location || '').trim() !== '' &&
+      (personForm.supervisor || '').trim() !== '' &&
+      (personForm.hospital || '').trim() !== ''
+    );
+  }
   return (
-    personForm.firstName.trim() !== '' &&
-    personForm.lastName.trim() !== '' &&
-    personForm.email.trim() !== '' &&
-    personForm.location.trim() !== ''
+    (personForm.firstName || '').trim() !== '' &&
+    (personForm.lastName || '').trim() !== '' &&
+    (personForm.email || '').trim() !== '' &&
+    (personForm.location || '').trim() !== ''
   );
 }
 

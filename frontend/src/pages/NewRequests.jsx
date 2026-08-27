@@ -504,6 +504,8 @@ const emptyPersonForm = () => ({
   lastName: '',
   email: '',
   location: '',
+  supervisor: '',
+  hospital: '',
   notes: '',
 });
 
@@ -518,7 +520,17 @@ const emptyManagerForm = () => ({
 export default function Requests() {
   const { showToast } = useToast();
   const { profile } = useAuth();
-  const { selectedPartnerId, partnerLabel } = usePartners();
+  const { selectedPartnerId, partnerLabel, partners } = usePartners();
+  const selectedPartner = useMemo(
+    () => partners?.find((p) => String(p.id) === String(selectedPartnerId)),
+    [partners, selectedPartnerId],
+  );
+  const isHealthTech = useMemo(
+    () =>
+      selectedPartner?.slug === 'health-tech' ||
+      (selectedPartner?.name || '').toLowerCase().includes('healthtech'),
+    [selectedPartner],
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -732,7 +744,10 @@ export default function Requests() {
     setManualTouchedFields({});
   };
 
-  const personValidation = useMemo(() => validatePersonForms(personForms), [personForms]);
+  const personValidation = useMemo(
+    () => validatePersonForms(personForms, { isHealthTech }),
+    [personForms, isHealthTech],
+  );
 
   const updatePersonForm = (index, field, value) => {
     const sanitized = sanitizePersonFieldInput(field, value);
@@ -901,7 +916,7 @@ export default function Requests() {
     e.preventDefault();
     setManualSubmitAttempted(true);
 
-    const validation = validatePersonForms(personForms);
+    const validation = validatePersonForms(personForms, { isHealthTech });
     if (!validation.ok) {
       const firstInvalid = firstInvalidPersonField(validation.errorsByRow);
       if (firstInvalid) {
@@ -924,11 +939,13 @@ export default function Requests() {
         body: JSON.stringify({
           submittedBy: managerForm,
           partnerId: selectedPartnerId || undefined,
-          people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
+          people: normalizedPeople.map(({ firstName, lastName, email, location, supervisor, hospital, notes }) => ({
             firstName,
             lastName,
             email,
             location,
+            supervisor: supervisor || undefined,
+            hospital: hospital || undefined,
             notes: notes?.trim() || undefined,
           })),
           action: action,
@@ -1736,6 +1753,45 @@ export default function Requests() {
                     <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'location')}</p>
                   )}
                 </div>
+
+                {isHealthTech && (
+                  <>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Supervisor *</label>
+                      <input
+                        type="text"
+                        required
+                        maxLength={PERSON_FIELD_LIMITS.supervisor}
+                        value={person.supervisor || ''}
+                        onChange={(e) => updatePersonForm(index, 'supervisor', e.target.value)}
+                        onBlur={() => handleManualPersonBlur(index, 'supervisor', person.supervisor)}
+                        ref={(node) => setManualPersonFieldRef(index, 'supervisor', node)}
+                        aria-invalid={getManualFieldError(index, 'supervisor') ? true : undefined}
+                        className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${getManualFieldError(index, 'supervisor') ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
+                      />
+                      {getManualFieldError(index, 'supervisor') && (
+                        <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'supervisor')}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Hospital *</label>
+                      <input
+                        type="text"
+                        required
+                        maxLength={PERSON_FIELD_LIMITS.hospital}
+                        value={person.hospital || ''}
+                        onChange={(e) => updatePersonForm(index, 'hospital', e.target.value)}
+                        onBlur={() => handleManualPersonBlur(index, 'hospital', person.hospital)}
+                        ref={(node) => setManualPersonFieldRef(index, 'hospital', node)}
+                        aria-invalid={getManualFieldError(index, 'hospital') ? true : undefined}
+                        className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${getManualFieldError(index, 'hospital') ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
+                      />
+                      {getManualFieldError(index, 'hospital') && (
+                        <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'hospital')}</p>
+                      )}
+                    </div>
+                  </>
+                )}
                 <div>
                   <label
                     htmlFor={`manual-person-${person.id}-notes`}

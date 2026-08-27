@@ -332,12 +332,27 @@ const TimestampCell = ({ val, className = '' }) => {
 
 function EditPersonModal({ isOpen, onClose, user, onSave }) {
   const { showToast } = useToast();
-  const { selectedPartnerId } = usePartners();
+  const { selectedPartnerId, partners } = usePartners();
+  const selectedPartner = useMemo(
+    () => partners?.find((p) => String(p.id) === String(selectedPartnerId)),
+    [partners, selectedPartnerId],
+  );
+  const isHealthTech = useMemo(
+    () =>
+      selectedPartner?.slug === 'health-tech' ||
+      (selectedPartner?.name || '').toLowerCase().includes('healthtech') ||
+      user?.supervisor != null ||
+      user?.hospital != null,
+    [selectedPartner, user],
+  );
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
     email: '',
     location: '',
+    supervisor: '',
+    hospital: '',
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -349,6 +364,8 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
         lastName: user.lastName || '',
         email: user.email || '',
         location: user.location || '',
+        supervisor: user.supervisor || '',
+        hospital: user.hospital || '',
       });
       setErrors({});
     }
@@ -366,6 +383,10 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
       errs.email = 'Enter a valid email address.';
     }
     if (!formData.location.trim()) errs.location = 'Location is required.';
+    if (isHealthTech) {
+      if (!formData.supervisor.trim()) errs.supervisor = 'Supervisor is required.';
+      if (!formData.hospital.trim()) errs.hospital = 'Hospital is required.';
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -380,6 +401,8 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
         lastName: formData.lastName.trim(),
         email: formData.email.trim().toLowerCase(),
         location: formData.location.trim(),
+        ...(isHealthTech || formData.supervisor.trim() ? { supervisor: formData.supervisor.trim() } : {}),
+        ...(isHealthTech || formData.hospital.trim() ? { hospital: formData.hospital.trim() } : {}),
       };
       const updated = await updatePerson(user.id, payload, selectedPartnerId || '');
       showToast('Directory record updated successfully.', 'success');
@@ -497,6 +520,46 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
           />
           {errors.location && <p className="mt-1 text-xs font-medium text-red-600">{errors.location}</p>}
         </div>
+
+        {isHealthTech && (
+          <>
+            <div>
+              <label htmlFor="edit-person-supervisor" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                Supervisor <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="edit-person-supervisor"
+                type="text"
+                value={formData.supervisor}
+                onChange={(e) => setFormData((prev) => ({ ...prev, supervisor: e.target.value }))}
+                className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+                  errors.supervisor
+                    ? 'border-red-300 focus:border-red-500 focus:ring-red-200 bg-red-50/30'
+                    : 'border-[var(--color-border-default)] focus:border-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)]/20'
+                }`}
+              />
+              {errors.supervisor && <p className="mt-1 text-xs font-medium text-red-600">{errors.supervisor}</p>}
+            </div>
+
+            <div>
+              <label htmlFor="edit-person-hospital" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                Hospital <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="edit-person-hospital"
+                type="text"
+                value={formData.hospital}
+                onChange={(e) => setFormData((prev) => ({ ...prev, hospital: e.target.value }))}
+                className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+                  errors.hospital
+                    ? 'border-red-300 focus:border-red-500 focus:ring-red-200 bg-red-50/30'
+                    : 'border-[var(--color-border-default)] focus:border-[var(--color-brand-primary)] focus:ring-[var(--color-brand-primary)]/20'
+                }`}
+              />
+              {errors.hospital && <p className="mt-1 text-xs font-medium text-red-600">{errors.hospital}</p>}
+            </div>
+          </>
+        )}
       </form>
     </Modal>
   );
@@ -1548,6 +1611,8 @@ export default function UserLedger() {
               ? selectedUser.requestHistory
               : buildFallbackHistory(selectedUser);
           const { name: fullName, email: personEmail, location: personLocation } = formatPersonFields(selectedUser);
+          const personSupervisor = selectedUser.supervisor || selectedUser.person_supervisor || selectedUser.personSupervisor || '';
+          const personHospital = selectedUser.hospital || selectedUser.person_hospital || selectedUser.personHospital || '';
           const manager = getDirectoryManagerColumnContent(selectedUser);
           const nameParts = fullName === 'No name' ? [] : fullName.split(/\s+/).filter(Boolean);
           const initials = (
@@ -1621,10 +1686,28 @@ export default function UserLedger() {
                     <p className="mt-0.5 break-words text-xs text-[var(--color-text-muted)]">
                       {personLocation}
                     </p>
+                    {(personSupervisor || personHospital) ? (
+                      <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[var(--color-text-secondary)] border-t border-[var(--color-border-default)]/60 pt-2">
+                        {personSupervisor ? (
+                          <div>
+                            <span className="font-semibold text-[var(--color-text-secondary)]">Supervisor:</span>{' '}
+                            <span className="text-[var(--color-text-primary)]">{personSupervisor}</span>
+                          </div>
+                        ) : null}
+                        {personHospital ? (
+                          <div>
+                            <span className="font-semibold text-[var(--color-text-secondary)]">Hospital:</span>{' '}
+                            <span className="text-[var(--color-text-primary)]">{personHospital}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <dl className="mt-4 space-y-2 border-t border-[var(--color-border-default)] pt-3">
                   <DrawerMetaRow label="Request ID" value={formatRequestDisplayId(selectedUser.displayId)} />
+                  {personSupervisor ? <DrawerMetaRow label="Supervisor" value={personSupervisor} /> : null}
+                  {personHospital ? <DrawerMetaRow label="Hospital" value={personHospital} /> : null}
                   <DrawerMetaRow label="Handled" value={formatAdminDateTime(selectedUser.dateAdded)} />
                   <DrawerMetaRow label="Handled by" value={personHandledBy(selectedUser)} />
                 </dl>

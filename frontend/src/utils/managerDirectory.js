@@ -154,8 +154,17 @@ function personMatchesNonEmailFields(person, query) {
   const last = String(person.lastName ?? person.last_name ?? '').toLowerCase();
   const fullName = `${first} ${last}`.trim();
   const location = String(person.location ?? '').toLowerCase();
+  const supervisor = String(person.supervisor ?? '').toLowerCase();
+  const hospital = String(person.hospital ?? '').toLowerCase();
 
-  return fullName.includes(q) || first.includes(q) || last.includes(q) || location.includes(q);
+  return (
+    fullName.includes(q) ||
+    first.includes(q) ||
+    last.includes(q) ||
+    location.includes(q) ||
+    supervisor.includes(q) ||
+    hospital.includes(q)
+  );
 }
 
 function emailMatchesSearch(email, query) {

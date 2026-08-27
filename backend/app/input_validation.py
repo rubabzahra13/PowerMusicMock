@@ -209,6 +209,36 @@ def normalize_person_notes(
     )
 
 
+def normalize_supervisor(
+    value: Optional[str],
+    *,
+    field_name: str = "supervisor",
+    required: bool = False,
+) -> Optional[str]:
+    return normalize_text(
+        value,
+        max_length=200,
+        allow_empty=not required,
+        field_name=field_name,
+        reject_html=True,
+    )
+
+
+def normalize_hospital(
+    value: Optional[str],
+    *,
+    field_name: str = "hospital",
+    required: bool = False,
+) -> Optional[str]:
+    return normalize_text(
+        value,
+        max_length=200,
+        allow_empty=not required,
+        field_name=field_name,
+        reject_html=True,
+    )
+
+
 def normalize_search_query(value: str, *, max_length: int = 100) -> str:
     cleaned = normalize_text(value, max_length=max_length, allow_empty=True, field_name="query")
     return cleaned or ""

@@ -20,14 +20,20 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app import models, schemas
-from app.duplicate_matching import are_requests_dismissed, get_all_dismissed_pairs, match_classification
+from app.duplicate_matching import (
+    are_requests_dismissed,
+    get_all_dismissed_pairs,
+    is_healthtech_from_request,
+    match_classification,
+    match_classification_for_partner,
+)
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
     TAG_CONFIRMED_DUPLICATE,
     TAG_POTENTIAL_DUPLICATE,
     merge_tags,
 )
-from app.person_match import person_from_model
+from app.person_match import person_from_model, same_person_for_partner
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +191,10 @@ def process_request_grouping(
 
     req_person = person_from_model(req)
 
+    # Detect whether this request belongs to the HealthTech partner so we use
+    # the correct 6-field matching logic throughout this grouping run.
+    is_ht = is_healthtech_from_request(db, req)
+
     # ── Step 1: scan pending new requests for a match ───────────────────────
     if pending_candidates is not None:
         p_cands = [
@@ -219,7 +229,7 @@ def process_request_grouping(
             if are_requests_dismissed(db, req.id, cand.id, dismissed_set=dismissed_set):
                 continue
             
-            classification, score = match_classification(req_person, person_from_model(cand))
+            classification, score = match_classification_for_partner(req_person, person_from_model(cand), is_healthtech=is_ht)
             if classification:
                 if group_best_classification != "confirmed_duplicate" and classification == "confirmed_duplicate":
                     group_best_classification = classification
@@ -271,7 +281,7 @@ def process_request_grouping(
     for dir_cand in dir_candidates:
         if are_requests_dismissed(db, req.id, dir_cand.id, dismissed_set=dismissed_set):
             continue
-        classification, _ = match_classification(req_person, person_from_model(dir_cand))
+        classification, _ = match_classification_for_partner(req_person, person_from_model(dir_cand), is_healthtech=is_ht)
         if classification:
             dir_match_person = dir_cand
             break
@@ -305,7 +315,7 @@ def process_request_grouping(
                 group.directory_person_id = dir_match_person.id
             # Absorb any other ungrouped candidates into this group too.
             _absorb_ungrouped_matches(
-                db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands
+                db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands, is_healthtech=is_ht
             )
             members = [req] + [c for c in p_cands if c.duplicate_group_id == group.id]
             _sync_group_representative_and_tags(db, group, member_requests=members)
@@ -332,7 +342,7 @@ def process_request_grouping(
 
     # Absorb any remaining ungrouped candidates that also match.
     _absorb_ungrouped_matches(
-        db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands, dismissed_set=dismissed_set
+        db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands, dismissed_set=dismissed_set, is_healthtech=is_ht
     )
 
     members = [req] + [c for c in p_cands if c.duplicate_group_id == group.id]
@@ -351,6 +361,7 @@ def _absorb_ungrouped_matches(
     exclude_id: Optional[str] = None,
     ungrouped_candidates: Optional[List[models.ManagerRequest]] = None,
     dismissed_set: Optional[Set[Tuple[str, str]]] = None,
+    is_healthtech: bool = False,
 ) -> None:
     """Pull any still-ungrouped pending requests that match req_person into *group*."""
     if ungrouped_candidates is not None:
@@ -380,7 +391,7 @@ def _absorb_ungrouped_matches(
         if is_request_dismissed_from_group(db, cand.id, group.id):
             continue
         
-        classification, score = match_classification(req_person, person_from_model(cand))
+        classification, score = match_classification_for_partner(req_person, person_from_model(cand), is_healthtech=is_healthtech)
         if classification:
             cand.duplicate_group_id = group.id
             upgraded = _best_classification(group.classification, classification)
@@ -450,11 +461,13 @@ def _sync_group_representative_and_tags(
 
     if len(members) >= 2:
         predecessor = members[1]
-        result = match_classification(
+        is_ht_group = is_healthtech_from_request(db, latest_req)
+        result = match_classification_for_partner(
             person_from_model(latest_req),
             person_from_model(predecessor),
+            is_healthtech=is_ht_group,
         )
-        # match_classification returns bare None when last names are missing,
+        # match_classification_for_partner returns bare None when last names are missing,
         # or (classification, score) otherwise.
         if isinstance(result, tuple):
             rep_classification, _ = result
@@ -546,8 +559,9 @@ def unlink_duplicate_members(
             .all()
         )
         req2_person = person_from_model(req2)
+        is_ht_grp = is_healthtech_from_request(db, req2)
         for sibling in siblings:
-            classification, _ = match_classification(req2_person, person_from_model(sibling))
+            classification, _ = match_classification_for_partner(req2_person, person_from_model(sibling), is_healthtech=is_ht_grp)
             if classification == "confirmed_duplicate":
                 cohort.append(sibling)
 
@@ -622,21 +636,24 @@ def unlink_duplicate_members(
                 .first()
             )
             if dir_person:
+                is_ht_remain = is_healthtech_from_request(db, remaining[0]) if remaining else False
                 for m in remaining:
                     if not are_requests_dismissed(db, m.id, dir_person.id):
-                        c, _ = match_classification(
-                            person_from_model(m), person_from_model(dir_person)
+                        c, _ = match_classification_for_partner(
+                            person_from_model(m), person_from_model(dir_person), is_healthtech=is_ht_remain
                         )
                         if c:
                             dir_match = True
                             break
 
+        is_ht_remain = is_healthtech_from_request(db, remaining[0]) if remaining else False
         for i in range(len(remaining)):
             for j in range(i + 1, len(remaining)):
                 if not are_requests_dismissed(db, remaining[i].id, remaining[j].id):
-                    c, _ = match_classification(
+                    c, _ = match_classification_for_partner(
                         person_from_model(remaining[i]),
                         person_from_model(remaining[j]),
+                        is_healthtech=is_ht_remain,
                     )
                     if c:
                         peer_match_class = _best_classification(peer_match_class, c)
@@ -705,8 +722,9 @@ def get_dismiss_impact(
             .all()
         )
         target_person = person_from_model(req)
+        is_ht_req = is_healthtech_from_request(db, req)
         for member in members:
-            classification, _ = match_classification(target_person, person_from_model(member))
+            classification, _ = match_classification_for_partner(target_person, person_from_model(member), is_healthtech=is_ht_req)
             if classification == "confirmed_duplicate":
                 confirmed_ids.append(member.id)
             elif classification == "potential_duplicate":
@@ -745,8 +763,9 @@ def collect_selective_dismiss_targets(
         .all()
     )
     target_person = person_from_model(req)
+    is_ht_req = is_healthtech_from_request(db, req)
     for member in members:
-        classification, _ = match_classification(target_person, person_from_model(member))
+        classification, _ = match_classification_for_partner(target_person, person_from_model(member), is_healthtech=is_ht_req)
         if classification == "confirmed_duplicate":
             to_dismiss.append(member)
         else:
@@ -807,19 +826,22 @@ def finalize_group_after_selective_dismiss(
             .first()
         )
         if dir_person:
+            is_ht_surv = is_healthtech_from_request(db, remaining[0]) if remaining else False
             for m in remaining:
                 if not are_requests_dismissed(db, m.id, dir_person.id):
-                    c, _ = match_classification(person_from_model(m), person_from_model(dir_person))
+                    c, _ = match_classification_for_partner(person_from_model(m), person_from_model(dir_person), is_healthtech=is_ht_surv)
                     if c:
                         dir_match = True
                         break
 
+    is_ht_surv = is_healthtech_from_request(db, remaining[0]) if remaining else False
     for i in range(len(remaining)):
         for j in range(i + 1, len(remaining)):
             if not are_requests_dismissed(db, remaining[i].id, remaining[j].id):
-                c, _ = match_classification(
+                c, _ = match_classification_for_partner(
                     person_from_model(remaining[i]),
                     person_from_model(remaining[j]),
+                    is_healthtech=is_ht_surv,
                 )
                 if c:
                     peer_match_class = _best_classification(peer_match_class, c)
@@ -1158,6 +1180,8 @@ def _finalize_group(
             "lastName": final_values.lastName or "",
             "email": final_values.email or "",
             "location": final_values.location or "",
+            "supervisor": final_values.supervisor or "",
+            "hospital": final_values.hospital or "",
         }
     if previous_values:
         meta["previous_values"] = {
@@ -1165,6 +1189,8 @@ def _finalize_group(
             "lastName": previous_values.lastName or "",
             "email": previous_values.email or "",
             "location": previous_values.location or "",
+            "supervisor": previous_values.supervisor or "",
+            "hospital": previous_values.hospital or "",
         }
     if admin_note:
         meta["admin_note"] = admin_note
@@ -1291,6 +1317,8 @@ def resolve_group_add(
         dir_row.person_last_name = (final_values.lastName or "").strip()
         dir_row.person_email = (final_values.email or "").strip()
         dir_row.person_location = (final_values.location or "").strip()
+        dir_row.person_supervisor = (final_values.supervisor or "").strip() or None
+        dir_row.person_hospital = (final_values.hospital or "").strip() or None
         _apply_merge_manager_provenance(dir_row, retained_req, final_values=final_values)
         if admin_uuid:
             dir_row.handled_by_admin_id = admin_uuid
@@ -1316,6 +1344,8 @@ def resolve_group_add(
             person_last_name=(final_values.lastName or "").strip(),
             person_email=(final_values.email or "").strip(),
             person_location=(final_values.location or "").strip(),
+            person_supervisor=(final_values.supervisor or "").strip() or None,
+            person_hospital=(final_values.hospital or "").strip() or None,
             intake_persons={},
             tags=[],
             partner_id=partner_id or group.partner_id,
@@ -1386,6 +1416,8 @@ def resolve_group_update(
         lastName=directory_person.person_last_name or "",
         email=directory_person.person_email or "",
         location=directory_person.person_location or "",
+        supervisor=getattr(directory_person, "person_supervisor", None) or getattr(directory_person, "supervisor", None) or "",
+        hospital=getattr(directory_person, "person_hospital", None) or getattr(directory_person, "hospital", None) or "",
     )
 
     # Update the Directory row in-place.
@@ -1393,6 +1425,8 @@ def resolve_group_update(
     directory_person.person_last_name = (final_values.lastName or "").strip()
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
+    directory_person.person_supervisor = (final_values.supervisor or "").strip() or None
+    directory_person.person_hospital = (final_values.hospital or "").strip() or None
 
     from app.intake_persons import append_lifecycle_history, get_lifecycle_history
     
@@ -1652,6 +1686,8 @@ def resolve_group_delete_from_directory(
     directory_person.person_last_name = (final_values.lastName or "").strip()
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
+    directory_person.person_supervisor = (final_values.supervisor or "").strip() or None
+    directory_person.person_hospital = (final_values.hospital or "").strip() or None
     
     manager_source = _current_request_member(
         members,
@@ -1776,6 +1812,8 @@ def resolve_group_mark_removed(
         dir_row.person_last_name = (final_values.lastName or "").strip()
         dir_row.person_email = (final_values.email or "").strip()
         dir_row.person_location = (final_values.location or "").strip()
+        dir_row.person_supervisor = (final_values.supervisor or "").strip() or None
+        dir_row.person_hospital = (final_values.hospital or "").strip() or None
         dir_row.archived_at = now
         
         manager_source = _current_request_member(
@@ -1810,6 +1848,8 @@ def resolve_group_mark_removed(
             person_last_name=(final_values.lastName or "").strip(),
             person_email=(final_values.email or "").strip(),
             person_location=(final_values.location or "").strip(),
+            person_supervisor=(final_values.supervisor or "").strip() or None,
+            person_hospital=(final_values.hospital or "").strip() or None,
             tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED],
             partner_id=partner_id or group.partner_id,
             archived_at=now,
@@ -1848,6 +1888,8 @@ _FIELD_LABELS = {
     "lastName": "Last Name",
     "email": "Email",
     "location": "Location",
+    "supervisor": "Supervisor",
+    "hospital": "Hospital",
 }
 
 
@@ -1861,12 +1903,16 @@ def preview_resolve_update(
         "lastName": directory_person.person_last_name or "",
         "email": directory_person.person_email or "",
         "location": directory_person.person_location or "",
+        "supervisor": getattr(directory_person, "person_supervisor", None) or getattr(directory_person, "supervisor", None) or "",
+        "hospital": getattr(directory_person, "person_hospital", None) or getattr(directory_person, "hospital", None) or "",
     }
     proposed = {
         "firstName": (final_values.firstName or "").strip(),
         "lastName": (final_values.lastName or "").strip(),
         "email": (final_values.email or "").strip(),
         "location": (final_values.location or "").strip(),
+        "supervisor": (final_values.supervisor or "").strip(),
+        "hospital": (final_values.hospital or "").strip(),
     }
 
     field_diffs = []
