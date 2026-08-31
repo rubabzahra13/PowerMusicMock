@@ -1504,7 +1504,7 @@ export default function UserLedger() {
             options: emailOptions
           },
           {
-            label: 'Person Location',
+            label: `User ${terms.locationTerm}`,
             value: filterLocation,
             onChange: setFilterLocation,
             options: locationOptions

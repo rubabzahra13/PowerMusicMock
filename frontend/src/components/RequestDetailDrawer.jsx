@@ -154,9 +154,17 @@ export default function RequestDetailView({
   const hasAutoMail = hasRequestAutoMail
     || Boolean(directoryAuto?.fromEmail || directoryAuto?.receivedAt || directoryAuto?.subject);
   const isAdd = request.action === 'Add';
-  const { name: personFullName, email: personEmail, location: personLocation } = formatPersonFields(
-    request.person,
+  const isAlreadyExistsOrRemoved = Boolean(directoryRecord) && (
+    (request.tags || []).includes('already_exists') ||
+    (request.tags || []).includes('already_removed') ||
+    request.intakeMatch?.classification?.startsWith('already_') ||
+    request.directoryMatch?.classification?.startsWith('already_')
   );
+  const heroPersonSource = (isAlreadyExistsOrRemoved && directoryRecord) ? directoryRecord : request.person;
+  const { name: personFullName, email: personEmail, location: personLocation } = formatPersonFields(
+    heroPersonSource,
+  );
+
   const notesText = readManagerNotes(request);
   const automatedSubject = readAutomatedSubject(request)
     || (directoryAuto?.subject || '').trim();
@@ -290,7 +298,7 @@ export default function RequestDetailView({
               className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[var(--color-surface-bg)] text-lg font-semibold tracking-tight text-[var(--color-brand-secondary)] ring-1 ring-[var(--color-border-default)] sm:h-16 sm:w-16 sm:text-xl"
               aria-hidden="true"
             >
-              {initials(request.person)}
+              {initials(heroPersonSource)}
             </div>
 
             <div className="min-w-0 flex-1">

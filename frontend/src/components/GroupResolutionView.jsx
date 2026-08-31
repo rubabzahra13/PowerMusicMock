@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, ChevronRight, ChevronDown, Check, Database, Clock, Pencil,
-  X, Users, Inbox, Trash2, AlertTriangle,
+  X, Users, Inbox, Trash2, AlertTriangle, Mail, MapPin,
 } from 'lucide-react';
 import { Tag, Modal, HoverTip } from './ui';
 import { usePartners } from '../context/PartnerContext';
@@ -22,6 +22,11 @@ import {
 } from '../utils/duplicateGroupApi';
 import { matchClassification } from '../utils/duplicateMatch';
 import { groupClassificationPills } from '../utils/requestTags';
+import {
+  formatPersonName,
+  formatPersonEmail,
+  formatPersonLocation,
+} from '../utils/personDisplay';
 
 /* ─── helpers ────────────────────────────────────────────────────────────── */
 
@@ -597,7 +602,27 @@ export default function GroupResolutionView({
     (a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0),
   )[0] || null;
   const currentRep = currentRequest || repMember;
-  const personName = personFullName(currentRep?.person);
+
+  const isAlreadyExistsOrRemoved =
+    group.classification?.startsWith('already_') ||
+    group.classification === 'already_exists' ||
+    group.classification === 'already_exists_conflict' ||
+    group.classification === 'already_removed' ||
+    group.classification === 'already_removed_conflict' ||
+    (group.classificationSummary && (
+      (group.classificationSummary.already_exists || 0) > 0 ||
+      (group.classificationSummary.already_removed || 0) > 0
+    ));
+
+  const heroPersonSource = (isAlreadyExistsOrRemoved && dirPerson)
+    ? dirPerson
+    : currentRep?.person;
+
+  const heroName = formatPersonName(heroPersonSource, { empty: formatPersonName(currentRep?.person) });
+  const heroEmail = formatPersonEmail(heroPersonSource, { empty: formatPersonEmail(currentRep?.person, { empty: '' }) });
+  const heroLocation = formatPersonLocation(heroPersonSource, { empty: formatPersonLocation(currentRep?.person, { empty: '' }) });
+
+  const personName = heroName;
   const currentManager = managerFieldsFromMember(currentRequest);
 
   const renderUnlinkedOneVisitNotice = () => (
@@ -715,19 +740,33 @@ export default function GroupResolutionView({
               className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[var(--color-surface-bg)] text-lg font-semibold tracking-tight text-[var(--color-brand-secondary)] ring-1 ring-[var(--color-border-default)] sm:h-16 sm:w-16 sm:text-xl"
               aria-hidden="true"
             >
-              {initials(currentRep?.person)}
+              {initials(heroPersonSource)}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h1 className="text-2xl font-semibold leading-tight tracking-tight text-[var(--color-text-primary)] sm:text-[1.75rem]">
-                    {personName}
+                    {heroName}
                   </h1>
-                  {currentRep?.person?.email && (
-                    <p className="mt-1.5 text-sm text-[var(--color-text-secondary)] font-mono">
-                      {currentRep.person.email}
-                    </p>
-                  )}
+                  <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[var(--color-text-secondary)]">
+                    {heroEmail ? (
+                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                        <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        <span className="truncate font-mono text-[13px] text-[var(--color-text-primary)]">
+                          {heroEmail}
+                        </span>
+                      </span>
+                    ) : null}
+                    {heroEmail && heroLocation ? (
+                      <span className="text-[var(--color-border-default)]" aria-hidden="true">·</span>
+                    ) : null}
+                    {heroLocation ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        <span className="text-[var(--color-text-primary)]">{heroLocation}</span>
+                      </span>
+                    ) : null}
+                  </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Tag
