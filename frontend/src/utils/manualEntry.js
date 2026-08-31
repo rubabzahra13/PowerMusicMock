@@ -1,3 +1,4 @@
+import { getPartnerTerminology } from './managerAuthBranding';
 import {
   isAwaitingManagerSubmission,
   TAG_PARTNER_REQUEST,
@@ -33,14 +34,17 @@ function submittedByClub(submittedBy) {
 }
 
 /** Name / email / club with empty placeholders when admin filled any manager field. */
-export function formatAttributedManagerFields(submittedBy) {
+export function formatAttributedManagerFields(submittedBy, options = {}) {
+  const pName = options.partnerName || submittedBy?.partnerName || submittedBy?.partner_name;
+  const pSlug = options.partnerSlug || submittedBy?.partnerSlug || submittedBy?.partner_slug;
+  const terms = getPartnerTerminology(pName, pSlug);
   const name = submittedByName(submittedBy);
   const email = (submittedBy?.email || '').trim();
   const club = submittedByClub(submittedBy);
   return {
     name: name || NO_MANAGER_NAME,
     email: email || NO_MANAGER_EMAIL,
-    club: club || NO_MANAGER_LOCATION,
+    club: club || `No ${terms.locationTermLower}`,
     hasAny: Boolean(name || email || club),
     rawName: name,
     rawEmail: email,
@@ -49,8 +53,8 @@ export function formatAttributedManagerFields(submittedBy) {
 }
 
 /** True when admin entered any manager name / email / club on Add Manually. */
-export function hasAttributedManager(submittedBy) {
-  return formatAttributedManagerFields(submittedBy).hasAny;
+export function hasAttributedManager(submittedBy, options = {}) {
+  return formatAttributedManagerFields(submittedBy, options).hasAny;
 }
 
 /** Admin Add Manually (no linked manager user) — may still include attributed manager details. */
@@ -74,7 +78,10 @@ export const getManagerDisplayName = (submittedBy, tags = [], request = null) =>
   return '';
 };
 
-export function getManagerColumnContent(request) {
+export function getManagerColumnContent(request, options = {}) {
+  const pName = options.partnerName || request?.partnerName || request?.partner_name;
+  const pSlug = options.partnerSlug || request?.partnerSlug || request?.partner_slug;
+  const terms = getPartnerTerminology(pName, pSlug);
   const tags = request?.tags || [];
   if (isAwaitingManagerSubmission(tags)) {
     return {
@@ -94,10 +101,10 @@ export function getManagerColumnContent(request) {
     };
   }
   if (isAdminEntry(request) || isManualEntry(submittedBy)) {
-    const fields = formatAttributedManagerFields(submittedBy);
+    const fields = formatAttributedManagerFields(submittedBy, { partnerName: pName, partnerSlug: pSlug });
     if (!fields.hasAny) {
       return {
-        primary: 'No manager details',
+        primary: `No ${terms.managerTermLower} details`,
         secondary: '',
         tertiary: '',
         lines: null,
@@ -125,19 +132,22 @@ export function getManagerColumnContent(request) {
   return {
     primary: name,
     secondary: (submittedBy?.email || '').trim() || 'No email',
-    tertiary: (submittedBy?.club || '').trim() || 'No club',
+    tertiary: (submittedBy?.club || '').trim() || `No ${terms.locationTermLower}`,
     muted: false,
   };
 }
 
 /** Directory ledger rows — empty manager is not an auto-email request. */
-export function getDirectoryManagerColumnContent(row) {
-  const name = (row?.managerName || '').trim();
+export function getDirectoryManagerColumnContent(row, options = {}) {
+  const pName = options.partnerName || row?.partnerName || row?.partner_name;
+  const pSlug = options.partnerSlug || row?.partnerSlug || row?.partner_slug;
+  const terms = getPartnerTerminology(pName, pSlug);
+  const name = (row?.managerName || row?.addedBy || '').trim();
   const email = (row?.managerEmail || '').trim();
   const club = (row?.club || '').trim();
   if (!name && !email) {
     return {
-      primary: 'No manager details',
+      primary: `No ${terms.managerTermLower} details`,
       secondary: '',
       tertiary: '',
       muted: true,
@@ -147,7 +157,7 @@ export function getDirectoryManagerColumnContent(row) {
   return {
     primary: name || NO_MANAGER_NAME,
     secondary: email || NO_MANAGER_EMAIL,
-    tertiary: club || NO_MANAGER_LOCATION,
+    tertiary: club || `No ${terms.locationTermLower}`,
     muted: !name,
   };
 }

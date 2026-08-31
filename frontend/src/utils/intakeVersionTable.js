@@ -1,3 +1,4 @@
+import { getPartnerTerminology } from './managerAuthBranding';
 import { formatAttributedManagerFields } from './manualEntry';
 import { formatPersonName } from './personDisplay';
 import {
@@ -34,39 +35,6 @@ function submitterParts(event, fallbackSubmittedBy) {
   };
 }
 
-const AUTO_ROWS = [
-  { key: 'receivedAt', label: 'Received at' },
-  { key: 'fromEmail', label: 'Received from', mono: true },
-  { key: 'inboxEmail', label: 'Sent to (inbox)', mono: true },
-  { key: 'subject', label: 'Subject' },
-  { key: 'name', label: 'Name' },
-  { key: 'email', label: 'Email', mono: true },
-  { key: 'location', label: 'Location' },
-  { key: 'details', label: 'Details' },
-];
-
-const MANAGER_ROWS = [
-  { key: 'submittedAt', label: 'Submitted at' },
-  { key: 'managerName', label: 'Manager name' },
-  { key: 'managerEmail', label: 'Manager email', mono: true },
-  { key: 'managerLocation', label: 'Manager location' },
-  { key: 'name', label: 'Person name' },
-  { key: 'email', label: 'Person email', mono: true },
-  { key: 'location', label: 'Person location' },
-  { key: 'notes', label: 'Notes' },
-];
-
-const ADMIN_ROWS = [
-  { key: 'submittedAt', label: 'Submitted at' },
-  { key: 'managerName', label: 'Manager name' },
-  { key: 'managerEmail', label: 'Manager email', mono: true },
-  { key: 'managerLocation', label: 'Manager location' },
-  { key: 'name', label: 'Person name' },
-  { key: 'email', label: 'Person email', mono: true },
-  { key: 'location', label: 'Person location' },
-  { key: 'notes', label: 'Notes' },
-];
-
 const DIRECTORY_ROWS = [
   { key: 'matchedAt', label: 'Matched at' },
   { key: 'directoryName', label: 'Directory name' },
@@ -74,51 +42,36 @@ const DIRECTORY_ROWS = [
   { key: 'directoryId', label: 'Directory id', mono: true },
 ];
 
-function valuesForEvent(event, channelKey, fallbackSubmittedBy) {
-  const meta = event.meta || {};
-  const person = personParts(event.person);
-  const when = formatIntakeEventWhen(event);
+function rowsForChannel(channelKey, terms = getPartnerTerminology()) {
+  const mTerm = terms.managerTerm;
+  const lTerm = terms.locationTerm;
+  const lTermLower = terms.locationTermLower;
 
-  if (channelKey === 'auto' || event.type === INTAKE_EVENT_AUTO) {
-    return {
-      receivedAt: when,
-      fromEmail: clean(meta.fromEmail),
-      inboxEmail: clean(meta.inboxEmail),
-      subject: clean(meta.subject),
-      name: person.name,
-      email: person.email,
-      location: person.location,
-      details: clean(meta.notes),
-    };
+  if (channelKey === 'auto') {
+    return [
+      { key: 'receivedAt', label: 'Received at' },
+      { key: 'fromEmail', label: 'Received from', mono: true },
+      { key: 'inboxEmail', label: 'Sent to (inbox)', mono: true },
+      { key: 'subject', label: 'Subject' },
+      { key: 'name', label: 'Name' },
+      { key: 'email', label: 'Email', mono: true },
+      { key: 'location', label: lTerm },
+      { key: 'details', label: 'Details' },
+    ];
   }
-
-  if (channelKey === 'directory' || event.type === INTAKE_EVENT_DIRECTORY) {
-    return {
-      matchedAt: when,
-      directoryName: clean(meta.directoryName),
-      directoryStatus: clean(meta.directoryStatus),
-      directoryId: clean(meta.directoryId),
-    };
+  if (channelKey === 'admin' || channelKey === 'manager') {
+    return [
+      { key: 'submittedAt', label: 'Submitted at' },
+      { key: 'managerName', label: `${mTerm} name` },
+      { key: 'managerEmail', label: `${mTerm} email`, mono: true },
+      { key: 'managerLocation', label: `${mTerm} ${lTermLower}` },
+      { key: 'name', label: 'Person name' },
+      { key: 'email', label: 'Person email', mono: true },
+      { key: 'location', label: `Person ${lTermLower}` },
+      { key: 'notes', label: 'Notes' },
+    ];
   }
-
-  const submitter = submitterParts(event, fallbackSubmittedBy);
-  return {
-    submittedAt: when,
-    managerName: submitter.managerName,
-    managerEmail: submitter.managerEmail,
-    managerLocation: submitter.managerLocation,
-    name: person.name,
-    email: person.email,
-    location: person.location,
-    notes: clean(meta.notes),
-  };
-}
-
-function rowsForChannel(channelKey) {
-  if (channelKey === 'auto') return AUTO_ROWS;
-  if (channelKey === 'admin') return ADMIN_ROWS;
-  if (channelKey === 'directory') return DIRECTORY_ROWS;
-  return MANAGER_ROWS;
+  return DIRECTORY_ROWS;
 }
 
 /**
@@ -131,6 +84,8 @@ export function buildChannelVersionTable(
   {
     fallbackManagerSubmittedBy = null,
     fallbackAdminSubmittedBy = null,
+    partnerName = null,
+    partnerSlug = null,
   } = {},
 ) {
   const type = channelKeyToEventType(channelKey);
@@ -145,6 +100,8 @@ export function buildChannelVersionTable(
       ? fallbackManagerSubmittedBy
       : null;
 
+  const terms = getPartnerTerminology(partnerName, partnerSlug);
+  const channelRows = rowsForChannel(channelKey, terms);
   const shortLabel = intakeEventLabel(type || channelEvents[0]?.type);
   const sources = channelEvents.map((event, index) => ({
     key: event.id || `${channelKey}-${index}`,
@@ -153,14 +110,14 @@ export function buildChannelVersionTable(
     values: valuesForEvent(event, channelKey, fallbackSubmittedBy),
   }));
 
-  const fieldRows = rowsForChannel(channelKey).filter(({ key }) =>
+  const fieldRows = channelRows.filter(({ key }) =>
     sources.some((source) => clean(source.values[key])),
   );
 
   return {
     channelKey,
     title: shortLabel,
-    fieldRows: fieldRows.length ? fieldRows : rowsForChannel(channelKey),
+    fieldRows: fieldRows.length ? fieldRows : channelRows,
     sources,
   };
 }

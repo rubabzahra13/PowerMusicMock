@@ -109,9 +109,9 @@ class TestPartnerDomainScoping:
         # Unique domain resolves without explicit partner_id
         assert resolve_partner_for_manager_email(db, unique_email) == partner_a.id
 
-        # Shared domain without partner context raises 409 (ambiguous)
+        # Shared domain without partner context raises 409 (ambiguous) when raise_if_ambiguous=True
         with pytest.raises(HTTPException) as exc_info:
-            resolve_partner_for_manager_email(db, email)
+            resolve_partner_for_manager_email(db, email, raise_if_ambiguous=True)
         assert exc_info.value.status_code == 409
         assert "belongs to multiple partners" in str(exc_info.value.detail)
 

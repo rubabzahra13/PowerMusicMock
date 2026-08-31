@@ -12,9 +12,9 @@ from app.pilot2.ai.client import _extract_json
 
 
 def make_template(id="tmpl-001", name="Cancellation Acknowledgement",
-                  intent="Cancellation", status="Active"):
+                  intent="Cancellation", status="Active", category="Cancellation"):
     return SimpleNamespace(
-        id=id, name=name, intent=intent, status=status, category="Membership",
+        id=id, name=name, intent=intent, status=status, category=category,
         subject="Re: Your cancellation request",
         body="Hi {{first_name}},\n\nWe've received your cancellation request.\n\nKind regards,\nPower Music Team",
     )
@@ -50,7 +50,7 @@ class TestHeuristicClassifier:
 
     def test_no_template_gets_flagged(self):
         result = classifier._heuristic(
-            "Sarah", "Membership question", "What are your prices?", [make_template()],
+            "Sarah", "Pricing question", "What are your prices?", [make_template(category="Cancellation")],
         )
         assert result.intent == "Enquiry"
         assert result.flag is True

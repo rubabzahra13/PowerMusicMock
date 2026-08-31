@@ -35,6 +35,8 @@ import {
   isAwaitingManagerSubmission,
   isAutomatedIntakeRequest,
 } from '../utils/requestTags';
+import { getPartnerTerminology } from '../utils/managerAuthBranding';
+import { usePartners } from '../context/PartnerContext';
 import { formatRequestDisplayId, formatAdminDateTime } from '../utils/requestDisplayId';
 import { formatManagerNotes, readAutomatedSubject, readLeaveDate, readManagerNotes } from '../utils/managerNotes';
 import { formatPersonFields, formatPersonName } from '../utils/personDisplay';
@@ -118,11 +120,20 @@ export default function RequestDetailView({
 
   if (!request) return null;
 
+  const { selectedPartner, partners } = usePartners();
+  const rawPartnerId = request.partnerId || request.partner_id;
+  const matchedPartner = partners?.find((p) => String(p.id) === String(rawPartnerId)) || selectedPartner;
+  const partnerName = request.partnerName || request.partner_name || matchedPartner?.name;
+  const partnerSlug = request.partnerSlug || request.partner_slug || rawPartnerId || matchedPartner?.slug;
+  const terms = getPartnerTerminology(partnerName, partnerSlug);
   const awaitingManager = isAwaitingManagerSubmission(request.tags);
   const adminEntry = isAdminEntry(request);
   const hasAdminOverlay = (request.tags || []).includes(TAG_SENT_BY_ADMIN)
     || Boolean(request.adminPerson);
-  const adminOverlayFields = formatAttributedManagerFields(request.adminSubmittedBy);
+  const adminOverlayFields = formatAttributedManagerFields(request.adminSubmittedBy, {
+    partnerName: request.partnerName,
+    partnerSlug: request.partnerSlug,
+  });
   const directoryRecord = directory.find(
     (record) => record.id === request.directoryMatch?.directoryId,
   )
@@ -301,22 +312,6 @@ export default function RequestDetailView({
                       <span className="text-[var(--color-text-primary)]">{personLocation}</span>
                     </span>
                   </p>
-                  {(request.person?.supervisor || request.person?.hospital) ? (
-                    <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[var(--color-text-secondary)] border-t border-[var(--color-border-default)]/60 pt-2">
-                      {request.person?.supervisor ? (
-                        <div>
-                          <span className="font-semibold text-[var(--color-text-secondary)]">Supervisor:</span>{' '}
-                          <span className="text-[var(--color-text-primary)]">{request.person.supervisor}</span>
-                        </div>
-                      ) : null}
-                      {request.person?.hospital ? (
-                        <div>
-                          <span className="font-semibold text-[var(--color-text-secondary)]">Hospital:</span>{' '}
-                          <span className="text-[var(--color-text-primary)]">{request.person.hospital}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
                 </div>
 
                 <Tag
@@ -406,15 +401,15 @@ export default function RequestDetailView({
         className={awaitingManager || (adminEntry && !attributedManager && !hasAdminOverlay) ? 'mt-5' : 'mt-4'}
         title={
           awaitingManager
-            ? 'No manager request yet'
+            ? `No ${terms.managerTermLower} request yet`
             : hasManagerSender && hasAdminOverlayDetails
               ? 'Sent by'
               : adminEntry
                 ? 'Entered via Admin form'
                 : hasManagerSender
-                  ? 'Sent by Manager Form'
+                  ? `Sent by ${terms.managerTerm} Form`
                   : hasAdminOverlayDetails
-                    ? 'Manager details from Admin form'
+                    ? `${terms.managerTerm} details from Admin form`
                     : 'Sent by'
         }
         icon={UserRound}
@@ -425,12 +420,12 @@ export default function RequestDetailView({
               <div>
                 {hasManagerSender && hasAdminOverlayDetails ? (
                   <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]">
-                    Manager Form
+                    {terms.managerTerm} Form
                   </h3>
                 ) : null}
                 <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-x-8">
                   <MetaItem
-                    label="Manager name"
+                    label={`${terms.managerTerm} name`}
                     value={
                       attributedManager && adminEntry
                         ? attributedFields.name
@@ -438,7 +433,7 @@ export default function RequestDetailView({
                     }
                   />
                   <MetaItem
-                    label="Manager email"
+                    label={`${terms.managerTerm} email`}
                     value={
                       attributedManager && adminEntry
                         ? attributedFields.email
@@ -447,7 +442,7 @@ export default function RequestDetailView({
                     mono={!(attributedManager && adminEntry) || Boolean(attributedFields.rawEmail)}
                   />
                   <MetaItem
-                    label="Manager location"
+                    label={`${terms.managerTerm} ${terms.locationTermLower}`}
                     value={
                       attributedManager && adminEntry
                         ? attributedFields.club
@@ -458,7 +453,7 @@ export default function RequestDetailView({
 
                 <div className="mt-5">
                   <h3 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
-                    Manager notes
+                    {terms.managerTerm} notes
                   </h3>
                   <p
                     className={`max-w-3xl text-sm leading-relaxed whitespace-pre-wrap ${
@@ -484,16 +479,16 @@ export default function RequestDetailView({
                   </h3>
                 ) : null}
                 <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
-                  Optional manager details entered when this was added via Admin form.
+                  Optional {terms.managerTermLower} details entered when this was added via Admin form.
                 </p>
                 <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-x-8">
-                  <MetaItem label="Manager name" value={adminOverlayFields.name} />
+                  <MetaItem label={`${terms.managerTerm} name`} value={adminOverlayFields.name} />
                   <MetaItem
-                    label="Manager email"
+                    label={`${terms.managerTerm} email`}
                     value={adminOverlayFields.email}
                     mono={Boolean(adminOverlayFields.rawEmail)}
                   />
-                  <MetaItem label="Manager location" value={adminOverlayFields.club} />
+                  <MetaItem label={`${terms.managerTerm} ${terms.locationTermLower}`} value={adminOverlayFields.club} />
                 </dl>
               </div>
             ) : null}

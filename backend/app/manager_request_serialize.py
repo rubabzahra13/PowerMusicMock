@@ -359,6 +359,27 @@ def _group_member_count(db: Optional[Session], req: models.ManagerRequest) -> in
     return int(result or 0)
 
 
+_PARTNER_CACHE: Dict[str, Tuple[str, str]] = {}
+
+
+def _resolve_partner_info(db: Optional[Session], partner_id: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not partner_id:
+        return None, None
+    if partner_id in _PARTNER_CACHE:
+        return _PARTNER_CACHE[partner_id]
+    if db is None:
+        return partner_id, partner_id.lower()
+    partner = db.query(models.Partner).filter(models.Partner.id == partner_id).first()
+    if not partner:
+        res = (partner_id, partner_id.lower())
+    else:
+        name = partner.name
+        slug = name.lower().replace(" ", "-")
+        res = (name, slug)
+    _PARTNER_CACHE[partner_id] = res
+    return res
+
+
 def request_to_api_dict(
     req: models.ManagerRequest,
     *,
@@ -371,6 +392,7 @@ def request_to_api_dict(
     persist_auto_mail_side_effects: bool = True,
     group_classification_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    partner_name, partner_slug = _resolve_partner_info(db, getattr(req, "partner_id", None))
     if manager_user is None:
         manager_user = getattr(req, "_manager_user", None)
     if admin_user is None:
@@ -414,8 +436,6 @@ def request_to_api_dict(
             "lastName": req.person_last_name,
             "email": req.person_email,
             "location": req.person_location,
-            "supervisor": getattr(req, "person_supervisor", None) or getattr(req, "supervisor", None),
-            "hospital": getattr(req, "person_hospital", None) or getattr(req, "hospital", None),
         },
         "action": req.action,
         "notes": manager_notes,
@@ -427,6 +447,8 @@ def request_to_api_dict(
         "managerId": str(req.manager_id) if req.manager_id else None,
         "handledByAdminId": str(req.handled_by_admin_id) if req.handled_by_admin_id else None,
         "partnerId": getattr(req, "partner_id", None),
+        "partnerName": partner_name,
+        "partnerSlug": partner_slug,
         # Duplicate group fields
         "duplicateGroupId": getattr(req, "duplicate_group_id", None),
         "needsReview": _needs_review(tags, getattr(req, "duplicate_group_id", None)),
@@ -603,6 +625,7 @@ def directory_person_to_api_dict(
     related_rows: Optional[List[models.ManagerRequest]] = None,
     group_by_directory_id: Optional[Dict[str, models.DuplicateGroup]] = None,
 ) -> Dict[str, Any]:
+    partner_name, partner_slug = _resolve_partner_info(db, getattr(req, "partner_id", None))
     if manager_user is None:
         manager_user = getattr(req, "_manager_user", None)
     if admin_user is None:
@@ -670,8 +693,6 @@ def directory_person_to_api_dict(
         "lastName": req.person_last_name,
         "email": req.person_email,
         "location": req.person_location,
-        "supervisor": getattr(req, "person_supervisor", None) or getattr(req, "supervisor", None),
-        "hospital": getattr(req, "person_hospital", None) or getattr(req, "hospital", None),
         "status": req.outcome or "",
         "action": req.action or "",
         "dateAdded": req.handled_at,
@@ -689,6 +710,8 @@ def directory_person_to_api_dict(
         "archivedAt": req.archived_at,
         "requestHistory": request_history,
         "partnerId": getattr(req, "partner_id", None),
+        "partnerName": partner_name,
+        "partnerSlug": partner_slug,
     }
 
 
@@ -877,8 +900,6 @@ def manager_request_list_item_to_api_dict(
             "lastName": req.person_last_name,
             "email": req.person_email,
             "location": req.person_location,
-            "supervisor": getattr(req, "person_supervisor", None) or getattr(req, "supervisor", None),
-            "hospital": getattr(req, "person_hospital", None) or getattr(req, "hospital", None),
         },
         "action": req.action,
         "status": req.status,

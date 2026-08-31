@@ -2,6 +2,7 @@ import { Tag, TruncateCell, EMPTY_CELL } from '../ui';
 import { formatTimestampSplit } from '../../utils/dateTime';
 import { formatPersonEmail, formatPersonLocation } from '../../utils/personDisplay';
 import { personName, requestStatusMeta } from '../../utils/managerRequestHistory';
+import { getPartnerTerminology } from '../../utils/managerAuthBranding';
 
 function TimestampCell({ val, className = '' }) {
   if (!val) return <span className="text-sm text-[var(--color-text-muted)]">{EMPTY_CELL}</span>;
@@ -20,7 +21,7 @@ function statusTagVariant(request) {
   return request.status === 'handled' ? 'neutral' : 'draft';
 }
 
-export function buildManagerRequestHistoryColumns(dateColumnLabel) {
+export function buildManagerRequestHistoryColumns(dateColumnLabel, partnerTerms = getPartnerTerminology()) {
   return [
     {
       key: '_rowNumber',
@@ -74,7 +75,7 @@ export function buildManagerRequestHistoryColumns(dateColumnLabel) {
     },
     {
       key: 'personLocation',
-      label: 'Location',
+      label: partnerTerms?.locationTerm || 'Location',
       width: '12%',
       headerClassName: 'text-center',
       cellClassName: 'align-top text-left max-w-0 overflow-hidden',

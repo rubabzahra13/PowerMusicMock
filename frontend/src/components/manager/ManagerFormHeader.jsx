@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronUp, Loader2, LogOut } from 'lucide-react';
 import { Modal } from '../ui';
 import { partnerInitials } from '../partner/PartnerConnectionBranding';
+import { getPartnerTerminology } from '../../utils/managerAuthBranding';
 
-function displayNameFrom(name, email) {
+function displayNameFrom(name, email, isHF = false) {
   const trimmed = name?.trim();
   if (trimmed) return trimmed;
   const local = String(email || '').split('@')[0];
   if (local) return local;
-  return 'Manager';
+  return isHF ? 'Director' : 'Manager';
 }
 
 function PartnerAvatar({ name, logoDataUrl, className = 'h-9 w-9' }) {
@@ -40,11 +41,12 @@ function ManagerAccountMenu({
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const displayName = displayNameFrom(name, email);
+  const displayPartner = partnerName?.trim() || null;
+  const terms = getPartnerTerminology(displayPartner);
+  const displayName = displayNameFrom(name, email, terms.isHealthFitness);
   const displayEmail = email?.trim() || null;
   const displayClub = clubLocation?.trim() || null;
-  const displayPartner = partnerName?.trim() || null;
-  const roleBadge = displayPartner ? `${displayPartner} Manager` : 'Manager';
+  const roleBadge = terms.roleBadge(displayPartner);
 
   useEffect(() => {
     if (!menuOpen) return undefined;

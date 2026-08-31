@@ -44,6 +44,7 @@ import {
   managerAuthSignupPath,
   managerAuthSubmitLabel,
   resolveManagerAuthPartnerBranding,
+  getPartnerTerminology,
 } from '../utils/managerAuthBranding';
 import { getManagerPartnerBranding, getPublicPartnerBranding } from '../utils/pilot2Api';
 import {
@@ -152,6 +153,10 @@ export default function Signup() {
     [emailBranding, slugBranding, partnerSlug],
   );
   const partnerLabel = partnerBranding?.partnerName || '';
+  const terms = useMemo(
+    () => getPartnerTerminology(partnerLabel, partnerSlug),
+    [partnerLabel, partnerSlug],
+  );
   const authAllowedDomains = useMemo(
     () =>
       resolveManagerAuthAllowedDomains({
@@ -962,7 +967,7 @@ export default function Signup() {
                     onClick={() => switchMode('signup')}
                     className="font-medium underline"
                   >
-                    {managerAuthCreateAccountLink(partnerLabel)}
+                    {managerAuthCreateAccountLink(partnerLabel, partnerSlug)}
                   </button>
                 </>
               )}
@@ -973,7 +978,7 @@ export default function Signup() {
         <form onSubmit={handleForgotPasswordSubmit} className="space-y-4" noValidate>
           <div>
             <label htmlFor={forgotEmailId} className={labelClass}>
-              Email
+              {terms.managerEmailLabel}
             </label>
             <input
               id={forgotEmailId}
@@ -1032,7 +1037,7 @@ export default function Signup() {
     return (
       <ManagerAuthShell partnerBranding={partnerBranding}>
         <h2 className="text-center text-base font-semibold text-[var(--color-text-primary)]">
-          {managerAuthHeading(partnerLabel, 'signin')}
+          {managerAuthHeading(partnerLabel, 'signin', partnerSlug)}
         </h2>
         <p className="mt-1 mb-6 text-center text-sm text-[var(--color-text-secondary)]">
           Use the email and password you chose when you signed up.
@@ -1061,7 +1066,7 @@ export default function Signup() {
                     onClick={() => switchMode('signup')}
                     className="font-medium underline"
                   >
-                    {managerAuthCreateAccountLink(partnerLabel)}
+                    {managerAuthCreateAccountLink(partnerLabel, partnerSlug)}
                   </button>
                 </>
               )}
@@ -1072,7 +1077,7 @@ export default function Signup() {
         <form onSubmit={handleSignInSubmit} className="space-y-4" noValidate>
           <div>
             <label htmlFor={signInEmailId} className={labelClass}>
-              Email
+              {terms.managerEmailLabel}
             </label>
             <input
               id={signInEmailId}
@@ -1131,10 +1136,10 @@ export default function Signup() {
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                <span>{managerAuthSubmitLabel(partnerLabel, 'signin', { loading: true })}</span>
+                <span>{managerAuthSubmitLabel(partnerLabel, 'signin', { loading: true, partnerSlug })}</span>
               </>
             ) : (
-              managerAuthSubmitLabel(partnerLabel, 'signin')
+              managerAuthSubmitLabel(partnerLabel, 'signin', { partnerSlug })
             )}
           </button>
         </form>
@@ -1146,7 +1151,7 @@ export default function Signup() {
             onClick={() => switchMode('signup')}
             className="font-medium text-[var(--color-brand-accent)] hover:underline"
           >
-            {managerAuthCreateAccountLink(partnerLabel)}
+            {managerAuthCreateAccountLink(partnerLabel, partnerSlug)}
           </button>
         </p>
       </ManagerAuthShell>
@@ -1156,7 +1161,7 @@ export default function Signup() {
   return (
     <ManagerAuthShell wide partnerBranding={partnerBranding}>
       <h2 className="text-center text-base font-semibold text-[var(--color-text-primary)]">
-        {managerAuthHeading(partnerLabel, 'signup')}
+        {managerAuthHeading(partnerLabel, 'signup', partnerSlug)}
       </h2>
       <p className="mt-1 mb-6 text-center text-sm text-[var(--color-text-secondary)]">
         Fill in your details and choose a password. You may need to confirm your email once.
@@ -1225,7 +1230,7 @@ export default function Signup() {
 
         <div>
           <label htmlFor="signup-email" className={labelClass}>
-            Email
+            {terms.managerEmailLabel}
           </label>
           <input
             id="signup-email"
@@ -1245,13 +1250,14 @@ export default function Signup() {
 
         <div>
           <label htmlFor="signup-club" className={labelClass}>
-            Club location
+            {terms.clubOrClientLabel}
           </label>
           <input
             id="signup-club"
             type="text"
             autoComplete="organization"
             maxLength={200}
+            placeholder={terms.clubOrClientPlaceholder}
             value={formData.club}
             onChange={(e) => handleChange('club', e.target.value)}
             disabled={loading}
@@ -1311,10 +1317,10 @@ export default function Signup() {
           {loading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              <span>{managerAuthSubmitLabel(partnerLabel, 'signup', { loading: true })}</span>
+              <span>{managerAuthSubmitLabel(partnerLabel, 'signup', { loading: true, partnerSlug })}</span>
             </>
           ) : (
-            managerAuthSubmitLabel(partnerLabel, 'signup')
+            managerAuthSubmitLabel(partnerLabel, 'signup', { partnerSlug })
           )}
         </button>
       </form>

@@ -1,4 +1,13 @@
-"""Duplicate matching logic supporting name derivatives, location probes, and false-positive dismissal checks."""
+"""Duplicate matching logic supporting name derivatives, location probes, and false-positive dismissal checks.
+
+Both PureGym and Health Fitness share the same 4-field duplicate matching:
+  first name, last name, email, location
+
+For Health Fitness, the "location" field stores what the partner calls "client".
+The is_healthtech detection helper is retained so call-sites remain unchanged,
+but match_classification_for_partner() now delegates to the same 4-field
+match_classification() for all partners.
+"""
 
 from __future__ import annotations
 
@@ -12,19 +21,23 @@ from app import models, schemas
 import re
 
 # ---------------------------------------------------------------------------
-# Partner capability detection
+# Partner detection (retained for call-site compatibility)
 # ---------------------------------------------------------------------------
 
 _HEALTHTECH_PARTNER_CACHE: dict[str, bool] = {}
 
 
 def is_healthtech_partner(db: Session, partner_id: Optional[str]) -> bool:
-    """Return True when *partner_id* belongs to the HealthTech partner.
+    """Return True when *partner_id* belongs to the Health Fitness partner.
 
     The check is name-based (case-insensitive substring) so it survives
-    partner renames as long as the word 'healthtech' or 'health tech' is
-    present. Results are cached for the lifetime of the process (partners
-    don't change at runtime).
+    partner renames as long as 'healthtech', 'health tech', or 'health fitness'
+    is present in the name.
+    Results are cached for the lifetime of the process (partners don't change
+    at runtime).
+
+    NOTE: Health Fitness now uses the same matching algorithm as PureGym.
+    This function is retained so all existing call-sites remain unchanged.
     """
     if not partner_id:
         return False
@@ -32,13 +45,17 @@ def is_healthtech_partner(db: Session, partner_id: Optional[str]) -> bool:
         return _HEALTHTECH_PARTNER_CACHE[partner_id]
     partner = db.query(models.Partner).filter(models.Partner.id == partner_id).first()
     name_lower = (partner.name if partner else "").lower()
-    result = "healthtech" in name_lower or "health tech" in name_lower
+    result = (
+        "healthtech" in name_lower
+        or "health tech" in name_lower
+        or "health fitness" in name_lower
+    )
     _HEALTHTECH_PARTNER_CACHE[partner_id] = result
     return result
 
 
 def is_healthtech_from_request(db: Session, req: models.ManagerRequest) -> bool:
-    """Convenience wrapper — detect HealthTech from a ManagerRequest instance."""
+    """Convenience wrapper — detect Health Fitness from a ManagerRequest instance."""
     return is_healthtech_partner(db, req.partner_id)
 
 def _norm(val: Optional[str]) -> str:
@@ -159,15 +176,15 @@ def match_classification(
 ) -> Tuple[Optional[str], float]:
     """Returns ('confirmed_duplicate' | 'potential_duplicate' | None, score).
 
-    PureGym / legacy 4-field implementation. DO NOT MODIFY — this function
-    is the source of truth for all non-HealthTech partners. HealthTech uses
-    match_classification_for_partner() instead.
+    Shared 4-field implementation for ALL partners (PureGym and Health Fitness).
+    For Health Fitness, the "location" field stores what the partner calls "client".
+    The stored value and matching logic are identical — only the UI label differs.
     """
     first_l, last_l, email_l, loc_l = _norm(left.firstName), _norm(left.lastName), _norm(left.email), _norm(left.location)
     first_r, last_r, email_r, loc_r = _norm(right.firstName), _norm(right.lastName), _norm(right.email), _norm(right.location)
 
     if not last_l or not last_r:
-        return None
+        return None, 0.0
 
     same_last = (last_l == last_r)
     same_first = (first_l == first_r)
@@ -184,81 +201,7 @@ def match_classification(
 
     # 1. Confirmed Duplicate (strict rule)
     # Identical across all relevant fields (First Name + Last Name + Email + Location)
-    # Empty fields do not contribute to a confirmed match due to existing safeguards in same_email/same_loc.
     if same_first and same_last and same_email and same_loc:
-        return "confirmed_duplicate", total_score
-
-    if total_score >= POTENTIAL_DUPLICATE_THRESHOLD:
-        return "potential_duplicate", total_score
-
-    return None, total_score
-
-
-# ---------------------------------------------------------------------------
-# HealthTech 6-field matching
-# ---------------------------------------------------------------------------
-
-# HealthTech weights for the two new fields — treated as normal peers, not
-# boosted. The base 4-field total is 100 pts; we rescale so the 6-field
-# total is still 100 pts, keeping the existing threshold meaningful.
-#
-# Original weights:  first=30, last=35, loc=25, email=10  => 100
-# New weights:       first=25, last=29, loc=21, email=8, supervisor=9, hospital=8  => 100
-#
-# The threshold (45.0) is identical — conceptually the same fraction of
-# the maximum score must be met.
-
-_HT_W_FIRST    = 25.0
-_HT_W_LAST     = 29.0
-_HT_W_LOC      = 21.0
-_HT_W_EMAIL    =  8.0
-_HT_W_SUPER    =  9.0
-_HT_W_HOSP     =  8.0
-
-
-def _match_classification_healthtech(
-    left: schemas.PersonInfo,
-    right: schemas.PersonInfo,
-) -> Tuple[Optional[str], float]:
-    """HealthTech 6-field variant. Returns same classification tokens as the
-    4-field version so all downstream code is unchanged."""
-    first_l = _norm(left.firstName)
-    last_l  = _norm(left.lastName)
-    email_l = _norm(left.email)
-    loc_l   = _norm(left.location)
-    sup_l   = _norm(getattr(left,  'supervisor', None))
-    hosp_l  = _norm(getattr(left,  'hospital',   None))
-
-    first_r = _norm(right.firstName)
-    last_r  = _norm(right.lastName)
-    email_r = _norm(right.email)
-    loc_r   = _norm(right.location)
-    sup_r   = _norm(getattr(right, 'supervisor', None))
-    hosp_r  = _norm(getattr(right, 'hospital',   None))
-
-    if not last_l or not last_r:
-        return None
-
-    same_first  = (first_l == first_r)
-    same_last   = (last_l  == last_r)
-    same_email  = bool(email_l and email_r and email_l == email_r)
-    same_loc    = bool(loc_l   and loc_r   and loc_l   == loc_r)
-    same_super  = bool(sup_l   and sup_r   and sup_l   == sup_r)
-    same_hosp   = bool(hosp_l  and hosp_r  and hosp_l  == hosp_r)
-
-    # Potential duplicate scoring — reuse Jaro-Winkler for name fields,
-    # exact-match for the remaining deterministic fields.
-    first_score = jaro_winkler(first_l, first_r) * _HT_W_FIRST
-    last_score  = jaro_winkler(last_l,  last_r)  * _HT_W_LAST
-    loc_score   = _HT_W_LOC   if same_loc   else 0.0
-    email_score = _HT_W_EMAIL if same_email  else 0.0
-    super_score = _HT_W_SUPER if same_super  else 0.0
-    hosp_score  = _HT_W_HOSP  if same_hosp   else 0.0
-
-    total_score = first_score + last_score + loc_score + email_score + super_score + hosp_score
-
-    # Confirmed duplicate: ALL SIX fields must match exactly.
-    if same_first and same_last and same_email and same_loc and same_super and same_hosp:
         return "confirmed_duplicate", total_score
 
     if total_score >= POTENTIAL_DUPLICATE_THRESHOLD:
@@ -275,9 +218,9 @@ def match_classification_for_partner(
 ) -> Tuple[Optional[str], float]:
     """Partner-aware wrapper.
 
-    When *is_healthtech* is True, evaluates all six HealthTech fields.
-    Otherwise delegates to the unchanged 4-field PureGym implementation.
+    Both PureGym and Health Fitness use the same 4-field scoring. The
+    is_healthtech flag is accepted for call-site compatibility but no longer
+    selects a different algorithm — the shared match_classification() is used
+    for all partners.
     """
-    if is_healthtech:
-        return _match_classification_healthtech(left, right)
     return match_classification(left, right)

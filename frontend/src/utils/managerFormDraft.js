@@ -47,25 +47,14 @@ export const EMPTY_PERSON_FORM = {
   lastName: '',
   email: '',
   location: '',
-  supervisor: '',
-  hospital: '',
   notes: '',
 };
 
 export const MAX_MANAGER_PERSON_ROWS = 10;
 
 export function isPersonFormComplete(personForm, options = {}) {
-  const isHealthTech = Boolean(options?.isHealthTech);
-  if (isHealthTech) {
-    return (
-      (personForm.firstName || '').trim() !== '' &&
-      (personForm.lastName || '').trim() !== '' &&
-      (personForm.email || '').trim() !== '' &&
-      (personForm.location || '').trim() !== '' &&
-      (personForm.supervisor || '').trim() !== '' &&
-      (personForm.hospital || '').trim() !== ''
-    );
-  }
+  // Both PureGym and Health Fitness require the same 4 fields.
+  // Health Fitness uses the location field to store "client" — label only differs in UI.
   return (
     (personForm.firstName || '').trim() !== '' &&
     (personForm.lastName || '').trim() !== '' &&

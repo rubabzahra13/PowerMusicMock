@@ -1,6 +1,7 @@
 import { formatPersonFields, formatPersonName } from './personDisplay';
 import { formatAdminDateTime } from './requestDisplayId';
 import { formatAttributedManagerFields } from './manualEntry';
+import { getPartnerTerminology } from './managerAuthBranding';
 
 export const INTAKE_EVENT_MANAGER = 'manager';
 export const INTAKE_EVENT_ADMIN = 'admin';
@@ -86,7 +87,7 @@ export function formatIntakeCountSummary(events = []) {
   return parts.join(' · ');
 }
 
-export function formatIntakeEventWho(event) {
+export function formatIntakeEventWho(event, options = {}) {
   if (!event) return '';
   if (event.type === INTAKE_EVENT_DIRECTORY) {
     return String(event.meta?.directoryName || '').trim() || 'Directory match';
@@ -95,11 +96,12 @@ export function formatIntakeEventWho(event) {
     const from = String(event.meta?.fromEmail || '').trim();
     return from || 'Automated email';
   }
-  const submitter = formatAttributedManagerFields(event.submittedBy);
+  const submitter = formatAttributedManagerFields(event.submittedBy, options);
   if (submitter.hasAny && submitter.rawName) return submitter.rawName;
   if (submitter.hasAny && submitter.rawEmail) return submitter.rawEmail;
   if (event.type === INTAKE_EVENT_ADMIN) return 'Admin';
-  return 'Manager';
+  const terms = getPartnerTerminology(options.partnerName, options.partnerSlug);
+  return terms.managerTerm;
 }
 
 export function formatIntakeEventSummary(event) {

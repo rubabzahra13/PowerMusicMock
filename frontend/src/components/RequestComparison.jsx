@@ -16,6 +16,8 @@ import {
   SENT_BY_ADMIN_LABEL,
 } from '../utils/manualEntry';
 import { ADMIN_FORM_LABEL, TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_SENT_BY_ADMIN } from '../utils/requestTags';
+import { getPartnerTerminology } from '../utils/managerAuthBranding';
+import { usePartners } from '../context/PartnerContext';
 
 const norm = (value) => {
   if (value == null) return '';
@@ -47,17 +49,15 @@ const PERSON_FIELD_ROWS = [
   { key: 'name', label: 'Name' },
   { key: 'email', label: 'Email', mono: true },
   { key: 'location', label: 'Location' },
-  { key: 'supervisor', label: 'Supervisor' },
-  { key: 'hospital', label: 'Hospital' },
 ];
 
 /**
  * One matrix: fields as rows, sources as columns.
  * Fits the available page width (table-fixed, wrapping) — no horizontal scroll.
  */
-function ComparisonMatrix({ sources, embedded = false, includeManagerRow = false }) {
+function ComparisonMatrix({ sources, embedded = false, includeManagerRow = false, locationLabel = 'Location' }) {
   const rows = [
-    ...PERSON_FIELD_ROWS.filter(({ key }) =>
+    ...PERSON_FIELD_ROWS.map((r) => r.key === 'location' ? { ...r, label: locationLabel } : r).filter(({ key }) =>
       sources.some((source) => source.values[key]),
     ),
     ...(includeManagerRow ? [{ key: 'manager', label: 'Sent by' }] : []),
@@ -363,8 +363,6 @@ function personValuesFromRequest(requestPerson) {
     name,
     email: (requestPerson.email || '').trim(),
     location: (requestPerson.location || '').trim(),
-    supervisor: (requestPerson.supervisor || '').trim(),
-    hospital: (requestPerson.hospital || '').trim(),
   };
 }
 
@@ -388,7 +386,14 @@ export default function RequestComparison({
   onViewDetails,
   className = '',
   embedded = false,
+  partnerName = null,
+  partnerSlug = null,
 }) {
+  const { selectedPartner } = usePartners();
+  const terms = getPartnerTerminology(
+    partnerName || selectedPartner?.name,
+    partnerSlug || selectedPartner?.slug,
+  );
   const directoryRecord = useMemo(() => {
     if (!directoryMatch) return null;
     const byId = directory.find((record) => record.id === directoryMatch.directoryId);
@@ -436,11 +441,11 @@ export default function RequestComparison({
 
   const requestPersonValues = personValuesFromRequest(requestPerson);
   const adminPersonValues = personValuesFromRequest(adminPerson);
-  const adminManagerFields = formatAttributedManagerFields(adminSubmittedBy);
+  const adminManagerFields = formatAttributedManagerFields(adminSubmittedBy, { partnerName, partnerSlug });
 
   const includeDirectory = Boolean(directoryRecord || directoryMatch);
   const directoryManager = directorySenderFromRecord(directoryRecord);
-  const senderRole = adminEntry && !hasAdminOverlay ? 'Admin' : 'Manager';
+  const senderRole = adminEntry && !hasAdminOverlay ? 'Admin' : terms.managerTerm;
   const requestManagerValue = typeof requestManager === 'object' && requestManager !== null
     ? (() => {
         const rawName = (requestManager.name || '').trim();
@@ -485,7 +490,7 @@ export default function RequestComparison({
     email: effectiveAutoEmail,
   });
 
-  const primarySourceTitle = adminEntry && !hasAdminOverlay ? ADMIN_FORM_LABEL : 'Manager request';
+  const primarySourceTitle = adminEntry && !hasAdminOverlay ? ADMIN_FORM_LABEL : `${terms.managerTerm} request`;
 
   const sources = [
     hasManagerForm
@@ -499,8 +504,6 @@ export default function RequestComparison({
             name: intakeField('name', 'leftValue') || requestPersonValues?.name || '',
             email: intakeField('email', 'leftValue') || requestPersonValues?.email || '',
             location: intakeField('location', 'leftValue') || requestPersonValues?.location || '',
-            supervisor: intakeField('supervisor', 'leftValue') || requestPersonValues?.supervisor || '',
-            hospital: intakeField('hospital', 'leftValue') || requestPersonValues?.hospital || '',
             manager: requestManagerValue,
           },
         }
@@ -514,8 +517,6 @@ export default function RequestComparison({
             name: adminPersonValues?.name || '',
             email: adminPersonValues?.email || '',
             location: adminPersonValues?.location || '',
-            supervisor: adminPersonValues?.supervisor || '',
-            hospital: adminPersonValues?.hospital || '',
             manager: adminSenderValue,
           },
         }
@@ -542,14 +543,6 @@ export default function RequestComparison({
               || directoryRecord?.location
               || requestPersonValues?.location
               || '',
-            supervisor: intakeField('supervisor', 'rightValue')
-              || directoryRecord?.supervisor
-              || requestPersonValues?.supervisor
-              || '',
-            hospital: intakeField('hospital', 'rightValue')
-              || directoryRecord?.hospital
-              || requestPersonValues?.hospital
-              || '',
             manager: autoSenderValue,
           },
         }
@@ -566,8 +559,6 @@ export default function RequestComparison({
                 name: `${directoryRecord.firstName || ''} ${directoryRecord.lastName || ''}`.trim(),
                 email: directoryRecord.email,
                 location: directoryRecord.location,
-                supervisor: directoryRecord.supervisor || '',
-                hospital: directoryRecord.hospital || '',
                 manager: directoryManager,
               }
             : {
@@ -575,10 +566,6 @@ export default function RequestComparison({
                 email: directoryMatch?.fields?.find((f) => f.field === 'email')?.rightValue || '',
                 location:
                   directoryMatch?.fields?.find((f) => f.field === 'location')?.rightValue || '',
-                supervisor:
-                  directoryMatch?.fields?.find((f) => f.field === 'supervisor')?.rightValue || '',
-                hospital:
-                  directoryMatch?.fields?.find((f) => f.field === 'hospital')?.rightValue || '',
                 manager: directoryManager,
               },
         }
@@ -593,6 +580,7 @@ export default function RequestComparison({
         sources={sources}
         embedded={embedded}
         includeManagerRow={includeSentByRow || includeDirectory}
+        locationLabel={terms.locationTerm}
       />
     </div>
   );

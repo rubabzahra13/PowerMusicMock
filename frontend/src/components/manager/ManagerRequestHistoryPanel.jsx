@@ -9,6 +9,7 @@ import ManagerRequestHistoryEmpty, {
   ManagerRequestHistoryNotice,
 } from './ManagerRequestHistoryEmpty';
 import { buildManagerRequestHistoryColumns } from './managerRequestHistoryColumns';
+import { getPartnerTerminology } from '../../utils/managerAuthBranding';
 import {
   countManagerHandledRequestUnseen,
   countManagerPendingUnseen,
@@ -61,8 +62,17 @@ export default function ManagerRequestHistoryPanel({
   onHighlightChange,
   embedded = false,
   backLabel = 'Back',
+  partnerName,
+  partnerSlug,
 }) {
   const [activeTab, setActiveTab] = useState('all');
+
+  const effectivePartnerName = partnerName || requests[0]?.partnerName || requests[0]?.partner_name;
+  const effectivePartnerSlug = partnerSlug || requests[0]?.partnerSlug || requests[0]?.partner_slug;
+  const partnerTerms = useMemo(
+    () => getPartnerTerminology(effectivePartnerName, effectivePartnerSlug),
+    [effectivePartnerName, effectivePartnerSlug],
+  );
 
   const unreadCount = useMemo(() => {
     void highlightVersion;
@@ -136,8 +146,8 @@ export default function ManagerRequestHistoryPanel({
     activeTab === 'new' ? 'Submitted' : activeTab === 'handled' ? 'Handled at' : 'Date';
 
   const columns = useMemo(
-    () => buildManagerRequestHistoryColumns(dateColumnLabel),
-    [dateColumnLabel],
+    () => buildManagerRequestHistoryColumns(dateColumnLabel, partnerTerms),
+    [dateColumnLabel, partnerTerms],
   );
 
   const tableRows = useMemo(

@@ -5,6 +5,7 @@ import PartnerConnectionBranding from '../partner/PartnerConnectionBranding';
 import {
   instantPartnerBrandingFromSlug,
   resolveManagerAuthPartnerBranding,
+  getPartnerTerminology,
 } from '../../utils/managerAuthBranding';
 
 const primaryButtonClass =
@@ -34,7 +35,8 @@ export default function RolePortalConflict({
         partnerSlug,
       }) || instantPartnerBrandingFromSlug(partnerSlug)
     : null;
-  const partnerLabel = urlBranding?.partnerName || 'partner managers';
+  const terms = getPartnerTerminology(urlBranding?.partnerName, partnerSlug);
+  const partnerLabel = urlBranding?.partnerName || `partner ${terms.managerTermPlural.toLowerCase()}`;
 
   const sessionPartnerName = sessionPartnerBranding?.partnerName || 'your partner';
 
@@ -49,8 +51,8 @@ export default function RolePortalConflict({
         <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-secondary)]">
           {isAdminOnManager
             ? partnerSlug
-              ? `This link is for ${partnerLabel}. Sign out to use the partner portal with a manager account.`
-              : 'The partner portal is for managers. Sign out to sign in with a manager account.'
+              ? `This link is for ${partnerLabel}. Sign out to use the partner portal with a ${terms.managerTermLower} account.`
+              : `The partner portal is for ${terms.managerTermPlural.toLowerCase()}. Sign out to sign in with a ${terms.managerTermLower} account.`
             : 'This area is for administrators. Sign out to sign in with an admin account.'}
         </p>
       </div>

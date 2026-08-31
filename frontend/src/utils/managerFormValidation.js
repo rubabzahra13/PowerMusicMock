@@ -11,16 +11,15 @@ export const PERSON_FIELD_LIMITS = {
   firstName: 100,
   lastName: 100,
   email: 254,
+  // "location" for PureGym, "client" for Health Fitness — same physical field.
   location: 200,
-  supervisor: 200,
-  hospital: 200,
   notes: 5000,
 };
 
 export const MIN_ROSTER_NAME_LENGTH = 2;
 export const MIN_ROSTER_LOCATION_LENGTH = 2;
 
-const PERSON_FIELDS = ['firstName', 'lastName', 'email', 'location', 'supervisor', 'hospital', 'notes'];
+const PERSON_FIELDS = ['firstName', 'lastName', 'email', 'location', 'notes'];
 
 /** Strip invalid characters as the user types. */
 export function sanitizePersonFieldInput(field, value) {
@@ -33,9 +32,6 @@ export function sanitizePersonFieldInput(field, value) {
   }
   if (field === 'location') {
     return raw.replace(LOCATION_CHARS, '').slice(0, PERSON_FIELD_LIMITS.location);
-  }
-  if (field === 'supervisor' || field === 'hospital') {
-    return raw.slice(0, PERSON_FIELD_LIMITS[field]);
   }
   const max = PERSON_FIELD_LIMITS[field] ?? 5000;
   return raw.slice(0, max);
@@ -79,59 +75,25 @@ export function validatePersonEmail(raw) {
   return normalized;
 }
 
-export function validatePersonLocation(raw) {
+export function validatePersonLocation(raw, fieldName = 'User location') {
   const cleaned = sanitizePersonFieldInput('location', raw).trim();
   if (!cleaned) {
-    return { ok: false, error: 'User location is required.' };
+    return { ok: false, error: `${fieldName} is required.` };
   }
   if (cleaned.length < MIN_ROSTER_LOCATION_LENGTH) {
-    return { ok: false, error: `User location must be at least ${MIN_ROSTER_LOCATION_LENGTH} characters.` };
+    return { ok: false, error: `${fieldName} must be at least ${MIN_ROSTER_LOCATION_LENGTH} characters.` };
   }
   if (cleaned.length > PERSON_FIELD_LIMITS.location) {
-    return { ok: false, error: 'User location must be at most 200 characters.' };
+    return { ok: false, error: `${fieldName} must be at most 200 characters.` };
   }
-  const htmlError = rejectHtml(cleaned, 'User location');
+  const htmlError = rejectHtml(cleaned, fieldName);
   if (htmlError) return { ok: false, error: htmlError };
   if (!ROSTER_LOCATION_RE.test(cleaned)) {
     return {
       ok: false,
-      error: 'User location must contain letters and spaces only (no numbers or symbols).',
+      error: `${fieldName} must contain letters and spaces only (no numbers or symbols).`,
     };
   }
-  return { ok: true, value: cleaned };
-}
-
-export function validatePersonSupervisor(raw, required = true) {
-  const cleaned = sanitizePersonFieldInput('supervisor', raw).trim();
-  if (!cleaned) {
-    if (required) return { ok: false, error: 'User supervisor is required.' };
-    return { ok: true, value: '' };
-  }
-  if (cleaned.length < MIN_ROSTER_NAME_LENGTH) {
-    return { ok: false, error: `User supervisor must be at least ${MIN_ROSTER_NAME_LENGTH} characters.` };
-  }
-  if (cleaned.length > PERSON_FIELD_LIMITS.supervisor) {
-    return { ok: false, error: 'User supervisor must be at most 200 characters.' };
-  }
-  const htmlError = rejectHtml(cleaned, 'User supervisor');
-  if (htmlError) return { ok: false, error: htmlError };
-  return { ok: true, value: cleaned };
-}
-
-export function validatePersonHospital(raw, required = true) {
-  const cleaned = sanitizePersonFieldInput('hospital', raw).trim();
-  if (!cleaned) {
-    if (required) return { ok: false, error: 'User hospital is required.' };
-    return { ok: true, value: '' };
-  }
-  if (cleaned.length < MIN_ROSTER_NAME_LENGTH) {
-    return { ok: false, error: `User hospital must be at least ${MIN_ROSTER_NAME_LENGTH} characters.` };
-  }
-  if (cleaned.length > PERSON_FIELD_LIMITS.hospital) {
-    return { ok: false, error: 'User hospital must be at most 200 characters.' };
-  }
-  const htmlError = rejectHtml(cleaned, 'User hospital');
-  if (htmlError) return { ok: false, error: htmlError };
   return { ok: true, value: cleaned };
 }
 
@@ -148,8 +110,18 @@ export function validatePersonNotes(raw) {
   return { ok: true, value: cleaned };
 }
 
-export function validatePersonFormFields(person, options = {}) {
-  const isHealthTech = Boolean(options?.isHealthTech);
+/**
+ * Validate a single person form row.
+ *
+ * Both PureGym and Health Fitness use the same 4 required fields:
+ *   firstName, lastName, email, location
+ *
+ * For Health Fitness, the "location" field stores what the partner calls
+ * "client" — the label is applied by the UI based on partner context.
+ * The options argument is accepted for backwards compatibility but no
+ * longer changes which fields are required.
+ */
+export function validatePersonFormFields(person, { locationLabel = 'User location' } = {}) {
   const errors = {};
   const values = {};
 
@@ -168,31 +140,6 @@ export function validatePersonFormFields(person, options = {}) {
   const location = validatePersonLocation(person.location);
   if (!location.ok) errors.location = location.error;
   else values.location = location.value;
-
-  if (isHealthTech) {
-    const supervisor = validatePersonSupervisor(person.supervisor, true);
-    if (!supervisor.ok) errors.supervisor = supervisor.error;
-    else values.supervisor = supervisor.value;
-
-    const hospital = validatePersonHospital(person.hospital, true);
-    if (!hospital.ok) errors.hospital = hospital.error;
-    else values.hospital = hospital.value;
-  } else {
-    if (person.supervisor?.trim()) {
-      const supervisor = validatePersonSupervisor(person.supervisor, false);
-      if (!supervisor.ok) errors.supervisor = supervisor.error;
-      else values.supervisor = supervisor.value;
-    } else {
-      values.supervisor = '';
-    }
-    if (person.hospital?.trim()) {
-      const hospital = validatePersonHospital(person.hospital, false);
-      if (!hospital.ok) errors.hospital = hospital.error;
-      else values.hospital = hospital.value;
-    } else {
-      values.hospital = '';
-    }
-  }
 
   const notes = validatePersonNotes(person.notes);
   if (!notes.ok) errors.notes = notes.error;
@@ -243,8 +190,6 @@ export function validatePersonForms(forms, options = {}) {
       lastName: result.values.lastName ?? forms[index].lastName,
       email: result.values.email ?? forms[index].email,
       location: result.values.location ?? forms[index].location,
-      supervisor: result.values.supervisor ?? forms[index].supervisor ?? '',
-      hospital: result.values.hospital ?? forms[index].hospital ?? '',
       notes: result.values.notes ?? forms[index].notes ?? '',
     })),
   };

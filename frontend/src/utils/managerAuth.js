@@ -391,23 +391,23 @@ export function validatePersonName(raw, fieldName) {
   return { ok: true, value: cleaned };
 }
 
-export function validateClub(raw) {
+export function validateClub(raw, fieldName = 'Club location') {
   const cleaned = stripControlChars(String(raw || ''));
   if (!cleaned) {
-    return { ok: false, error: 'Club location is required.' };
+    return { ok: false, error: `${fieldName} is required.` };
   }
   if (cleaned.length < MIN_CLUB_LOCATION_LENGTH) {
-    return { ok: false, error: `Club location must be at least ${MIN_CLUB_LOCATION_LENGTH} characters.` };
+    return { ok: false, error: `${fieldName} must be at least ${MIN_CLUB_LOCATION_LENGTH} characters.` };
   }
   if (cleaned.length > 200) {
-    return { ok: false, error: 'Club location must be at most 200 characters.' };
+    return { ok: false, error: `${fieldName} must be at most 200 characters.` };
   }
-  const htmlError = rejectHtml(cleaned, 'Club location');
+  const htmlError = rejectHtml(cleaned, fieldName);
   if (htmlError) return { ok: false, error: htmlError };
   if (!CLUB_LOCATION_RE.test(cleaned)) {
     return {
       ok: false,
-      error: 'Club location must contain letters and spaces only (no numbers or symbols).',
+      error: `${fieldName} must contain letters and spaces only (no numbers or symbols).`,
     };
   }
   return { ok: true, value: cleaned };

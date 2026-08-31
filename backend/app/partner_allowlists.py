@@ -161,6 +161,7 @@ def resolve_partner_for_manager_email(
     partner_id: Optional[str] = None,
     partner_slug: Optional[str] = None,
     manager_user_id: Optional[str] = None,
+    raise_if_ambiguous: bool = False,
 ) -> Optional[str]:
     addr = (email or "").strip().lower()
     if not addr or "@" not in addr:
@@ -204,6 +205,12 @@ def resolve_partner_for_manager_email(
                     return recent_req.partner_id
             except Exception:
                 pass
+
+        if raise_if_ambiguous:
+            raise HTTPException(
+                status_code=409,
+                detail="Email domain belongs to multiple partners. Explicit partner context is required.",
+            )
 
         # Fallback to the latest configured partner domain instead of raising 409
         latest_match = (

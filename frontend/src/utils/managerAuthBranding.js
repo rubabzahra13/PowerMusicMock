@@ -1,5 +1,43 @@
 import { readCachedPartnerSlugBranding } from './partnerSlugBrandingCache';
 
+export function isHealthFitnessPartner(partnerName, partnerSlug = '') {
+  const name = (partnerName || '').toLowerCase();
+  const slug = (partnerSlug || '').toLowerCase();
+  return (
+    slug === 'health-fitness' ||
+    slug === 'health-tech' ||
+    slug.includes('health') ||
+    name.includes('health fitness') ||
+    name.includes('healthtech') ||
+    name.includes('health tech') ||
+    name.includes('health')
+  );
+}
+
+export function getPartnerTerminology(partnerName, partnerSlug = '') {
+  const isHF = isHealthFitnessPartner(partnerName, partnerSlug);
+  return {
+    isHealthFitness: isHF,
+    managerTerm: isHF ? 'Director' : 'Manager',
+    managerTermLower: isHF ? 'director' : 'manager',
+    managerTermPlural: isHF ? 'Directors' : 'Managers',
+    locationTerm: isHF ? 'Client' : 'Location',
+    locationTermLower: isHF ? 'client' : 'location',
+    clubOrClientLabel: isHF ? 'Client' : 'Club location',
+    clubOrClientPlaceholder: isHF ? 'e.g. Health Fitness HQ' : 'e.g. London Central',
+    managerDetailsTitle: isHF ? 'Director details' : 'Manager details',
+    managerFirstLabel: isHF ? 'Director first name' : 'Manager first name',
+    managerLastLabel: isHF ? 'Director last name' : 'Manager last name',
+    managerEmailLabel: isHF ? 'Director email' : 'Manager email',
+    managerClubLabel: isHF ? 'Director client' : 'Manager club location',
+    roleBadge: (name) => {
+      const p = name?.trim();
+      if (isHF) return p ? `${p} Director` : 'Director';
+      return p ? `${p} Manager` : 'Manager';
+    },
+  };
+}
+
 export function partnerDisplayNameFromSlug(slug) {
   if (!slug) return '';
   return String(slug)
@@ -50,31 +88,40 @@ export function managerAuthSignupPath(partnerSlug = '') {
   return `/${encodeURIComponent(slug)}/submit/signup`;
 }
 
-export function managerAuthHeading(partnerName, mode) {
+export function managerAuthHeading(partnerName, mode, partnerSlug = '') {
   const label = partnerName?.trim();
+  const terms = getPartnerTerminology(partnerName, partnerSlug);
   if (!label) {
-    if (mode === 'signup') return 'Create account';
-    if (mode === 'signin') return 'Sign in';
+    if (mode === 'signup') return `${terms.managerTerm} sign up`;
+    if (mode === 'signin') return `${terms.managerTerm} sign in`;
     return 'Account';
   }
-  if (mode === 'signup') return `${label} sign up`;
-  return `${label} sign in`;
+  if (mode === 'signup') {
+    return terms.isHealthFitness ? `${label} Director sign up` : `${label} sign up`;
+  }
+  return terms.isHealthFitness ? `${label} Director sign in` : `${label} sign in`;
 }
 
-export function managerAuthSubmitLabel(partnerName, mode, { loading = false } = {}) {
+export function managerAuthSubmitLabel(partnerName, mode, { loading = false, partnerSlug = '' } = {}) {
   const label = partnerName?.trim();
+  const terms = getPartnerTerminology(partnerName, partnerSlug);
+  const role = terms.isHealthFitness ? 'Director ' : '';
   if (loading) {
-    if (mode === 'signup') return label ? `${label} sign up…` : 'Creating account…';
-    return label ? `${label} sign in…` : 'Signing in…';
+    if (mode === 'signup') return label ? `${label} ${role}sign up…` : `${terms.managerTerm} sign up…`;
+    return label ? `${label} ${role}sign in…` : `${terms.managerTerm} sign in…`;
   }
   if (!label) {
-    return mode === 'signup' ? 'Create account' : 'Sign in';
+    return mode === 'signup' ? `${terms.managerTerm} sign up` : `${terms.managerTerm} sign in`;
   }
-  if (mode === 'signup') return `${label} sign up`;
-  return `${label} sign in`;
+  if (mode === 'signup') return `${label} ${role}sign up`;
+  return `${label} ${role}sign in`;
 }
 
-export function managerAuthCreateAccountLink(partnerName) {
+export function managerAuthCreateAccountLink(partnerName, partnerSlug = '') {
   const label = partnerName?.trim();
+  const terms = getPartnerTerminology(partnerName, partnerSlug);
+  if (terms.isHealthFitness) {
+    return label ? `Create a ${label} Director account` : 'Create a Director account';
+  }
   return label ? `Create a ${label} account` : 'Create an account';
 }

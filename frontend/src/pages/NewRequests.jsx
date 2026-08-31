@@ -24,6 +24,7 @@ import {
 } from '../utils/adminUiHighlights';
 import { useAuth } from '../context/AuthContext';
 import { usePartners } from '../context/PartnerContext';
+import { getPartnerTerminology } from '../utils/managerAuthBranding';
 import { formatRequestDisplayId } from '../utils/requestDisplayId';
 import { formatTimestampSplit } from '../utils/dateTime';
 import { formatManagerNotes, readManagerNotes } from '../utils/managerNotes';
@@ -274,6 +275,7 @@ function NewRequestsMobileList({
   dismissLoadingId,
   getRowClassName,
 }) {
+  const { selectedPartner, partners } = usePartners();
   if (loading) {
     return (
       <div className="overflow-hidden rounded-md border border-[var(--color-border-default)] bg-white sm:hidden">
@@ -288,7 +290,6 @@ function NewRequestsMobileList({
       </div>
     );
   }
-
   if (!rows.length) {
     return (
       <div className="rounded-md border border-[var(--color-border-default)] bg-white px-4 py-8 text-center text-sm text-[var(--color-text-secondary)] sm:hidden">
@@ -301,8 +302,13 @@ function NewRequestsMobileList({
     <ul className="overflow-hidden rounded-md border border-[var(--color-border-default)] bg-white sm:hidden">
       {rows.map((row) => {
         const extraClass = getRowClassName ? getRowClassName(row) : '';
+        const rawPartnerId = row?.partnerId || row?.partner_id;
+        const matchedPartner = partners?.find((p) => String(p.id) === String(rawPartnerId)) || selectedPartner;
+        const pName = row?.partnerName || row?.partner_name || matchedPartner?.name;
+        const pSlug = row?.partnerSlug || row?.partner_slug || matchedPartner?.slug;
+        const rowTerms = getPartnerTerminology(pName, pSlug);
         const { name, email, location } = formatPersonFields(row.person);
-        const manager = getManagerColumnContent(row);
+        const manager = getManagerColumnContent(row, { partnerName: pName, partnerSlug: pSlug });
         const isAdd = row.action === 'Add';
         const sentViaTags = sentViaTableRequestTags(row.tags || [], {
           isAdminEntry: isAdminEntry(row),
@@ -323,7 +329,6 @@ function NewRequestsMobileList({
               <HoverTip label="Delete" className="absolute top-2 right-2" placement="left">
                 <button
                   type="button"
-                  disabled={dismissLoadingId === row.id}
                   onClick={(e) => {
                     e.stopPropagation();
                     onDismiss(row);
@@ -398,7 +403,7 @@ function NewRequestsMobileList({
 
                     <div className="min-w-0">
                       <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
-                        Manager
+                        {rowTerms.managerTerm}
                       </p>
                       <p
                         className={`mt-0.5 truncate ${
@@ -415,8 +420,8 @@ function NewRequestsMobileList({
                         ? manager.lines
                         : [manager.secondary, manager.tertiary].filter(Boolean)
                       ).map((line, index, all) => {
-                        const isSectionHeading = String(line).trim().toLowerCase() === 'manager details';
-                        const hasHeading = String(all[0] || '').trim().toLowerCase() === 'manager details';
+                        const isSectionHeading = ['manager details', 'director details'].includes(String(line).trim().toLowerCase());
+                        const hasHeading = ['manager details', 'director details'].includes(String(all[0] || '').trim().toLowerCase());
                         const detailIndex = hasHeading ? index - 1 : index;
                         return (
                           <p
@@ -438,7 +443,7 @@ function NewRequestsMobileList({
                     </div>
 
                     <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
-                      <span className="font-semibold text-[var(--color-text-muted)]">Manager notes: </span>
+                      <span className="font-semibold text-[var(--color-text-muted)]">{rowTerms.managerTerm} notes: </span>
                       <span className={readManagerNotes(row) ? '' : 'text-[var(--color-text-muted)]'}>
                         {formatManagerNotes(row)}
                       </span>
@@ -504,8 +509,6 @@ const emptyPersonForm = () => ({
   lastName: '',
   email: '',
   location: '',
-  supervisor: '',
-  hospital: '',
   notes: '',
 });
 
@@ -525,10 +528,8 @@ export default function Requests() {
     () => partners?.find((p) => String(p.id) === String(selectedPartnerId)),
     [partners, selectedPartnerId],
   );
-  const isHealthTech = useMemo(
-    () =>
-      selectedPartner?.slug === 'health-tech' ||
-      (selectedPartner?.name || '').toLowerCase().includes('healthtech'),
+  const terms = useMemo(
+    () => getPartnerTerminology(selectedPartner?.name, selectedPartner?.slug),
     [selectedPartner],
   );
   const navigate = useNavigate();
@@ -745,8 +746,8 @@ export default function Requests() {
   };
 
   const personValidation = useMemo(
-    () => validatePersonForms(personForms, { isHealthTech }),
-    [personForms, isHealthTech],
+    () => validatePersonForms(personForms),
+    [personForms],
   );
 
   const updatePersonForm = (index, field, value) => {
@@ -916,7 +917,7 @@ export default function Requests() {
     e.preventDefault();
     setManualSubmitAttempted(true);
 
-    const validation = validatePersonForms(personForms, { isHealthTech });
+    const validation = validatePersonForms(personForms);
     if (!validation.ok) {
       const firstInvalid = firstInvalidPersonField(validation.errorsByRow);
       if (firstInvalid) {
@@ -939,13 +940,11 @@ export default function Requests() {
         body: JSON.stringify({
           submittedBy: managerForm,
           partnerId: selectedPartnerId || undefined,
-          people: normalizedPeople.map(({ firstName, lastName, email, location, supervisor, hospital, notes }) => ({
+          people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
             firstName,
             lastName,
             email,
             location,
-            supervisor: supervisor || undefined,
-            hospital: hospital || undefined,
             notes: notes?.trim() || undefined,
           })),
           action: action,
@@ -1244,12 +1243,12 @@ export default function Requests() {
     },
     {
       key: 'manager',
-      label: 'Manager',
+      label: terms.managerTerm,
       width: '15%',
       headerClassName: 'text-center',
       cellClassName: 'align-top max-w-0 overflow-hidden text-left',
       render: (_, row) => {
-        const manager = getManagerColumnContent(row);
+        const manager = getManagerColumnContent(row, { partnerName: selectedPartner?.name, partnerSlug: selectedPartner?.slug });
         return (
           <StackedTextCell
             primary={manager.primary}
@@ -1516,7 +1515,7 @@ export default function Requests() {
             ]
           },
           {
-            label: 'User Location', value: filterLocation, onChange: setFilterLocation,
+            label: `User ${terms.locationTerm}`, value: filterLocation, onChange: setFilterLocation,
             options: locationOptions,
             searchable: true,
           },
@@ -1524,9 +1523,9 @@ export default function Requests() {
             label: 'Sent via', value: filterSentVia, onChange: setFilterSentVia,
             options: [
               { value: 'All', label: 'All' },
-              { value: TAG_PARTNER_REQUEST, label: 'Manager Form' },
+              { value: TAG_PARTNER_REQUEST, label: `${terms.managerTerm} Form` },
               { value: TAG_AUTO_MAIL, label: 'Automated email' },
-              { value: SENT_VIA_BOTH, label: 'Manager +Auto Mail' },
+              { value: SENT_VIA_BOTH, label: `${terms.managerTerm} +Auto Mail` },
             ]
           },
           {
@@ -1638,7 +1637,7 @@ export default function Requests() {
         <form onSubmit={handleCreateRequest} noValidate className="space-y-4 text-left">
           <div className="space-y-3">
             <span className="block text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">
-              Manager Details <span className="font-semibold normal-case tracking-normal text-[var(--color-text-muted)]">(optional)</span>
+              {terms.managerDetailsTitle} <span className="font-semibold normal-case tracking-normal text-[var(--color-text-muted)]">(optional)</span>
             </span>
             <div className={formGridClass}>
               {[['First Name', 'firstName', 'text'], ['Last Name', 'lastName', 'text']].map(([label, field, type]) => (
@@ -1651,7 +1650,7 @@ export default function Requests() {
               ))}
             </div>
             <div className={formGridClass}>
-              {[['Email', 'email', 'email'], ['Club Location', 'club', 'text']].map(([label, field, type]) => (
+              {[['Email', 'email', 'email'], [terms.clubOrClientLabel, 'club', 'text']].map(([label, field, type]) => (
                 <div key={field}>
                   <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
                   <input type={type} value={managerForm[field]}
@@ -1737,7 +1736,7 @@ export default function Requests() {
                   )}
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Location *</label>
+                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{terms.locationTerm} *</label>
                   <input
                     type="text"
                     required
@@ -1754,44 +1753,6 @@ export default function Requests() {
                   )}
                 </div>
 
-                {isHealthTech && (
-                  <>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Supervisor *</label>
-                      <input
-                        type="text"
-                        required
-                        maxLength={PERSON_FIELD_LIMITS.supervisor}
-                        value={person.supervisor || ''}
-                        onChange={(e) => updatePersonForm(index, 'supervisor', e.target.value)}
-                        onBlur={() => handleManualPersonBlur(index, 'supervisor', person.supervisor)}
-                        ref={(node) => setManualPersonFieldRef(index, 'supervisor', node)}
-                        aria-invalid={getManualFieldError(index, 'supervisor') ? true : undefined}
-                        className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${getManualFieldError(index, 'supervisor') ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
-                      />
-                      {getManualFieldError(index, 'supervisor') && (
-                        <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'supervisor')}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Hospital *</label>
-                      <input
-                        type="text"
-                        required
-                        maxLength={PERSON_FIELD_LIMITS.hospital}
-                        value={person.hospital || ''}
-                        onChange={(e) => updatePersonForm(index, 'hospital', e.target.value)}
-                        onBlur={() => handleManualPersonBlur(index, 'hospital', person.hospital)}
-                        ref={(node) => setManualPersonFieldRef(index, 'hospital', node)}
-                        aria-invalid={getManualFieldError(index, 'hospital') ? true : undefined}
-                        className={`w-full px-3 py-2 bg-white border rounded-lg text-sm focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all ${getManualFieldError(index, 'hospital') ? 'border-red-500' : 'border-[var(--color-border-default)]'}`}
-                      />
-                      {getManualFieldError(index, 'hospital') && (
-                        <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'hospital')}</p>
-                      )}
-                    </div>
-                  </>
-                )}
                 <div>
                   <label
                     htmlFor={`manual-person-${person.id}-notes`}

@@ -376,8 +376,6 @@ def create_manager_request(
         person_last_name=person.lastName,
         person_email=person.email,
         person_location=person.location or "",
-        person_supervisor=person.supervisor or None,
-        person_hospital=person.hospital or None,
         action=action,
         manager_notes=manager_notes,
         tags=build_tags(db, person, action=action, partner_id=partner_id, extra_tags=extra_tags),

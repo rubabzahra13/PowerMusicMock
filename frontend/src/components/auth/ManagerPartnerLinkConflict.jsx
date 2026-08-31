@@ -1,7 +1,11 @@
 import { Loader2, LogOut } from 'lucide-react';
 import ManagerAuthShell from './ManagerAuthShell';
 import PartnerConnectionBranding from '../partner/PartnerConnectionBranding';
-import { instantPartnerBrandingFromSlug, resolveManagerAuthPartnerBranding } from '../../utils/managerAuthBranding';
+import {
+  instantPartnerBrandingFromSlug,
+  resolveManagerAuthPartnerBranding,
+  getPartnerTerminology,
+} from '../../utils/managerAuthBranding';
 
 export default function ManagerPartnerLinkConflict({
   urlPartnerBranding,
@@ -18,6 +22,7 @@ export default function ManagerPartnerLinkConflict({
   const urlPartnerName =
     urlBranding?.partnerName ||
     'this partner';
+  const urlTerms = getPartnerTerminology(urlPartnerName, urlPartnerSlug);
   const sessionPartnerName = sessionPartnerBranding?.partnerName || 'your partner';
 
   const primaryButtonClass =
@@ -34,7 +39,7 @@ export default function ManagerPartnerLinkConflict({
             You&apos;re signed in as {sessionPartnerName}
           </p>
           <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-            This link is for {urlPartnerName} managers. Sign out to create an account or sign in
+            This link is for {urlPartnerName} {urlTerms.managerTermLower}s. Sign out to create an account or sign in
             with an email allowed for {urlPartnerName}.
           </p>
         </div>

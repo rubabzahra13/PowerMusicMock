@@ -45,13 +45,17 @@ export function ManagerAuthLoading({ partnerBranding = null }) {
   );
 }
 
+import { getPartnerTerminology } from '../../utils/managerAuthBranding';
+
 export default function ManagerAuthShell({
   children,
   wide = false,
-  footnote = 'Partner managers only.',
+  footnote = null,
   partnerBranding = null,
 }) {
   useAuthPageCanvas();
+  const terms = getPartnerTerminology(partnerBranding?.partnerName);
+  const displayFootnote = footnote || `Partner ${terms.managerTermLower}s only.`;
 
   return (
     <div
@@ -72,7 +76,7 @@ export default function ManagerAuthShell({
             <div className="px-5 py-6 sm:px-8 sm:py-7">{children}</div>
           </div>
 
-          <p className="mt-4 px-2 text-center text-xs text-white/45 sm:mt-6">{footnote}</p>
+          <p className="mt-4 px-2 text-center text-xs text-white/45 sm:mt-6">{displayFootnote}</p>
         </main>
       </div>
     </div>

@@ -153,17 +153,14 @@ function personMatchesNonEmailFields(person, query) {
   const first = String(person.firstName ?? person.first_name ?? '').toLowerCase();
   const last = String(person.lastName ?? person.last_name ?? '').toLowerCase();
   const fullName = `${first} ${last}`.trim();
+  // "location" stores either the PureGym gym location or the Health Fitness client name.
   const location = String(person.location ?? '').toLowerCase();
-  const supervisor = String(person.supervisor ?? '').toLowerCase();
-  const hospital = String(person.hospital ?? '').toLowerCase();
 
   return (
     fullName.includes(q) ||
     first.includes(q) ||
     last.includes(q) ||
-    location.includes(q) ||
-    supervisor.includes(q) ||
-    hospital.includes(q)
+    location.includes(q)
   );
 }
 

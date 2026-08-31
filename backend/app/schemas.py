@@ -10,8 +10,6 @@ from app.input_validation import (
     normalize_roster_person_name,
     normalize_person_name,
     normalize_person_notes,
-    normalize_supervisor,
-    normalize_hospital,
     normalize_text,
 )
 
@@ -50,9 +48,9 @@ class PersonInfo(BaseModel):
     firstName: Optional[str] = Field(default=None, max_length=100)
     lastName: Optional[str] = Field(default=None, max_length=100)
     email: Optional[str] = Field(default=None, max_length=254)
+    # Stores "location" for PureGym and "client" for Health Fitness.
+    # Partner-specific label is applied at the presentation layer.
     location: Optional[str] = Field(default=None, max_length=200)
-    supervisor: Optional[str] = Field(default=None, max_length=200)
-    hospital: Optional[str] = Field(default=None, max_length=200)
     notes: Optional[str] = Field(default=None, max_length=5000)
 
     @field_validator("firstName", "lastName", mode="before")
@@ -70,20 +68,6 @@ class PersonInfo(BaseModel):
             return None
         return normalize_roster_person_location(value, field_name="User location")
 
-    @field_validator("supervisor", mode="before")
-    @classmethod
-    def clean_supervisor(cls, value):
-        if value is None:
-            return None
-        return normalize_supervisor(value, field_name="Supervisor")
-
-    @field_validator("hospital", mode="before")
-    @classmethod
-    def clean_hospital(cls, value):
-        if value is None:
-            return None
-        return normalize_hospital(value, field_name="Hospital")
-
     @field_validator("notes", mode="before")
     @classmethod
     def clean_person_notes(cls, value):
@@ -99,9 +83,9 @@ class PersonUpdateIn(BaseModel):
     firstName: str = Field(min_length=1, max_length=100)
     lastName: str = Field(min_length=1, max_length=100)
     email: str = Field(min_length=3, max_length=254)
+    # For PureGym: location. For Health Fitness: client.
+    # Stored in the same column; label applied at presentation layer.
     location: str = Field(min_length=1, max_length=200)
-    supervisor: Optional[str] = Field(default=None, max_length=200)
-    hospital: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("firstName", "lastName", mode="before")
     @classmethod
@@ -113,20 +97,6 @@ class PersonUpdateIn(BaseModel):
     @classmethod
     def clean_person_location(cls, value):
         return normalize_roster_person_location(value, field_name="User location")
-
-    @field_validator("supervisor", mode="before")
-    @classmethod
-    def clean_supervisor(cls, value):
-        if value is None:
-            return None
-        return normalize_supervisor(value, field_name="Supervisor")
-
-    @field_validator("hospital", mode="before")
-    @classmethod
-    def clean_hospital(cls, value):
-        if value is None:
-            return None
-        return normalize_hospital(value, field_name="Hospital")
 
     @field_validator("email", mode="before")
     @classmethod
@@ -270,13 +240,11 @@ class RequestOut(BaseModel):
                     "email": "",
                     "club": "",
                 },
-                "person": {
+            "person": {
                     "firstName": data.get("person_first_name"),
                     "lastName": data.get("person_last_name"),
                     "email": data.get("person_email"),
                     "location": data.get("person_location"),
-                    "supervisor": data.get("supervisor") or data.get("person_supervisor"),
-                    "hospital": data.get("hospital") or data.get("person_hospital"),
                 },
                 "action": data.get("action"),
                 "notes": data.get("notes"),
@@ -302,8 +270,6 @@ class RequestOut(BaseModel):
                 "lastName": getattr(data, "person_last_name", None),
                 "email": getattr(data, "person_email", None),
                 "location": getattr(data, "person_location", None),
-                "supervisor": getattr(data, "person_supervisor", None) or getattr(data, "supervisor", None),
-                "hospital": getattr(data, "person_hospital", None) or getattr(data, "hospital", None),
             },
             "action": getattr(data, "action", None),
             "notes": getattr(data, "notes", None),
@@ -337,9 +303,8 @@ class PersonOut(BaseModel):
     firstName: Optional[str] = None
     lastName: Optional[str] = None
     email: Optional[str] = None
+    # label is "Location" for PureGym, "Client" for Health Fitness (presentation layer)
     location: Optional[str] = None
-    supervisor: Optional[str] = None
-    hospital: Optional[str] = None
     status: str
     action: Optional[str] = None
     dateAdded: Optional[datetime] = None
@@ -375,8 +340,6 @@ class PersonOut(BaseModel):
                 "lastName": data.get("last_name"),
                 "email": data.get("email"),
                 "location": data.get("location"),
-                "supervisor": data.get("supervisor") or data.get("person_supervisor"),
-                "hospital": data.get("hospital") or data.get("person_hospital"),
                 "status": data.get("status"),
                 "dateAdded": data.get("date_added"),
                 "addedBy": data.get("handled_by") or data.get("added_by"),
@@ -402,8 +365,6 @@ class PersonOut(BaseModel):
             "lastName": getattr(data, "last_name", None),
             "email": getattr(data, "email", None),
             "location": getattr(data, "location", None),
-            "supervisor": getattr(data, "person_supervisor", None) or getattr(data, "supervisor", None),
-            "hospital": getattr(data, "person_hospital", None) or getattr(data, "hospital", None),
             "status": getattr(data, "status", None),
             "dateAdded": getattr(data, "date_added", None),
             "addedBy": getattr(data, "handled_by", None) or getattr(data, "added_by", None),
@@ -519,9 +480,8 @@ class DuplicateCheckIn(BaseModel):
     email: Optional[str] = Field(default=None, max_length=254)
     firstName: Optional[str] = Field(default=None, max_length=100)
     lastName: Optional[str] = Field(default=None, max_length=100)
+    # For PureGym: location. For Health Fitness: client (same physical field).
     location: Optional[str] = Field(default=None, max_length=100)
-    supervisor: Optional[str] = Field(default=None, max_length=200)
-    hospital: Optional[str] = Field(default=None, max_length=200)
     partnerId: Optional[str] = None
 
     @field_validator("email", mode="before")
@@ -539,20 +499,6 @@ class DuplicateCheckIn(BaseModel):
     def clean_location(cls, value):
         return normalize_text(value, max_length=100, allow_empty=True, field_name="location")
 
-    @field_validator("supervisor", mode="before")
-    @classmethod
-    def clean_supervisor(cls, value):
-        if value is None:
-            return None
-        return normalize_supervisor(value, field_name="supervisor")
-
-    @field_validator("hospital", mode="before")
-    @classmethod
-    def clean_hospital(cls, value):
-        if value is None:
-            return None
-        return normalize_hospital(value, field_name="hospital")
-
 
 class DuplicateCheckOut(BaseModel):
     duplicate: bool
@@ -563,8 +509,6 @@ class DuplicateCheckOut(BaseModel):
     status: Optional[str] = None
     dateAdded: Optional[datetime] = None
     location: Optional[str] = None
-    supervisor: Optional[str] = None
-    hospital: Optional[str] = None
     partnerId: Optional[str] = None
 
 
@@ -574,8 +518,6 @@ class PersonSearchOut(BaseModel):
     lastName: Optional[str] = None
     email: Optional[str] = None
     location: Optional[str] = None
-    supervisor: Optional[str] = None
-    hospital: Optional[str] = None
     status: str
     dateAdded: Optional[datetime] = None
     partnerId: Optional[str] = None

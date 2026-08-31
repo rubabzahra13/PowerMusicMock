@@ -1180,8 +1180,6 @@ def _finalize_group(
             "lastName": final_values.lastName or "",
             "email": final_values.email or "",
             "location": final_values.location or "",
-            "supervisor": final_values.supervisor or "",
-            "hospital": final_values.hospital or "",
         }
     if previous_values:
         meta["previous_values"] = {
@@ -1189,8 +1187,6 @@ def _finalize_group(
             "lastName": previous_values.lastName or "",
             "email": previous_values.email or "",
             "location": previous_values.location or "",
-            "supervisor": previous_values.supervisor or "",
-            "hospital": previous_values.hospital or "",
         }
     if admin_note:
         meta["admin_note"] = admin_note
@@ -1317,8 +1313,6 @@ def resolve_group_add(
         dir_row.person_last_name = (final_values.lastName or "").strip()
         dir_row.person_email = (final_values.email or "").strip()
         dir_row.person_location = (final_values.location or "").strip()
-        dir_row.person_supervisor = (final_values.supervisor or "").strip() or None
-        dir_row.person_hospital = (final_values.hospital or "").strip() or None
         _apply_merge_manager_provenance(dir_row, retained_req, final_values=final_values)
         if admin_uuid:
             dir_row.handled_by_admin_id = admin_uuid
@@ -1344,8 +1338,6 @@ def resolve_group_add(
             person_last_name=(final_values.lastName or "").strip(),
             person_email=(final_values.email or "").strip(),
             person_location=(final_values.location or "").strip(),
-            person_supervisor=(final_values.supervisor or "").strip() or None,
-            person_hospital=(final_values.hospital or "").strip() or None,
             intake_persons={},
             tags=[],
             partner_id=partner_id or group.partner_id,
@@ -1416,8 +1408,6 @@ def resolve_group_update(
         lastName=directory_person.person_last_name or "",
         email=directory_person.person_email or "",
         location=directory_person.person_location or "",
-        supervisor=getattr(directory_person, "person_supervisor", None) or getattr(directory_person, "supervisor", None) or "",
-        hospital=getattr(directory_person, "person_hospital", None) or getattr(directory_person, "hospital", None) or "",
     )
 
     # Update the Directory row in-place.
@@ -1425,8 +1415,6 @@ def resolve_group_update(
     directory_person.person_last_name = (final_values.lastName or "").strip()
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
-    directory_person.person_supervisor = (final_values.supervisor or "").strip() or None
-    directory_person.person_hospital = (final_values.hospital or "").strip() or None
 
     from app.intake_persons import append_lifecycle_history, get_lifecycle_history
     
@@ -1686,8 +1674,6 @@ def resolve_group_delete_from_directory(
     directory_person.person_last_name = (final_values.lastName or "").strip()
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
-    directory_person.person_supervisor = (final_values.supervisor or "").strip() or None
-    directory_person.person_hospital = (final_values.hospital or "").strip() or None
     
     manager_source = _current_request_member(
         members,
@@ -1812,8 +1798,6 @@ def resolve_group_mark_removed(
         dir_row.person_last_name = (final_values.lastName or "").strip()
         dir_row.person_email = (final_values.email or "").strip()
         dir_row.person_location = (final_values.location or "").strip()
-        dir_row.person_supervisor = (final_values.supervisor or "").strip() or None
-        dir_row.person_hospital = (final_values.hospital or "").strip() or None
         dir_row.archived_at = now
         
         manager_source = _current_request_member(
@@ -1848,8 +1832,6 @@ def resolve_group_mark_removed(
             person_last_name=(final_values.lastName or "").strip(),
             person_email=(final_values.email or "").strip(),
             person_location=(final_values.location or "").strip(),
-            person_supervisor=(final_values.supervisor or "").strip() or None,
-            person_hospital=(final_values.hospital or "").strip() or None,
             tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED],
             partner_id=partner_id or group.partner_id,
             archived_at=now,
@@ -1887,9 +1869,9 @@ _FIELD_LABELS = {
     "firstName": "First Name",
     "lastName": "Last Name",
     "email": "Email",
+    # label "Location" for PureGym; "Client" for Health Fitness — applied at
+    # the presentation layer by the frontend based on partner context.
     "location": "Location",
-    "supervisor": "Supervisor",
-    "hospital": "Hospital",
 }
 
 
@@ -1903,16 +1885,12 @@ def preview_resolve_update(
         "lastName": directory_person.person_last_name or "",
         "email": directory_person.person_email or "",
         "location": directory_person.person_location or "",
-        "supervisor": getattr(directory_person, "person_supervisor", None) or getattr(directory_person, "supervisor", None) or "",
-        "hospital": getattr(directory_person, "person_hospital", None) or getattr(directory_person, "hospital", None) or "",
     }
     proposed = {
         "firstName": (final_values.firstName or "").strip(),
         "lastName": (final_values.lastName or "").strip(),
         "email": (final_values.email or "").strip(),
         "location": (final_values.location or "").strip(),
-        "supervisor": (final_values.supervisor or "").strip(),
-        "hospital": (final_values.hospital or "").strip(),
     }
 
     field_diffs = []

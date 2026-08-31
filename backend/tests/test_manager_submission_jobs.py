@@ -37,7 +37,7 @@ def test_batch_job_result_is_json_serializable(db: Session, manager: models.Powe
         submittedBy=schemas.SubmittedBy(
             firstName=manager.first_name or "Test",
             lastName=manager.last_name or "Manager",
-            email=manager.email,
+            email=f"manager-{suffix}@gmail.com",
             club=manager.club or "Test Club",
         ),
         people=[

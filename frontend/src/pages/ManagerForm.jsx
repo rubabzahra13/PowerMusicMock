@@ -49,6 +49,7 @@ import ManagerPortalIntro, {
   shouldShowManagerPortalIntro,
 } from '../components/manager/ManagerPortalIntro';
 import { getPublicPartnerBranding } from '../utils/pilot2Api';
+import { getPartnerTerminology } from '../utils/managerAuthBranding';
 import { FlowGradientBackground } from '../components/ui/flow-gradient-hero-section';
 import { useManagerDirectory } from '../hooks/useManagerDirectory';
 import ManagerPartnerLinkConflict from '../components/auth/ManagerPartnerLinkConflict';
@@ -273,33 +274,27 @@ export default function ManagerForm() {
     ? partnerSlugFromName(partnerBranding.partnerName)
     : '';
 
-  const isHealthTech = useMemo(() => {
-    const name = (partnerBranding?.partnerName || '').toLowerCase();
-    return (
-      activePartnerSlug === 'health-tech' ||
-      intendedSlug === 'health-tech' ||
-      name.includes('healthtech') ||
-      name.includes('health tech')
-    );
-  }, [partnerBranding, activePartnerSlug, intendedSlug]);
+  const terms = useMemo(
+    () => getPartnerTerminology(partnerBranding?.partnerName, activePartnerSlug || intendedSlug),
+    [partnerBranding?.partnerName, activePartnerSlug, intendedSlug],
+  );
+  const isHealthFitness = terms.isHealthFitness;
 
-  const managerGridClass = isHealthTech
-    ? 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3'
-    : 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4';
+  // Both partners use the same 4-column grid.
+  // Health Fitness shows "Client" instead of "Location" — label only.
+  const managerGridClass = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4';
 
   const personFieldIds = (index) => ({
     first: `${formId}-person-${index}-first`,
     last: `${formId}-person-${index}-last`,
     email: `${formId}-person-${index}-email`,
     location: `${formId}-person-${index}-location`,
-    supervisor: `${formId}-person-${index}-supervisor`,
-    hospital: `${formId}-person-${index}-hospital`,
     notes: `${formId}-person-${index}-notes`,
   });
 
   const personValidation = useMemo(
-    () => validatePersonForms(personForms, { isHealthTech }),
-    [personForms, isHealthTech],
+    () => validatePersonForms(personForms),
+    [personForms],
   );
 
   const touchKey = (index, field) => `${index}.${field}`;
@@ -539,7 +534,7 @@ export default function ManagerForm() {
     e.preventDefault();
     setSubmitAttempted(true);
 
-    const validation = validatePersonForms(personForms, { isHealthTech });
+    const validation = validatePersonForms(personForms);
     if (
       !managerDetails.firstName.trim() ||
       !managerDetails.lastName.trim() ||
@@ -577,8 +572,6 @@ export default function ManagerForm() {
                 lastName: normalizedPeople[0].lastName,
                 email: normalizedPeople[0].email,
                 location: normalizedPeople[0].location,
-                supervisor: normalizedPeople[0].supervisor || undefined,
-                hospital: normalizedPeople[0].hospital || undefined,
               },
               action,
               notes: normalizedPeople[0].notes?.trim() || undefined,
@@ -586,13 +579,11 @@ export default function ManagerForm() {
           : {
               submittedBy: managerDetails,
               partnerId: partnerBranding?.partnerId || undefined,
-              people: normalizedPeople.map(({ firstName, lastName, email, location, supervisor, hospital, notes }) => ({
+              people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
                 firstName,
                 lastName,
                 email,
                 location,
-                supervisor: supervisor || undefined,
-                hospital: hospital || undefined,
                 notes: notes?.trim() || undefined,
               })),
               action,
@@ -941,6 +932,8 @@ export default function ManagerForm() {
                 error={requestPortal.historyError}
                 highlightVersion={requestPortal.highlightVersion}
                 onHighlightChange={requestPortal.bumpHighlights}
+                partnerName={partnerBranding?.partnerName}
+                partnerSlug={activePartnerSlug || intendedPartnerSlug}
               />
             </div>
           ) : submitted ? (
@@ -1001,12 +994,12 @@ export default function ManagerForm() {
               </h1>
               <div className="mt-4 flex min-h-0 flex-1 flex-col sm:mt-5">
               <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain sm:space-y-6">
-              <FormSection title="Manager details">
+              <FormSection title={terms.managerDetailsTitle}>
                 <p className="-mt-1 text-[11px] text-[var(--color-text-secondary)]">
                   Taken from your signed-in account and cannot be changed here.
                 </p>
                 <div className={managerGridClass}>
-                  <Field id={ids.managerFirst} label="Manager first name" required labelMuted>
+                  <Field id={ids.managerFirst} label={terms.managerFirstLabel} required labelMuted>
                     <input
                       id={ids.managerFirst}
                       type="text"
@@ -1018,7 +1011,7 @@ export default function ManagerForm() {
                       className={managerReadonlyInputClass}
                     />
                   </Field>
-                  <Field id={ids.managerLast} label="Manager last name" required labelMuted>
+                  <Field id={ids.managerLast} label={terms.managerLastLabel} required labelMuted>
                     <input
                       id={ids.managerLast}
                       type="text"
@@ -1031,7 +1024,7 @@ export default function ManagerForm() {
                     />
                   </Field>
 
-                  <Field id={ids.managerEmail} label="Manager email" required labelMuted>
+                  <Field id={ids.managerEmail} label={terms.managerEmailLabel} required labelMuted>
                     <input
                       id={ids.managerEmail}
                       type="email"
@@ -1043,7 +1036,7 @@ export default function ManagerForm() {
                       className={managerReadonlyInputClass}
                     />
                   </Field>
-                  <Field id={ids.managerClub} label="Manager club location" required labelMuted>
+                  <Field id={ids.managerClub} label={terms.managerClubLabel} required labelMuted>
                     <input
                       id={ids.managerClub}
                       type="text"
@@ -1172,7 +1165,7 @@ export default function ManagerForm() {
                           </Field>
                           <Field
                             id={rowIds.location}
-                            label="User location"
+                            label={isHealthFitness ? 'User client' : 'User location'}
                             required
                             error={getFieldError(index, 'location')}
                           >
@@ -1196,61 +1189,6 @@ export default function ManagerForm() {
                             )}
                           </Field>
 
-                          {isHealthTech && (
-                            <>
-                              <Field
-                                id={rowIds.supervisor}
-                                label="Supervisor"
-                                required
-                                error={getFieldError(index, 'supervisor')}
-                              >
-                                {({ describedBy, invalid }) => (
-                                  <input
-                                    ref={(node) => setPersonFieldRef(index, 'supervisor', node)}
-                                    id={rowIds.supervisor}
-                                    type="text"
-                                    required
-                                    autoComplete="off"
-                                    maxLength={PERSON_FIELD_LIMITS.supervisor}
-                                    value={personForm.supervisor || ''}
-                                    onChange={(e) =>
-                                      handlePersonChange(index, 'supervisor', e.target.value)
-                                    }
-                                    onBlur={() => handlePersonBlur(index, 'supervisor')}
-                                    aria-invalid={invalid || undefined}
-                                    aria-describedby={describedBy}
-                                    className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
-                                  />
-                                )}
-                              </Field>
-
-                              <Field
-                                id={rowIds.hospital}
-                                label="Hospital"
-                                required
-                                error={getFieldError(index, 'hospital')}
-                              >
-                                {({ describedBy, invalid }) => (
-                                  <input
-                                    ref={(node) => setPersonFieldRef(index, 'hospital', node)}
-                                    id={rowIds.hospital}
-                                    type="text"
-                                    required
-                                    autoComplete="off"
-                                    maxLength={PERSON_FIELD_LIMITS.hospital}
-                                    value={personForm.hospital || ''}
-                                    onChange={(e) =>
-                                      handlePersonChange(index, 'hospital', e.target.value)
-                                    }
-                                    onBlur={() => handlePersonBlur(index, 'hospital')}
-                                    aria-invalid={invalid || undefined}
-                                    aria-describedby={describedBy}
-                                    className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
-                                  />
-                                )}
-                              </Field>
-                            </>
-                          )}
                         </div>
 
                         {rowMatches.length > 0 && (
@@ -1383,11 +1321,11 @@ export default function ManagerForm() {
                     <input
                       id={ids.search}
                       type="search"
-                      placeholder="Search by name, email, or location..."
+                      placeholder={isHealthFitness ? "Search by name, email, or client..." : "Search by name, email, or location..."}
                       value={searchInput}
                       onChange={(e) => setSearchInput(e.target.value)}
                       disabled={submitted}
-                      aria-label="Search by name, email, or location"
+                      aria-label={isHealthFitness ? "Search by name, email, or client" : "Search by name, email, or location"}
                       className={directorySearchInputClass}
                     />
                   </div>

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.directory_person_match import (
     active_roster_rows,
+    archived_snapshot_rows,
     directory_ledger_rows,
     directory_outcome_conflicts,
     duplicate_tags_for_person,
@@ -250,15 +251,19 @@ class TestActiveRoster:
         removed_email = f"ledger-removed-{uuid.uuid4().hex[:8]}@example.com"
         added = _handled_row(db, _person(email=added_email), outcome="Added", action="Add")
         prior_added = _handled_row(db, _person(email=removed_email), outcome="Added", action="Add")
+        prior_added.handled_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
         removed = _handled_row(db, _person(email=removed_email), outcome="Removed", action="Remove")
+        removed.handled_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
         db.flush()
 
         ledger_by_id = {row.id: row for row in directory_ledger_rows(db, limit=200)}
         assert added.id in ledger_by_id
         assert ledger_by_id[added.id].outcome == "Added"
-        assert removed.id in ledger_by_id
-        assert ledger_by_id[removed.id].outcome == "Removed"
         assert prior_added.id not in ledger_by_id
+
+        archived_by_id = {row.id: row for row in archived_snapshot_rows(db, limit=200)}
+        assert removed.id in archived_by_id
+        assert archived_by_id[removed.id].outcome == "Removed"
 
     def test_directory_ledger_excludes_group_resolved_merge_history(self, db: Session):
         """Merged historical snapshots must not become Directory people."""
