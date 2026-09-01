@@ -1085,7 +1085,7 @@ export default function ManagerForm() {
                         <div className={managerGridClass}>
                           <Field
                             id={rowIds.first}
-                            label="User first name"
+                            label="User First Name"
                             required
                             error={getFieldError(index, 'firstName')}
                           >
@@ -1111,7 +1111,7 @@ export default function ManagerForm() {
                           </Field>
                           <Field
                             id={rowIds.last}
-                            label="User last name"
+                            label="User Last Name"
                             required
                             error={getFieldError(index, 'lastName')}
                           >
@@ -1138,7 +1138,7 @@ export default function ManagerForm() {
 
                           <Field
                             id={rowIds.email}
-                            label="User email"
+                            label="User Email"
                             required
                             error={getFieldError(index, 'email')}
                           >
@@ -1165,7 +1165,7 @@ export default function ManagerForm() {
                           </Field>
                           <Field
                             id={rowIds.location}
-                            label={isHealthFitness ? 'User client' : 'User location'}
+                            label={isHealthFitness ? 'User Client' : 'User Location'}
                             required
                             error={getFieldError(index, 'location')}
                           >

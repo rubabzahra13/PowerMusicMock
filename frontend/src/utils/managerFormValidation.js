@@ -68,14 +68,14 @@ export function validatePersonEmail(raw) {
   const normalized = normalizeManagerEmail(raw);
   if (!normalized.ok) {
     if (normalized.error === 'Email address is required.') {
-      return { ok: false, error: 'User email is required.' };
+      return { ok: false, error: 'User Email is required.' };
     }
     return normalized;
   }
   return normalized;
 }
 
-export function validatePersonLocation(raw, fieldName = 'User location') {
+export function validatePersonLocation(raw, fieldName = 'User Location') {
   const cleaned = sanitizePersonFieldInput('location', raw).trim();
   if (!cleaned) {
     return { ok: false, error: `${fieldName} is required.` };
@@ -121,15 +121,15 @@ export function validatePersonNotes(raw) {
  * The options argument is accepted for backwards compatibility but no
  * longer changes which fields are required.
  */
-export function validatePersonFormFields(person, { locationLabel = 'User location' } = {}) {
+export function validatePersonFormFields(person, { locationLabel = 'User Location' } = {}) {
   const errors = {};
   const values = {};
 
-  const first = validateRosterPersonName(person.firstName, 'User first name', 'firstName');
+  const first = validateRosterPersonName(person.firstName, 'User First Name', 'firstName');
   if (!first.ok) errors.firstName = first.error;
   else values.firstName = first.value;
 
-  const last = validateRosterPersonName(person.lastName, 'User last name', 'lastName');
+  const last = validateRosterPersonName(person.lastName, 'User Last Name', 'lastName');
   if (!last.ok) errors.lastName = last.error;
   else values.lastName = last.value;
 
@@ -137,7 +137,7 @@ export function validatePersonFormFields(person, { locationLabel = 'User locatio
   if (!email.ok) errors.email = email.error;
   else values.email = email.value;
 
-  const location = validatePersonLocation(person.location);
+  const location = validatePersonLocation(person.location, locationLabel);
   if (!location.ok) errors.location = location.error;
   else values.location = location.value;
 

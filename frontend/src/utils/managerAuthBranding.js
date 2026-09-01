@@ -23,13 +23,13 @@ export function getPartnerTerminology(partnerName, partnerSlug = '') {
     managerTermPlural: isHF ? 'Directors' : 'Managers',
     locationTerm: isHF ? 'Client' : 'Location',
     locationTermLower: isHF ? 'client' : 'location',
-    clubOrClientLabel: isHF ? 'Client' : 'Club location',
+    clubOrClientLabel: isHF ? 'Client' : 'Club Location',
     clubOrClientPlaceholder: isHF ? 'e.g. Health Fitness HQ' : 'e.g. London Central',
-    managerDetailsTitle: isHF ? 'Director details' : 'Manager details',
-    managerFirstLabel: isHF ? 'Director first name' : 'Manager first name',
-    managerLastLabel: isHF ? 'Director last name' : 'Manager last name',
-    managerEmailLabel: isHF ? 'Director email' : 'Manager email',
-    managerClubLabel: isHF ? 'Director client' : 'Manager club location',
+    managerDetailsTitle: isHF ? 'Director Details' : 'Manager Details',
+    managerFirstLabel: isHF ? 'Director First Name' : 'Manager First Name',
+    managerLastLabel: isHF ? 'Director Last Name' : 'Manager Last Name',
+    managerEmailLabel: isHF ? 'Director Email' : 'Manager Email',
+    managerClubLabel: isHF ? 'Director Client' : 'Manager Club Location',
     roleBadge: (name) => {
       const p = name?.trim();
       if (isHF) return p ? `${p} Director` : 'Director';

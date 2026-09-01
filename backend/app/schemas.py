@@ -58,7 +58,7 @@ class PersonInfo(BaseModel):
     def clean_person_name(cls, value, info):
         if value is None:
             return None
-        label = "User first name" if info.field_name == "firstName" else "User last name"
+        label = "User First Name" if info.field_name == "firstName" else "User Last Name"
         return normalize_roster_person_name(value, field_name=label)
 
     @field_validator("location", mode="before")
@@ -66,7 +66,7 @@ class PersonInfo(BaseModel):
     def clean_person_location(cls, value):
         if value is None:
             return None
-        return normalize_roster_person_location(value, field_name="User location")
+        return normalize_roster_person_location(value, field_name="User Location")
 
     @field_validator("notes", mode="before")
     @classmethod
@@ -90,13 +90,13 @@ class PersonUpdateIn(BaseModel):
     @field_validator("firstName", "lastName", mode="before")
     @classmethod
     def clean_person_name(cls, value, info):
-        label = "User first name" if info.field_name == "firstName" else "User last name"
+        label = "User First Name" if info.field_name == "firstName" else "User Last Name"
         return normalize_roster_person_name(value, field_name=label)
 
     @field_validator("location", mode="before")
     @classmethod
     def clean_person_location(cls, value):
-        return normalize_roster_person_location(value, field_name="User location")
+        return normalize_roster_person_location(value, field_name="User Location")
 
     @field_validator("email", mode="before")
     @classmethod

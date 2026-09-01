@@ -145,20 +145,20 @@ export default function ManagerFormPreview({
             </p>
 
             <div className="mt-4 space-y-5 sm:space-y-6">
-              <PreviewSection title="Manager details">
+              <PreviewSection title="Manager Details">
                 <p className="-mt-1 text-[11px] text-[var(--color-text-secondary)]">
                   Taken from the signed-in account and cannot be changed here.
                 </p>
                 <div className={formGridClass}>
-                  <PreviewField id="preview-manager-first" label="Manager first name" required labelMuted>
+                  <PreviewField id="preview-manager-first" label="Manager First Name" required labelMuted>
                     <input id="preview-manager-first" type="text" readOnly disabled tabIndex={-1} value="Alex" className={managerReadonlyInputClass} />
                   </PreviewField>
-                  <PreviewField id="preview-manager-last" label="Manager last name" required labelMuted>
+                  <PreviewField id="preview-manager-last" label="Manager Last Name" required labelMuted>
                     <input id="preview-manager-last" type="text" readOnly disabled tabIndex={-1} value="Manager" className={managerReadonlyInputClass} />
                   </PreviewField>
                 </div>
                 <div className={formGridClass}>
-                  <PreviewField id="preview-manager-email" label="Manager email" required labelMuted>
+                  <PreviewField id="preview-manager-email" label="Manager Email" required labelMuted>
                     <input
                       id="preview-manager-email"
                       type="email"
@@ -169,7 +169,7 @@ export default function ManagerFormPreview({
                       className={managerReadonlyInputClass}
                     />
                   </PreviewField>
-                  <PreviewField id="preview-manager-club" label="Manager club location" required labelMuted>
+                  <PreviewField id="preview-manager-club" label="Manager Club Location" required labelMuted>
                     <input id="preview-manager-club" type="text" readOnly disabled tabIndex={-1} value="Sample Club" className={managerReadonlyInputClass} />
                   </PreviewField>
                 </div>
@@ -177,15 +177,15 @@ export default function ManagerFormPreview({
 
               <PreviewSection title={copy.userSection}>
                 <div className={formGridClass}>
-                  <PreviewField id="preview-user-first" label="User first name" required>
+                  <PreviewField id="preview-user-first" label="User First Name" required>
                     <input id="preview-user-first" type="text" readOnly tabIndex={-1} placeholder="First name" className={inputClass} />
                   </PreviewField>
-                  <PreviewField id="preview-user-last" label="User last name" required>
+                  <PreviewField id="preview-user-last" label="User Last Name" required>
                     <input id="preview-user-last" type="text" readOnly tabIndex={-1} placeholder="Last name" className={inputClass} />
                   </PreviewField>
                 </div>
                 <div className={formGridClass}>
-                  <PreviewField id="preview-user-email" label="User email" required>
+                  <PreviewField id="preview-user-email" label="User Email" required>
                     <input
                       id="preview-user-email"
                       type="email"
@@ -195,7 +195,7 @@ export default function ManagerFormPreview({
                       className={inputClass}
                     />
                   </PreviewField>
-                  <PreviewField id="preview-user-location" label="User location" required>
+                  <PreviewField id="preview-user-location" label="User Location" required>
                     <input id="preview-user-location" type="text" readOnly tabIndex={-1} placeholder="Location" className={inputClass} />
                   </PreviewField>
                 </div>
