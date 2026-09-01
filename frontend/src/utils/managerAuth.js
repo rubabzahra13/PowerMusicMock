@@ -61,16 +61,16 @@ export async function ensureManagerAllowedDomains({ force = false } = {}) {
 export const MANAGER_ALLOWED_EMAIL_DOMAINS = ['@puregym.com'];
 
 export const MANAGER_ACCOUNT_EXISTS_MESSAGE =
-  'An account with this email already exists. Please sign in instead.';
+  'An account with this email already exists. Please Sign In instead.';
 
 export const MANAGER_ACCOUNT_NOT_FOUND_MESSAGE =
-  "We couldn't find an account for this email. Please create an account first.";
+  "We couldn't find an account for this email. Please Create an Account first.";
 
 export const MANAGER_DOMAINS_UNAVAILABLE_MESSAGE =
   'Could not verify allowed email domains. Check that the server is running and try again.';
 
 export const MANAGER_EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE =
-  'This email or domain is not allowed to sign in or sign up.';
+  'This email or domain is not allowed to Sign In or Sign Up.';
 
 export function isManagerAccountExistsMessage(message) {
   const msg = (message || '').toLowerCase();
@@ -391,7 +391,7 @@ export function validatePersonName(raw, fieldName) {
   return { ok: true, value: cleaned };
 }
 
-export function validateClub(raw, fieldName = 'Club location') {
+export function validateClub(raw, fieldName = 'Club Location') {
   const cleaned = stripControlChars(String(raw || ''));
   if (!cleaned) {
     return { ok: false, error: `${fieldName} is required.` };
@@ -417,10 +417,10 @@ export function validateManagerSignupFields(
   { firstName, lastName, email, club, password, confirmPassword },
   { enforceDomain = true, allowedDomains } = {}
 ) {
-  const first = validatePersonName(firstName, 'First name');
+  const first = validatePersonName(firstName, 'First Name');
   if (!first.ok) return first;
 
-  const last = validatePersonName(lastName, 'Last name');
+  const last = validatePersonName(lastName, 'Last Name');
   if (!last.ok) return last;
 
   const emailResult = validateManagerEmail(email, { enforceDomain, allowedDomains });

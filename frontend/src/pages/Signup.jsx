@@ -836,7 +836,7 @@ export default function Signup() {
             disabled={emailGateLoading || (appConfig.enforceDomainCheck && !domainsReady)}
             className="font-medium text-[var(--color-brand-accent)] hover:underline disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Create account
+            Create Account
           </button>
         </p>
       </ManagerAuthShell>
@@ -940,7 +940,7 @@ export default function Signup() {
               }}
               className="font-medium text-[var(--color-brand-accent)] hover:underline"
             >
-              Back to sign in
+              Back to Sign In
             </button>
           </p>
         </ManagerAuthShell>
@@ -1024,7 +1024,7 @@ export default function Signup() {
             onClick={() => switchMode('signin')}
             className="font-medium text-[var(--color-brand-accent)] hover:underline"
           >
-            Back to sign in
+            Back to Sign In
           </button>
         </p>
       </ManagerAuthShell>
@@ -1196,7 +1196,7 @@ export default function Signup() {
         <div className={formGridClass}>
           <div>
             <label htmlFor="signup-first" className={labelClass}>
-              First name
+              First Name
             </label>
             <input
               id="signup-first"
@@ -1212,7 +1212,7 @@ export default function Signup() {
           </div>
           <div>
             <label htmlFor="signup-last" className={labelClass}>
-              Last name
+              Last Name
             </label>
             <input
               id="signup-last"
@@ -1284,7 +1284,7 @@ export default function Signup() {
 
         <div>
           <label htmlFor="signup-confirm" className={labelClass}>
-            Confirm password
+            Confirm Password
           </label>
           <PasswordInput
             id="signup-confirm"
@@ -1332,7 +1332,7 @@ export default function Signup() {
           onClick={() => switchMode('signin')}
           className="font-medium text-[var(--color-brand-accent)] hover:underline"
         >
-          Sign in
+          Sign In
         </button>
       </p>
     </ManagerAuthShell>
