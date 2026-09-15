@@ -26,7 +26,7 @@ export function useManagerDirectory(userId, accessToken, { enabled = true, outco
       if (!userId || !accessToken || !enabled) return;
       if (inFlightRef.current) return;
 
-      const cached = readDirectoryCache(userId, outcome);
+      const cached = readDirectoryCache(userId, outcome, partnerId || '');
       if (cached?.length && !hasLoadedRef.current) {
         setPeople(cached);
         setLoading(false);
@@ -45,12 +45,12 @@ export function useManagerDirectory(userId, accessToken, { enabled = true, outco
           ? data.map(normalizeDirectoryPerson).filter(Boolean)
           : [];
         setPeople(normalized);
-        writeDirectoryCache(userId, normalized, outcome);
+        writeDirectoryCache(userId, normalized, outcome, partnerId || '');
         setError(null);
         hasLoadedRef.current = true;
       } catch (err) {
         console.error(err);
-        const stale = readDirectoryCache(userId, outcome);
+        const stale = readDirectoryCache(userId, outcome, partnerId || '');
         if (stale?.length) {
           setPeople(stale);
         } else if (!isRateLimitError(err)) {
@@ -62,7 +62,7 @@ export function useManagerDirectory(userId, accessToken, { enabled = true, outco
         inFlightRef.current = false;
       }
     },
-    [userId, accessToken, enabled, outcome],
+    [userId, accessToken, enabled, outcome, partnerId],
   );
 
   useEffect(() => {
@@ -72,7 +72,7 @@ export function useManagerDirectory(userId, accessToken, { enabled = true, outco
     setLoading(true);
     load();
     return undefined;
-  }, [enabled, load, outcome]);
+  }, [enabled, load, outcome, partnerId]);
 
   useBackgroundRefresh(() => load({ silent: true }), { enabled: enabled && Boolean(userId) });
 

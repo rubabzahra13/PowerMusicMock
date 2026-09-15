@@ -52,9 +52,20 @@ def resolve_manager_fields(
     *,
     manager_user: Optional[models.PowermusicUser] = None,
 ) -> Dict[str, str]:
+    from app.intake_persons import get_submitted_by_attribution, get_admin_submitted_by
+
+    attr = get_submitted_by_attribution(req)
+    if attr.get("firstName") or attr.get("lastName") or attr.get("email") or attr.get("club"):
+        return attr
+
+    admin_attr = get_admin_submitted_by(req)
+    if admin_attr.get("firstName") or admin_attr.get("lastName") or admin_attr.get("email") or admin_attr.get("club"):
+        return admin_attr
+
     manager_user = manager_user or getattr(req, "_manager_user", None)
     if manager_user is not None:
         return user_manager_fields(manager_user)
+
     return {
         "firstName": "",
         "lastName": "",
@@ -68,18 +79,19 @@ def resolve_manager_name(
     *,
     manager_user: Optional[models.PowermusicUser] = None,
 ) -> str:
-    manager_user = manager_user or getattr(req, "_manager_user", None)
-    if manager_user is not None:
-        return user_display_name(manager_user)
-    
     from app.intake_persons import get_submitted_by_attribution, get_admin_submitted_by
+
     attr = get_submitted_by_attribution(req)
     if attr.get("firstName") or attr.get("lastName"):
         return f"{attr.get('firstName', '')} {attr.get('lastName', '')}".strip()
-    
+
     admin_attr = get_admin_submitted_by(req)
     if admin_attr.get("firstName") or admin_attr.get("lastName"):
         return f"{admin_attr.get('firstName', '')} {admin_attr.get('lastName', '')}".strip()
+
+    manager_user = manager_user or getattr(req, "_manager_user", None)
+    if manager_user is not None:
+        return user_display_name(manager_user)
 
     return ""
 

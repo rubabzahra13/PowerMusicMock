@@ -39,12 +39,12 @@ export function formatAttributedManagerFields(submittedBy, options = {}) {
   const pSlug = options.partnerSlug || submittedBy?.partnerSlug || submittedBy?.partner_slug;
   const terms = getPartnerTerminology(pName, pSlug);
   const name = submittedByName(submittedBy);
-  const email = (submittedBy?.email || '').trim();
-  const club = submittedByClub(submittedBy);
+  const email = terms.isHealthFitness ? '' : (submittedBy?.email || '').trim();
+  const club = terms.isHealthFitness ? '' : submittedByClub(submittedBy);
   return {
     name: name || NO_MANAGER_NAME,
-    email: email || NO_MANAGER_EMAIL,
-    club: club || `No ${terms.locationTermLower}`,
+    email: terms.isHealthFitness ? '' : (email || NO_MANAGER_EMAIL),
+    club: terms.isHealthFitness ? '' : (club || `No ${terms.locationTermLower}`),
     hasAny: Boolean(name || email || club),
     rawName: name,
     rawEmail: email,
@@ -95,8 +95,8 @@ export function getManagerColumnContent(request, options = {}) {
   if (isAutomatedSubmittedBy(submittedBy)) {
     return {
       primary: getManagerDisplayName(submittedBy, tags, request),
-      secondary: AWAITING_MANAGER_HINT,
-      tertiary: submittedBy?.club || '',
+      secondary: terms.isHealthFitness ? '' : AWAITING_MANAGER_HINT,
+      tertiary: terms.isHealthFitness ? '' : (submittedBy?.club || ''),
       muted: true,
     };
   }
@@ -114,8 +114,8 @@ export function getManagerColumnContent(request, options = {}) {
     }
     return {
       primary: fields.name,
-      secondary: fields.email,
-      tertiary: fields.club,
+      secondary: terms.isHealthFitness ? '' : fields.email,
+      tertiary: terms.isHealthFitness ? '' : fields.club,
       lines: null,
       muted: false,
     };
@@ -124,15 +124,15 @@ export function getManagerColumnContent(request, options = {}) {
   if (!name) {
     return {
       primary: AWAITING_MANAGER_LABEL,
-      secondary: AWAITING_MANAGER_HINT,
+      secondary: terms.isHealthFitness ? '' : AWAITING_MANAGER_HINT,
       tertiary: '',
       muted: true,
     };
   }
   return {
     primary: name,
-    secondary: (submittedBy?.email || '').trim() || 'No email',
-    tertiary: (submittedBy?.club || '').trim() || `No ${terms.locationTermLower}`,
+    secondary: terms.isHealthFitness ? '' : ((submittedBy?.email || '').trim() || 'No email'),
+    tertiary: terms.isHealthFitness ? '' : ((submittedBy?.club || '').trim() || `No ${terms.locationTermLower}`),
     muted: false,
   };
 }
@@ -156,8 +156,8 @@ export function getDirectoryManagerColumnContent(row, options = {}) {
   }
   return {
     primary: name || NO_MANAGER_NAME,
-    secondary: email || NO_MANAGER_EMAIL,
-    tertiary: club || `No ${terms.locationTermLower}`,
+    secondary: terms.isHealthFitness ? '' : (email || NO_MANAGER_EMAIL),
+    tertiary: terms.isHealthFitness ? '' : (club || `No ${terms.locationTermLower}`),
     muted: !name,
   };
 }

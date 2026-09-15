@@ -28,11 +28,11 @@ export function getPartnerTerminology(partnerName, partnerSlug = '') {
     managerDetailsTitle: isHF ? 'Director Details' : 'Manager Details',
     managerFirstLabel: isHF ? 'Director First Name' : 'Manager First Name',
     managerLastLabel: isHF ? 'Director Last Name' : 'Manager Last Name',
-    managerEmailLabel: isHF ? 'Director Email' : 'Manager Email',
+    managerEmailLabel: 'Manager Email',
     managerClubLabel: isHF ? 'Director Client' : 'Manager Club Location',
     roleBadge: (name) => {
       const p = name?.trim();
-      if (isHF) return p ? `${p} Director` : 'Director';
+      if (isHF) return p ? `Manager ${p}` : 'Manager';
       return p ? `${p} Manager` : 'Manager';
     },
   };
@@ -97,31 +97,26 @@ export function managerAuthHeading(partnerName, mode, partnerSlug = '') {
     return 'Account';
   }
   if (mode === 'signup') {
-    return terms.isHealthFitness ? `${label} Director Sign Up` : `${label} Sign Up`;
+    return `${label} Sign Up`;
   }
-  return terms.isHealthFitness ? `${label} Director Sign In` : `${label} Sign In`;
+  return `${label} Sign In`;
 }
 
 export function managerAuthSubmitLabel(partnerName, mode, { loading = false, partnerSlug = '' } = {}) {
   const label = partnerName?.trim();
   const terms = getPartnerTerminology(partnerName, partnerSlug);
-  const role = terms.isHealthFitness ? 'Director ' : '';
   if (loading) {
-    if (mode === 'signup') return label ? `${label} ${role}Sign Up…` : `${terms.managerTerm} Sign Up…`;
-    return label ? `${label} ${role}Sign In…` : `${terms.managerTerm} Sign In…`;
+    if (mode === 'signup') return label ? `${label} Sign Up…` : `${terms.managerTerm} Sign Up…`;
+    return label ? `${label} Sign In…` : `${terms.managerTerm} Sign In…`;
   }
   if (!label) {
     return mode === 'signup' ? `${terms.managerTerm} Sign Up` : `${terms.managerTerm} Sign In`;
   }
-  if (mode === 'signup') return `${label} ${role}Sign Up`;
-  return `${label} ${role}Sign In`;
+  if (mode === 'signup') return `${label} Sign Up`;
+  return `${label} Sign In`;
 }
 
 export function managerAuthCreateAccountLink(partnerName, partnerSlug = '') {
   const label = partnerName?.trim();
-  const terms = getPartnerTerminology(partnerName, partnerSlug);
-  if (terms.isHealthFitness) {
-    return label ? `Create a ${label} Director Account` : 'Create a Director Account';
-  }
   return label ? `Create a ${label} Account` : 'Create an Account';
 }

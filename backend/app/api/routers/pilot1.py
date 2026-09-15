@@ -661,17 +661,32 @@ def _assert_manager_submitter(
     header_partner_slug: Optional[str] = None,
 ) -> str:
     sub_email = (submitted_by.email or "").strip()
-    if auth_is_required() and sub_email.lower() != manager.email.lower():
-        raise HTTPException(
-            status_code=403,
-            detail="Submitter email must match your signed-in account.",
-        )
     effective_partner_id = partner_id or header_partner_id
     effective_partner_slug = header_partner_slug
-    return assert_manager_email_allowed(
+    resolved_partner_id = resolve_partner_for_manager_email(
         db,
         sub_email or manager.email,
         partner_id=effective_partner_id,
+        partner_slug=effective_partner_slug,
+        manager_user_id=manager.id if manager else None,
+    )
+    if not resolved_partner_id:
+        raise HTTPException(status_code=409, detail="Manager account is not assigned to a partner.")
+
+    partner = get_partner_or_404(db, resolved_partner_id)
+    is_health_fitness = (partner.name or "").strip().lower() == "health fitness"
+
+    if auth_is_required() and not is_health_fitness:
+        if sub_email.lower() != manager.email.lower():
+            raise HTTPException(
+                status_code=403,
+                detail="Submitter email must match your signed-in account.",
+            )
+
+    return assert_manager_email_allowed(
+        db,
+        manager.email if is_health_fitness else (sub_email or manager.email),
+        partner_id=resolved_partner_id,
         partner_slug=effective_partner_slug,
         manager_user_id=manager.id if manager else None,
     )

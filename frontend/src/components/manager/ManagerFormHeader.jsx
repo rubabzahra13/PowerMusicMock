@@ -9,7 +9,7 @@ function displayNameFrom(name, email, isHF = false) {
   if (trimmed) return trimmed;
   const local = String(email || '').split('@')[0];
   if (local) return local;
-  return isHF ? 'Director' : 'Manager';
+  return 'Manager';
 }
 
 function PartnerAvatar({ name, logoDataUrl, className = 'h-9 w-9' }) {

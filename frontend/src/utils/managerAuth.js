@@ -415,7 +415,7 @@ export function validateClub(raw, fieldName = 'Club Location') {
 
 export function validateManagerSignupFields(
   { firstName, lastName, email, club, password, confirmPassword },
-  { enforceDomain = true, allowedDomains } = {}
+  { enforceDomain = true, allowedDomains, isHealthFitness = false } = {}
 ) {
   const first = validatePersonName(firstName, 'First Name');
   if (!first.ok) return first;
@@ -426,8 +426,12 @@ export function validateManagerSignupFields(
   const emailResult = validateManagerEmail(email, { enforceDomain, allowedDomains });
   if (!emailResult.ok) return emailResult;
 
-  const clubResult = validateClub(club);
-  if (!clubResult.ok) return clubResult;
+  let clubValue = '';
+  if (!isHealthFitness) {
+    const clubResult = validateClub(club);
+    if (!clubResult.ok) return clubResult;
+    clubValue = clubResult.value;
+  }
 
   const passwordResult = validatePassword(password, { email: emailResult.value });
   if (!passwordResult.ok) return passwordResult;
@@ -442,7 +446,7 @@ export function validateManagerSignupFields(
       firstName: first.value,
       lastName: last.value,
       email: emailResult.value,
-      club: clubResult.value,
+      club: clubValue,
       password: passwordResult.value,
       full_name: `${first.value} ${last.value}`.trim(),
     },

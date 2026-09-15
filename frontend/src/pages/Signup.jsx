@@ -549,6 +549,7 @@ export default function Signup() {
     const validated = validateManagerSignupFields(formData, {
       enforceDomain: appConfig.enforceDomainCheck,
       allowedDomains: authAllowedDomains,
+      isHealthFitness: terms.isHealthFitness,
     });
     if (!validated.ok) {
       setErrorMsg(validated.error);
@@ -574,6 +575,7 @@ export default function Signup() {
 
       const result = await registerManager(formData, {
         enforceDomain: appConfig.enforceDomainCheck,
+        isHealthFitness: terms.isHealthFitness,
       });
 
       if (result.needsConfirmation) {
@@ -1248,23 +1250,25 @@ export default function Signup() {
           />
         </div>
 
-        <div>
-          <label htmlFor="signup-club" className={labelClass}>
-            {terms.clubOrClientLabel}
-          </label>
-          <input
-            id="signup-club"
-            type="text"
-            autoComplete="organization"
-            maxLength={200}
-            placeholder={terms.clubOrClientPlaceholder}
-            value={formData.club}
-            onChange={(e) => handleChange('club', e.target.value)}
-            disabled={loading}
-            className={inputClass}
-            required
-          />
-        </div>
+        {!terms.isHealthFitness && (
+          <div>
+            <label htmlFor="signup-club" className={labelClass}>
+              {terms.clubOrClientLabel}
+            </label>
+            <input
+              id="signup-club"
+              type="text"
+              autoComplete="organization"
+              maxLength={200}
+              placeholder={terms.clubOrClientPlaceholder}
+              value={formData.club}
+              onChange={(e) => handleChange('club', e.target.value)}
+              disabled={loading}
+              className={inputClass}
+              required
+            />
+          </div>
+        )}
 
         <div>
           <label htmlFor="signup-password" className={labelClass}>
@@ -1306,7 +1310,7 @@ export default function Signup() {
             !formData.firstName.trim() ||
             !formData.lastName.trim() ||
             !formData.email.trim() ||
-            !formData.club.trim() ||
+            (!terms.isHealthFitness && !formData.club.trim()) ||
             !formData.password ||
             !formData.confirmPassword ||
             !isPasswordStrongEnough(formData.password, { email: formData.email }) ||

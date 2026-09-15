@@ -177,11 +177,22 @@ function activeFormUserIndexes(personForms) {
     .filter(Boolean);
 }
 
-function directoryResultsEmptyMessage({ hasSearchQuery, hasFormCriteria, isSearchTooBroad }) {
+function directoryResultsEmptyMessage({
+  hasSearchQuery,
+  hasFormCriteria,
+  isSearchTooBroad,
+  isHealthFitness = false,
+  isRemoveAction = false,
+  managerLocation = '',
+}) {
   if (isSearchTooBroad) return 'Nothing matched that search. Try a name or email address.';
   if (hasSearchQuery) return 'No one matched that search.';
   if (hasFormCriteria) return 'No directory matches for the details entered on the left yet.';
-  return 'Type at least 2 characters to search, or enter person details on the left to check automatically.';
+  if (isHealthFitness) {
+    return isRemoveAction ? 'No removed users found.' : 'No active directory users found.';
+  }
+  const loc = managerLocation ? ` for ${managerLocation}` : '';
+  return isRemoveAction ? `No removed users found${loc}.` : `No active directory users found${loc}.`;
 }
 
 function directoryLiveStatusMessage({
@@ -190,6 +201,10 @@ function directoryLiveStatusMessage({
   hasSearchQuery,
   displayResults,
   multipleUsers,
+  isHealthFitness = false,
+  isRemoveAction = false,
+  totalCount = 0,
+  managerLocation = '',
 }) {
   const activeUsers = activeFormUserIndexes(personForms);
 
@@ -198,6 +213,15 @@ function directoryLiveStatusMessage({
       return `${formMatchResults.length} possible match${formMatchResults.length === 1 ? '' : 'es'} across User ${activeUsers.join(', User ')}. Highlighted on the right.`;
     }
     return `${formMatchResults.length} possible match${formMatchResults.length === 1 ? '' : 'es'} from your form. Highlighted rows on the right.`;
+  }
+
+  if (!hasSearchQuery) {
+    const term = isRemoveAction ? 'removed' : 'active directory';
+    if (isHealthFitness) {
+      return `${totalCount} ${term} user${totalCount === 1 ? '' : 's'} shown by default. Search by name, email, or client to filter.`;
+    }
+    const locText = managerLocation ? ` for ${managerLocation}` : '';
+    return `${totalCount} ${term} user${totalCount === 1 ? '' : 's'}${locText} shown by default. Search by name, email, or location to filter.`;
   }
 
   if (activeUsers.length > 0) {
@@ -243,6 +267,8 @@ export default function ManagerForm() {
       partnerId: partnerBranding?.partnerId,
     });
   const [searchInput, setSearchInput] = useState('');
+  const [hfManagerFirstName, setHfManagerFirstName] = useState('');
+  const [hfManagerLastName, setHfManagerLastName] = useState('');
 
   const [personForms, setPersonForms] = useState([{ ...EMPTY_PERSON_FORM }]);
   const [touchedFields, setTouchedFields] = useState({});
@@ -467,6 +493,8 @@ export default function ManagerForm() {
     setAction(nextAction);
     setFlowStep('form');
     setPersonForms([{ ...EMPTY_PERSON_FORM }]);
+    setHfManagerFirstName('');
+    setHfManagerLastName('');
     setTouchedFields({});
     setSubmitAttempted(false);
     setSearchInput('');
@@ -476,6 +504,8 @@ export default function ManagerForm() {
   const handleBackToChoice = () => {
     setFlowStep('choose');
     setPersonForms([{ ...EMPTY_PERSON_FORM }]);
+    setHfManagerFirstName('');
+    setHfManagerLastName('');
     setTouchedFields({});
     setSubmitAttempted(false);
     setSearchInput('');
@@ -521,13 +551,22 @@ export default function ManagerForm() {
 
   const isFormValid = useMemo(
     () =>
-      managerDetails.firstName.trim() !== '' &&
-      managerDetails.lastName.trim() !== '' &&
-      managerDetails.email.trim() !== '' &&
-      managerDetails.club.trim() !== '' &&
+      (isHealthFitness
+        ? hfManagerFirstName.trim() !== '' && hfManagerLastName.trim() !== ''
+        : managerDetails.firstName.trim() !== '' &&
+          managerDetails.lastName.trim() !== '' &&
+          managerDetails.email.trim() !== '' &&
+          managerDetails.club.trim() !== '') &&
       personForms.length > 0 &&
       personValidation.ok,
-    [managerDetails, personForms.length, personValidation.ok],
+    [
+      isHealthFitness,
+      hfManagerFirstName,
+      hfManagerLastName,
+      managerDetails,
+      personForms.length,
+      personValidation.ok,
+    ],
   );
 
   const handleSubmit = async (e) => {
@@ -536,10 +575,12 @@ export default function ManagerForm() {
 
     const validation = validatePersonForms(personForms);
     if (
-      !managerDetails.firstName.trim() ||
-      !managerDetails.lastName.trim() ||
-      !managerDetails.email.trim() ||
-      !managerDetails.club.trim() ||
+      (isHealthFitness
+        ? !hfManagerFirstName.trim() || !hfManagerLastName.trim()
+        : !managerDetails.firstName.trim() ||
+          !managerDetails.lastName.trim() ||
+          !managerDetails.email.trim() ||
+          !managerDetails.club.trim()) ||
       !validation.ok
     ) {
       const firstInvalid = firstInvalidPersonField(validation.errorsByRow);
@@ -557,6 +598,12 @@ export default function ManagerForm() {
     if (submitting) return;
 
     const normalizedPeople = validation.normalizedForms;
+    const submittedByPayload = isHealthFitness
+      ? {
+          firstName: hfManagerFirstName.trim(),
+          lastName: hfManagerLastName.trim(),
+        }
+      : managerDetails;
 
     setSubmitting(true);
     try {
@@ -565,7 +612,7 @@ export default function ManagerForm() {
       const body =
         normalizedPeople.length === 1
           ? {
-              submittedBy: managerDetails,
+              submittedBy: submittedByPayload,
               partnerId: partnerBranding?.partnerId || undefined,
               person: {
                 firstName: normalizedPeople[0].firstName,
@@ -577,7 +624,7 @@ export default function ManagerForm() {
               notes: normalizedPeople[0].notes?.trim() || undefined,
             }
           : {
-              submittedBy: managerDetails,
+              submittedBy: submittedByPayload,
               partnerId: partnerBranding?.partnerId || undefined,
               people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
                 firstName,
@@ -620,6 +667,8 @@ export default function ManagerForm() {
       setSubmittedCount(count);
       setRequestRefreshToken((token) => token + 1);
       setSearchInput('');
+      setHfManagerFirstName('');
+      setHfManagerLastName('');
       setPersonForms([{ ...EMPTY_PERSON_FORM }]);
       setTouchedFields({});
       setSubmitAttempted(false);
@@ -642,6 +691,8 @@ export default function ManagerForm() {
     setSubmitted(false);
     setSubmittedCount(1);
     setPersonForms([{ ...EMPTY_PERSON_FORM }]);
+    setHfManagerFirstName('');
+    setHfManagerLastName('');
     setTouchedFields({});
     setSubmitAttempted(false);
     setSearchInput('');
@@ -713,6 +764,20 @@ export default function ManagerForm() {
     return map;
   }, [directoryPeople, personForms]);
 
+  const defaultLocationPeople = useMemo(() => {
+    if (isHealthFitness) {
+      return directoryPeople;
+    }
+    const managerLoc = (managerDetails.club || '').trim().toLowerCase();
+    if (!managerLoc) {
+      return directoryPeople;
+    }
+    return directoryPeople.filter((person) => {
+      const personLoc = (person.location || '').trim().toLowerCase();
+      return personLoc === managerLoc;
+    });
+  }, [directoryPeople, isHealthFitness, managerDetails.club]);
+
   const displayResults = useMemo(() => {
     const byId = new Map();
 
@@ -733,14 +798,27 @@ export default function ManagerForm() {
       });
     };
 
-    for (const row of searchResults) {
-      mergeRow(row, 'search');
-    }
-    for (const row of formMatchResults) {
-      mergeRow(row, 'form');
+    if (!hasSearchQuery) {
+      for (const row of defaultLocationPeople) {
+        mergeRow(row, 'default');
+      }
+      for (const row of formMatchResults) {
+        mergeRow(row, 'form');
+      }
+    } else {
+      for (const row of searchResults) {
+        mergeRow(row, 'search');
+      }
+      for (const row of formMatchResults) {
+        mergeRow(row, 'form');
+      }
     }
 
     return Array.from(byId.values()).sort((a, b) => {
+      const aForm = a.fromFormMatch ? 1 : 0;
+      const bForm = b.fromFormMatch ? 1 : 0;
+      if (bForm !== aForm) return bForm - aForm;
+
       if (hasSearchQuery) {
         const aSearch = a.fromManualSearch ? 1 : 0;
         const bSearch = b.fromManualSearch ? 1 : 0;
@@ -752,13 +830,9 @@ export default function ManagerForm() {
       if (bScore !== aScore) return bScore - aScore;
       return 0;
     });
-  }, [searchResults, formMatchResults, hasSearchQuery]);
+  }, [defaultLocationPeople, searchResults, formMatchResults, hasSearchQuery]);
 
-  const showDirectoryResults =
-    !submitted &&
-    (hasSearchQuery ||
-      formMatchResults.length > 0 ||
-      personForms.some(formHasMatchCriteria));
+  const showDirectoryResults = !submitted;
   const hasFormMatchCriteria = personForms.some(formHasMatchCriteria);
   const directoryLiveStatus = directoryLiveStatusMessage({
     personForms,
@@ -766,11 +840,18 @@ export default function ManagerForm() {
     hasSearchQuery,
     displayResults,
     multipleUsers: personForms.length > 1,
+    isHealthFitness,
+    isRemoveAction: action === 'Remove',
+    totalCount: isHealthFitness ? directoryPeople.length : defaultLocationPeople.length,
+    managerLocation: managerDetails.club,
   });
   const directoryEmptyMessage = directoryResultsEmptyMessage({
     hasSearchQuery,
     hasFormCriteria: hasFormMatchCriteria,
     isSearchTooBroad,
+    isHealthFitness,
+    isRemoveAction: action === 'Remove',
+    managerLocation: managerDetails.club,
   });
 
   const showInitialDirectoryLoading = directoryLoading && directoryPeople.length === 0;
@@ -785,13 +866,21 @@ export default function ManagerForm() {
         : 'User to remove';
   const isRemoveAction = action === 'Remove';
   const directoryPanelDescription = isRemoveAction
-    ? 'Search removed users by name or email. Person details on the form are checked automatically.'
-    : 'Search by name or email. Person details on the form are checked automatically.';
+    ? isHealthFitness
+      ? 'Search removed users by name, email, or client. Person details on the form are checked automatically.'
+      : 'Search removed users by name or email. Person details on the form are checked automatically.'
+    : isHealthFitness
+      ? 'Search directory by name, email, or client. Person details on the form are checked automatically.'
+      : 'Search by name or email. Person details on the form are checked automatically.';
   const directoryDateColumnLabel = isRemoveAction ? 'Removed' : 'Added';
   const directoryLoadingLabel = isRemoveAction ? 'Loading removed users…' : 'Loading directory…';
   const directoryFooterText = isRemoveAction
-    ? 'Rows that share any name, email, or location detail with your form are also listed here from removed users.'
-    : 'Rows that share any name, email, or location detail with your form are also listed here.';
+    ? isHealthFitness
+      ? 'Rows that share any name, email, or client detail with your form are also listed here from removed users.'
+      : 'Rows that share any name, email, or location detail with your form are also listed here from removed users.'
+    : isHealthFitness
+      ? 'Rows that share any name, email, or client detail with your form are also listed here.'
+      : 'Rows that share any name, email, or location detail with your form are also listed here.';
 
   const intendedPartnerSlug = readManagerIntendedPartnerSlug();
   const cachedPartnerConflict = intendedPartnerSlug
@@ -995,59 +1084,109 @@ export default function ManagerForm() {
               <div className="mt-4 flex min-h-0 flex-1 flex-col sm:mt-5">
               <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain sm:space-y-6">
               <FormSection title={terms.managerDetailsTitle}>
-                <p className="-mt-1 text-[11px] text-[var(--color-text-secondary)]">
-                  Taken from your signed-in account and cannot be changed here.
-                </p>
-                <div className={managerGridClass}>
-                  <Field id={ids.managerFirst} label={terms.managerFirstLabel} required labelMuted>
-                    <input
-                      id={ids.managerFirst}
-                      type="text"
-                      disabled
-                      readOnly
-                      aria-readonly="true"
-                      autoComplete="given-name"
-                      value={managerDetails.firstName}
-                      className={managerReadonlyInputClass}
-                    />
-                  </Field>
-                  <Field id={ids.managerLast} label={terms.managerLastLabel} required labelMuted>
-                    <input
-                      id={ids.managerLast}
-                      type="text"
-                      disabled
-                      readOnly
-                      aria-readonly="true"
-                      autoComplete="family-name"
-                      value={managerDetails.lastName}
-                      className={managerReadonlyInputClass}
-                    />
-                  </Field>
-
-                  <Field id={ids.managerEmail} label={terms.managerEmailLabel} required labelMuted>
-                    <input
-                      id={ids.managerEmail}
-                      type="email"
-                      disabled
-                      readOnly
-                      aria-readonly="true"
-                      autoComplete="email"
-                      value={managerDetails.email}
-                      className={managerReadonlyInputClass}
-                    />
-                  </Field>
-                  <Field id={ids.managerClub} label={terms.managerClubLabel} required labelMuted>
-                    <input
-                      id={ids.managerClub}
-                      type="text"
-                      disabled
-                      readOnly
-                      aria-readonly="true"
-                      autoComplete="organization"
-                      value={managerDetails.club}
-                      className={managerReadonlyInputClass}
-                    />
-                  </Field>
+                {!isHealthFitness && (
+                  <p className="-mt-1 text-[11px] text-[var(--color-text-secondary)]">
+                    Taken from your signed-in account and cannot be changed here.
+                  </p>
+                )}
+                <div className={isHealthFitness ? 'grid grid-cols-1 gap-3 sm:grid-cols-2' : managerGridClass}>
+                  {isHealthFitness ? (
+                    <>
+                      <Field
+                        id={ids.managerFirst}
+                        label={terms.managerFirstLabel}
+                        required
+                        error={submitAttempted && !hfManagerFirstName.trim() ? `${terms.managerFirstLabel} is required` : ''}
+                      >
+                        {({ describedBy, invalid }) => (
+                          <input
+                            id={ids.managerFirst}
+                            type="text"
+                            required
+                            autoComplete="given-name"
+                            spellCheck={false}
+                            value={hfManagerFirstName}
+                            onChange={(e) => setHfManagerFirstName(e.target.value)}
+                            aria-invalid={invalid || undefined}
+                            aria-describedby={describedBy}
+                            className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                          />
+                        )}
+                      </Field>
+                      <Field
+                        id={ids.managerLast}
+                        label={terms.managerLastLabel}
+                        required
+                        error={submitAttempted && !hfManagerLastName.trim() ? `${terms.managerLastLabel} is required` : ''}
+                      >
+                        {({ describedBy, invalid }) => (
+                          <input
+                            id={ids.managerLast}
+                            type="text"
+                            required
+                            autoComplete="family-name"
+                            spellCheck={false}
+                            value={hfManagerLastName}
+                            onChange={(e) => setHfManagerLastName(e.target.value)}
+                            aria-invalid={invalid || undefined}
+                            aria-describedby={describedBy}
+                            className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                          />
+                        )}
+                      </Field>
+                    </>
+                  ) : (
+                    <>
+                      <Field id={ids.managerFirst} label={terms.managerFirstLabel} required labelMuted>
+                        <input
+                          id={ids.managerFirst}
+                          type="text"
+                          disabled
+                          readOnly
+                          aria-readonly="true"
+                          autoComplete="given-name"
+                          value={managerDetails.firstName}
+                          className={managerReadonlyInputClass}
+                        />
+                      </Field>
+                      <Field id={ids.managerLast} label={terms.managerLastLabel} required labelMuted>
+                        <input
+                          id={ids.managerLast}
+                          type="text"
+                          disabled
+                          readOnly
+                          aria-readonly="true"
+                          autoComplete="family-name"
+                          value={managerDetails.lastName}
+                          className={managerReadonlyInputClass}
+                        />
+                      </Field>
+                      <Field id={ids.managerEmail} label={terms.managerEmailLabel} required labelMuted>
+                        <input
+                          id={ids.managerEmail}
+                          type="email"
+                          disabled
+                          readOnly
+                          aria-readonly="true"
+                          autoComplete="email"
+                          value={managerDetails.email}
+                          className={managerReadonlyInputClass}
+                        />
+                      </Field>
+                      <Field id={ids.managerClub} label={terms.managerClubLabel} required labelMuted>
+                        <input
+                          id={ids.managerClub}
+                          type="text"
+                          disabled
+                          readOnly
+                          aria-readonly="true"
+                          autoComplete="organization"
+                          value={managerDetails.club}
+                          className={managerReadonlyInputClass}
+                        />
+                      </Field>
+                    </>
+                  )}
                 </div>
               </FormSection>
 
@@ -1450,7 +1589,7 @@ export default function ManagerForm() {
                   scope="col"
                   className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]"
                   >
-                  Location
+                  {isHealthFitness ? 'Client' : 'Location'}
                   </th>
                   <th
                   scope="col"
@@ -1528,7 +1667,7 @@ export default function ManagerForm() {
                   : 'hover:bg-[var(--color-manager-panel)]'
                   }
                   >
-                  <td className="px-4 py-3 align-top">
+                  <td className="px-3.5 py-3 align-top text-left">
                   <span
                   className={`break-words font-medium leading-snug ${isMatch ? 'font-semibold' : ''}`}
                   >
@@ -1540,16 +1679,18 @@ export default function ManagerForm() {
                   </span>
                   ) : null}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-normal text-[var(--color-text-secondary)]">
+                  <td className="px-3.5 py-3 align-top text-left font-normal text-[var(--color-text-secondary)] break-all">
                   {row.email || '-'}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-normal text-[var(--color-text-secondary)]">
+                  <td className="px-3.5 py-3 align-top text-center font-normal text-[var(--color-text-secondary)]">
+                  <span className="block break-words font-normal leading-snug">
                   {row.location || '-'}
+                  </span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-normal text-[var(--color-text-secondary)]">
+                  <td className="px-3.5 py-3 align-top text-center whitespace-nowrap font-normal text-[var(--color-text-secondary)]">
                   {dateLabel || '-'}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3">
+                  <td className="px-3.5 py-3 align-top text-center whitespace-nowrap">
                   <span
                   className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                   isAdded

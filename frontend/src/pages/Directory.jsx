@@ -1255,7 +1255,12 @@ export default function UserLedger() {
       headerClassName: 'text-center',
       cellClassName: 'align-top max-w-0 overflow-hidden text-left',
       render: (_, row) => {
-        const manager = getDirectoryManagerColumnContent(row);
+        const rawPartnerId = row?.partnerId || row?.partner_id;
+        const matchedPartner = partners?.find((p) => String(p.id) === String(rawPartnerId)) || selectedPartner;
+        const manager = getDirectoryManagerColumnContent(row, {
+          partnerName: row?.partnerName || row?.partner_name || matchedPartner?.name,
+          partnerSlug: row?.partnerSlug || row?.partner_slug || matchedPartner?.slug,
+        });
         return (
           <StackedTextCell
             primary={manager.primary}

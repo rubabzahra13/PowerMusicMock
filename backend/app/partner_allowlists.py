@@ -233,6 +233,11 @@ def assert_manager_email_allowed(
     partner_slug: Optional[str] = None,
     manager_user_id: Optional[str] = None,
 ) -> str:
+    if not email and manager_user_id:
+        u = db.query(models.PowermusicUser).filter(models.PowermusicUser.id == manager_user_id).first()
+        if u and u.email:
+            email = u.email
+
     effective_partner_id = partner_id
     if not effective_partner_id and partner_slug:
         p_obj = get_partner_by_slug(db, partner_slug)

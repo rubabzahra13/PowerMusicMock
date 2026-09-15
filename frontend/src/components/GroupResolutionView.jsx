@@ -900,8 +900,12 @@ export default function GroupResolutionView({
                             <MetaItem label="Email" value={member.person.email || '—'} />
                             <MetaItem label={locationTerm} value={member.person.location || '—'} />
                             <MetaItem label={`${managerTerm} name`} value={managerName || '—'} />
-                            <MetaItem label={`${managerTerm} email`} value={managerEmail || '—'} />
-                            <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={managerClub || '—'} />
+                            {!terms.isHealthFitness && (
+                              <>
+                                <MetaItem label={`${managerTerm} email`} value={managerEmail || '—'} />
+                                <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={managerClub || '—'} />
+                              </>
+                            )}
                             <MetaItem label={`${managerTerm} notes`} value={notesText || 'No notes'} />
                           </dl>
 
@@ -1009,8 +1013,12 @@ export default function GroupResolutionView({
             <MetaItem label="Email" value={currentRequest.person?.email} />
             <MetaItem label={locationTerm} value={currentRequest.person?.location} />
             <MetaItem label={`${managerTerm} name`} value={currentManager.managerName} />
-            <MetaItem label={`${managerTerm} email`} value={currentManager.managerEmail} />
-            <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={currentManager.managerClub} />
+            {!terms.isHealthFitness && (
+              <>
+                <MetaItem label={`${managerTerm} email`} value={currentManager.managerEmail} />
+                <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={currentManager.managerClub} />
+              </>
+            )}
             <MetaItem label={`${managerTerm} notes`} value={currentManager.notesText || 'No notes'} />
           </dl>
 
@@ -1093,8 +1101,12 @@ export default function GroupResolutionView({
               <MetaItem label="Email" value={member.person?.email} />
               <MetaItem label={locationTerm} value={member.person?.location} />
               <MetaItem label={`${managerTerm} name`} value={mgr.managerName} />
-              <MetaItem label={`${managerTerm} email`} value={mgr.managerEmail} />
-              <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={mgr.managerClub} />
+              {!terms.isHealthFitness && (
+                <>
+                  <MetaItem label={`${managerTerm} email`} value={mgr.managerEmail} />
+                  <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={mgr.managerClub} />
+                </>
+              )}
               <MetaItem label={`${managerTerm} notes`} value={mgr.notesText || 'No notes'} />
             </dl>
 

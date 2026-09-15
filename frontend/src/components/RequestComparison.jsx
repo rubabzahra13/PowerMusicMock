@@ -55,7 +55,7 @@ const PERSON_FIELD_ROWS = [
  * One matrix: fields as rows, sources as columns.
  * Fits the available page width (table-fixed, wrapping) — no horizontal scroll.
  */
-function ComparisonMatrix({ sources, embedded = false, includeManagerRow = false, locationLabel = 'Location' }) {
+function ComparisonMatrix({ sources, embedded = false, includeManagerRow = false, locationLabel = 'Location', isHealthFitness = false }) {
   const rows = [
     ...PERSON_FIELD_ROWS.map((r) => r.key === 'location' ? { ...r, label: locationLabel } : r).filter(({ key }) =>
       sources.some((source) => source.values[key]),
@@ -162,7 +162,7 @@ function ComparisonMatrix({ sources, embedded = false, includeManagerRow = false
                           title={typeof value === 'string' ? value : undefined}
                         >
                           {key === 'manager' ? (
-                            renderManagerValue(value, differs)
+                            renderManagerValue(value, differs, isHealthFitness)
                           ) : (
                             <>
                               {value || <span className="text-[var(--color-text-muted)]">-</span>}
@@ -219,7 +219,7 @@ function TableReviewCell({ hasDiffs: showYes, onViewDetails }) {
   );
 }
 
-function renderManagerValue(value, differs) {
+function renderManagerValue(value, differs, isHealthFitness = false) {
   if (value?.kind === 'admin-details-link') {
     const href = value.href || '#admin-form-heading';
     return (
@@ -269,12 +269,12 @@ function renderManagerValue(value, differs) {
           {parsed.name}
         </span>
       ) : null}
-      {parsed.email ? (
+      {!isHealthFitness && parsed.email ? (
         <span className={`mt-0.5 block text-[12px] sm:text-[13px] ${isPlaceholder(parsed.email) ? placeholderClass : `font-mono ${secondaryClass}`}`.trim()}>
           {parsed.email}
         </span>
       ) : null}
-      {parsed.club ? (
+      {!isHealthFitness && parsed.club ? (
         <span className={`mt-0.5 block text-[12px] sm:text-[13px] ${isPlaceholder(parsed.club) ? placeholderClass : secondaryClass}`.trim()}>
           {parsed.club}
         </span>
@@ -581,6 +581,7 @@ export default function RequestComparison({
         embedded={embedded}
         includeManagerRow={includeSentByRow || includeDirectory}
         locationLabel={terms.locationTerm}
+        isHealthFitness={terms.isHealthFitness}
       />
     </div>
   );

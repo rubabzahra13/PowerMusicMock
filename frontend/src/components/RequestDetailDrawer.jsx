@@ -431,7 +431,7 @@ export default function RequestDetailView({
                     {terms.managerTerm} Form
                   </h3>
                 ) : null}
-                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-x-8">
+                <dl className={`grid grid-cols-1 gap-4 ${terms.isHealthFitness ? 'sm:grid-cols-1' : 'sm:grid-cols-3'} sm:gap-x-8`}>
                   <MetaItem
                     label={`${terms.managerTerm} name`}
                     value={
@@ -440,23 +440,27 @@ export default function RequestDetailView({
                         : getManagerDisplayName(request.submittedBy, request.tags, request)
                     }
                   />
-                  <MetaItem
-                    label={`${terms.managerTerm} email`}
-                    value={
-                      attributedManager && adminEntry
-                        ? attributedFields.email
-                        : (request.submittedBy?.email || null)
-                    }
-                    mono={!(attributedManager && adminEntry) || Boolean(attributedFields.rawEmail)}
-                  />
-                  <MetaItem
-                    label={`${terms.managerTerm} ${terms.locationTermLower}`}
-                    value={
-                      attributedManager && adminEntry
-                        ? attributedFields.club
-                        : clubLabel
-                    }
-                  />
+                  {!terms.isHealthFitness && (
+                    <>
+                      <MetaItem
+                        label={`${terms.managerTerm} email`}
+                        value={
+                          attributedManager && adminEntry
+                            ? attributedFields.email
+                            : (request.submittedBy?.email || null)
+                        }
+                        mono={!(attributedManager && adminEntry) || Boolean(attributedFields.rawEmail)}
+                      />
+                      <MetaItem
+                        label={`${terms.managerTerm} ${terms.locationTermLower}`}
+                        value={
+                          attributedManager && adminEntry
+                            ? attributedFields.club
+                            : clubLabel
+                        }
+                      />
+                    </>
+                  )}
                 </dl>
 
                 <div className="mt-5">
@@ -489,14 +493,18 @@ export default function RequestDetailView({
                 <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
                   Optional {terms.managerTermLower} details entered when this was added via Admin form.
                 </p>
-                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-x-8">
+                <dl className={`grid grid-cols-1 gap-4 ${terms.isHealthFitness ? 'sm:grid-cols-1' : 'sm:grid-cols-3'} sm:gap-x-8`}>
                   <MetaItem label={`${terms.managerTerm} name`} value={adminOverlayFields.name} />
-                  <MetaItem
-                    label={`${terms.managerTerm} email`}
-                    value={adminOverlayFields.email}
-                    mono={Boolean(adminOverlayFields.rawEmail)}
-                  />
-                  <MetaItem label={`${terms.managerTerm} ${terms.locationTermLower}`} value={adminOverlayFields.club} />
+                  {!terms.isHealthFitness && (
+                    <>
+                      <MetaItem
+                        label={`${terms.managerTerm} email`}
+                        value={adminOverlayFields.email}
+                        mono={Boolean(adminOverlayFields.rawEmail)}
+                      />
+                      <MetaItem label={`${terms.managerTerm} ${terms.locationTermLower}`} value={adminOverlayFields.club} />
+                    </>
+                  )}
                 </dl>
               </div>
             ) : null}

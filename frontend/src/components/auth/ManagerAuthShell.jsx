@@ -55,7 +55,7 @@ export default function ManagerAuthShell({
 }) {
   useAuthPageCanvas();
   const terms = getPartnerTerminology(partnerBranding?.partnerName);
-  const displayFootnote = footnote || `Partner ${terms.managerTermLower}s only.`;
+  const displayFootnote = footnote || 'Partner managers only.';
 
   return (
     <div

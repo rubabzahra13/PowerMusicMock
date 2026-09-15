@@ -261,7 +261,7 @@ def intake_manager_submission(
         new_id=new_id,
     )
 
-    if submitted_by is not None and not row.manager_id:
+    if submitted_by is not None:
         set_submitted_by_attribution(
             row,
             first_name=submitted_by.firstName or "",

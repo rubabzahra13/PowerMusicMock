@@ -89,7 +89,11 @@ def process_manager_batch_payload(
     req_in = schemas.ManagerBatchRequestIn.model_validate(payload)
     partner_id = req_in.partnerId
     if partner_id is None:
-        partner_id = assert_manager_email_allowed(db, req_in.submittedBy.email or "")
+        partner_id = assert_manager_email_allowed(
+            db,
+            req_in.submittedBy.email or "",
+            manager_user_id=manager_user_id,
+        )
     request_ids = allocate_request_ids(db, len(req_in.people))
     new_requests = [
         _create_manager_request_row(

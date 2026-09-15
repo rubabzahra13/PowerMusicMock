@@ -91,6 +91,7 @@ function ControlsBar({
   filterSlots,
   sortPreset, setSortPreset,
   activeFilterCount,
+  terms,
 }) {
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef(null);
@@ -129,7 +130,7 @@ function ControlsBar({
           <Search className="h-4 w-4 text-[var(--color-brand-secondary)]/70 shrink-0" />
           <input
             type="text"
-            placeholder="Search person name, email, or location..."
+            placeholder={`Search person name, email, or ${terms?.locationTermLower || 'location'}...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="flex-1 bg-transparent text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none"
@@ -1503,6 +1504,7 @@ export default function Requests() {
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
         filterOpen={filterOpen} setFilterOpen={setFilterOpen}
         activeFilterCount={activeFilterCount}
+        terms={terms}
         filterSlots={[
           {
             label: 'Received',
@@ -1649,16 +1651,18 @@ export default function Requests() {
                 </div>
               ))}
             </div>
-            <div className={formGridClass}>
-              {[['Email', 'email', 'email'], [terms.clubOrClientLabel, 'club', 'text']].map(([label, field, type]) => (
-                <div key={field}>
-                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
-                  <input type={type} value={managerForm[field]}
-                    onChange={(e) => setManagerForm({ ...managerForm, [field]: e.target.value })}
-                    className="w-full px-3 py-2 bg-[var(--color-surface-panel)]/50 border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:bg-white focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all" />
-                </div>
-              ))}
-            </div>
+            {!terms.isHealthFitness && (
+              <div className={formGridClass}>
+                {[['Email', 'email', 'email'], [terms.clubOrClientLabel, 'club', 'text']].map(([label, field, type]) => (
+                  <div key={field}>
+                    <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
+                    <input type={type} value={managerForm[field]}
+                      onChange={(e) => setManagerForm({ ...managerForm, [field]: e.target.value })}
+                      className="w-full px-3 py-2 bg-[var(--color-surface-panel)]/50 border border-[var(--color-border-default)] rounded-lg text-sm focus:outline-none focus:bg-white focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all" />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2.5">
