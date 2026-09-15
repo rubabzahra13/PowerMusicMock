@@ -286,12 +286,14 @@ export default function ManagerForm() {
 
   const managerDetails = useMemo(() => {
     const nameParts = (profile?.full_name || '').trim().split(/\s+/).filter(Boolean);
-    const club = user?.user_metadata?.club;
+    const rawClub = (profile?.club !== undefined && profile?.club !== null)
+      ? profile.club
+      : user?.user_metadata?.club;
     return {
-      firstName: nameParts[0] || '',
-      lastName: nameParts.slice(1).join(' ') || '',
+      firstName: profile?.first_name || nameParts[0] || '',
+      lastName: profile?.last_name || (nameParts.length > 1 ? nameParts.slice(1).join(' ') : ''),
       email: profile?.email || user?.email || '',
-      club: typeof club === 'string' ? club.trim() : '',
+      club: typeof rawClub === 'string' ? rawClub.trim() : '',
     };
   }, [profile, user]);
 

@@ -245,6 +245,9 @@ def get_current_profile(
         "id": str(profile.id),
         "email": profile.email or user.email,
         "full_name": profile.full_name,
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "club": profile.club,
         "role": profile.role,
     }
 

@@ -83,7 +83,7 @@ async function fetchUserProfile(userId, { accessToken, email } = {}) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const { data, error } = await supabase
       .from('powermusic_users')
-      .select('id, email, full_name, role')
+      .select('id, email, full_name, first_name, last_name, club, role')
       .eq('id', userId)
       .single();
 
