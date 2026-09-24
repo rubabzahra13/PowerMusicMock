@@ -53,13 +53,12 @@ export const EMPTY_PERSON_FORM = {
 export const MAX_MANAGER_PERSON_ROWS = 10;
 
 export function isPersonFormComplete(personForm, options = {}) {
-  // Both PureGym and Health Fitness require the same 4 fields.
-  // Health Fitness uses the location field to store "client" — label only differs in UI.
+  const requiresLocation = options.requiresLocation ?? true;
   return (
     (personForm.firstName || '').trim() !== '' &&
     (personForm.lastName || '').trim() !== '' &&
     (personForm.email || '').trim() !== '' &&
-    (personForm.location || '').trim() !== ''
+    (!requiresLocation || (personForm.location || '').trim() !== '')
   );
 }
 

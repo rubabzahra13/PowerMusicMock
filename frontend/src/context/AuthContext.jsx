@@ -600,7 +600,7 @@ export function AuthProvider({ children }) {
   };
 
   /** Manager portal — register with email + password (one email verify if enabled in Supabase). */
-  const registerManager = async (fields, { enforceDomain = true, isHealthFitness = false } = {}) => {
+  const registerManager = async (fields, { enforceDomain = true, isHealthFitness = false, isGll = false } = {}) => {
     const supabase = getSupabase();
     if (!supabase) {
       throw new Error(
@@ -612,7 +612,7 @@ export function AuthProvider({ children }) {
     if (enforceDomain) {
       allowedDomains = await ensureManagerAllowedDomains();
     }
-    const validated = validateManagerSignupFields(fields, { enforceDomain, allowedDomains, isHealthFitness });
+    const validated = validateManagerSignupFields(fields, { enforceDomain, allowedDomains, isHealthFitness, isGll });
     if (!validated.ok) {
       throw new Error(validated.error);
     }

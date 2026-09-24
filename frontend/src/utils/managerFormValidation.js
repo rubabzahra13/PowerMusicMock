@@ -121,7 +121,7 @@ export function validatePersonNotes(raw) {
  * The options argument is accepted for backwards compatibility but no
  * longer changes which fields are required.
  */
-export function validatePersonFormFields(person, { locationLabel = 'User Location' } = {}) {
+export function validatePersonFormFields(person, { locationLabel = 'User Location', requiresLocation = true } = {}) {
   const errors = {};
   const values = {};
 
@@ -137,9 +137,13 @@ export function validatePersonFormFields(person, { locationLabel = 'User Locatio
   if (!email.ok) errors.email = email.error;
   else values.email = email.value;
 
-  const location = validatePersonLocation(person.location, locationLabel);
-  if (!location.ok) errors.location = location.error;
-  else values.location = location.value;
+  if (requiresLocation) {
+    const location = validatePersonLocation(person.location, locationLabel);
+    if (!location.ok) errors.location = location.error;
+    else values.location = location.value;
+  } else {
+    values.location = '';
+  }
 
   const notes = validatePersonNotes(person.notes);
   if (!notes.ok) errors.notes = notes.error;

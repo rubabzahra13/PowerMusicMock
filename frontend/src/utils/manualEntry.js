@@ -40,11 +40,11 @@ export function formatAttributedManagerFields(submittedBy, options = {}) {
   const terms = getPartnerTerminology(pName, pSlug);
   const name = submittedByName(submittedBy);
   const email = terms.isHealthFitness ? '' : (submittedBy?.email || '').trim();
-  const club = terms.isHealthFitness ? '' : submittedByClub(submittedBy);
+  const club = (terms.isHealthFitness || terms.isGll) ? '' : submittedByClub(submittedBy);
   return {
     name: name || NO_MANAGER_NAME,
     email: terms.isHealthFitness ? '' : (email || NO_MANAGER_EMAIL),
-    club: terms.isHealthFitness ? '' : (club || `No ${terms.locationTermLower}`),
+    club: (terms.isHealthFitness || terms.isGll) ? '' : (club || `No ${terms.locationTermLower}`),
     hasAny: Boolean(name || email || club),
     rawName: name,
     rawEmail: email,
@@ -96,7 +96,7 @@ export function getManagerColumnContent(request, options = {}) {
     return {
       primary: getManagerDisplayName(submittedBy, tags, request),
       secondary: terms.isHealthFitness ? '' : AWAITING_MANAGER_HINT,
-      tertiary: terms.isHealthFitness ? '' : (submittedBy?.club || ''),
+      tertiary: (terms.isHealthFitness || terms.isGll) ? '' : (submittedBy?.club || ''),
       muted: true,
     };
   }
@@ -115,7 +115,7 @@ export function getManagerColumnContent(request, options = {}) {
     return {
       primary: fields.name,
       secondary: terms.isHealthFitness ? '' : fields.email,
-      tertiary: terms.isHealthFitness ? '' : fields.club,
+      tertiary: (terms.isHealthFitness || terms.isGll) ? '' : fields.club,
       lines: null,
       muted: false,
     };
@@ -132,7 +132,7 @@ export function getManagerColumnContent(request, options = {}) {
   return {
     primary: name,
     secondary: terms.isHealthFitness ? '' : ((submittedBy?.email || '').trim() || 'No email'),
-    tertiary: terms.isHealthFitness ? '' : ((submittedBy?.club || '').trim() || `No ${terms.locationTermLower}`),
+    tertiary: (terms.isHealthFitness || terms.isGll) ? '' : ((submittedBy?.club || '').trim() || `No ${terms.locationTermLower}`),
     muted: false,
   };
 }
@@ -157,7 +157,7 @@ export function getDirectoryManagerColumnContent(row, options = {}) {
   return {
     primary: name || NO_MANAGER_NAME,
     secondary: terms.isHealthFitness ? '' : (email || NO_MANAGER_EMAIL),
-    tertiary: terms.isHealthFitness ? '' : (club || `No ${terms.locationTermLower}`),
+    tertiary: (terms.isHealthFitness || terms.isGll) ? '' : (club || `No ${terms.locationTermLower}`),
     muted: !name,
   };
 }

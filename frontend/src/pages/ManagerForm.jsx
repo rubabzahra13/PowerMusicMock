@@ -307,10 +307,11 @@ export default function ManagerForm() {
     [partnerBranding?.partnerName, activePartnerSlug, intendedSlug],
   );
   const isHealthFitness = terms.isHealthFitness;
+  const isGll = terms.isGll;
 
-  // Both partners use the same 4-column grid.
-  // Health Fitness shows "Client" instead of "Location" — label only.
-  const managerGridClass = 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4';
+  const managerGridClass = isGll
+    ? 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3'
+    : 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4';
 
   const personFieldIds = (index) => ({
     first: `${formId}-person-${index}-first`,
@@ -321,8 +322,12 @@ export default function ManagerForm() {
   });
 
   const personValidation = useMemo(
-    () => validatePersonForms(personForms),
-    [personForms],
+    () =>
+      validatePersonForms(personForms, {
+        locationLabel: isHealthFitness ? 'User Client' : 'User Location',
+        requiresLocation: !isGll,
+      }),
+    [personForms, isHealthFitness, isGll],
   );
 
   const touchKey = (index, field) => `${index}.${field}`;
@@ -555,14 +560,19 @@ export default function ManagerForm() {
     () =>
       (isHealthFitness
         ? hfManagerFirstName.trim() !== '' && hfManagerLastName.trim() !== ''
-        : managerDetails.firstName.trim() !== '' &&
-          managerDetails.lastName.trim() !== '' &&
-          managerDetails.email.trim() !== '' &&
-          managerDetails.club.trim() !== '') &&
+        : isGll
+          ? managerDetails.firstName.trim() !== '' &&
+            managerDetails.lastName.trim() !== '' &&
+            managerDetails.email.trim() !== ''
+          : managerDetails.firstName.trim() !== '' &&
+            managerDetails.lastName.trim() !== '' &&
+            managerDetails.email.trim() !== '' &&
+            managerDetails.club.trim() !== '') &&
       personForms.length > 0 &&
       personValidation.ok,
     [
       isHealthFitness,
+      isGll,
       hfManagerFirstName,
       hfManagerLastName,
       managerDetails,
@@ -575,14 +585,21 @@ export default function ManagerForm() {
     e.preventDefault();
     setSubmitAttempted(true);
 
-    const validation = validatePersonForms(personForms);
+    const validation = validatePersonForms(personForms, {
+      locationLabel: isHealthFitness ? 'User Client' : 'User Location',
+      requiresLocation: !isGll,
+    });
     if (
       (isHealthFitness
         ? !hfManagerFirstName.trim() || !hfManagerLastName.trim()
-        : !managerDetails.firstName.trim() ||
-          !managerDetails.lastName.trim() ||
-          !managerDetails.email.trim() ||
-          !managerDetails.club.trim()) ||
+        : isGll
+          ? !managerDetails.firstName.trim() ||
+            !managerDetails.lastName.trim() ||
+            !managerDetails.email.trim()
+          : !managerDetails.firstName.trim() ||
+            !managerDetails.lastName.trim() ||
+            !managerDetails.email.trim() ||
+            !managerDetails.club.trim()) ||
       !validation.ok
     ) {
       const firstInvalid = firstInvalidPersonField(validation.errorsByRow);
@@ -605,7 +622,13 @@ export default function ManagerForm() {
           firstName: hfManagerFirstName.trim(),
           lastName: hfManagerLastName.trim(),
         }
-      : managerDetails;
+      : isGll
+        ? {
+            firstName: managerDetails.firstName,
+            lastName: managerDetails.lastName,
+            email: managerDetails.email,
+          }
+        : managerDetails;
 
     setSubmitting(true);
     try {
@@ -620,7 +643,7 @@ export default function ManagerForm() {
                 firstName: normalizedPeople[0].firstName,
                 lastName: normalizedPeople[0].lastName,
                 email: normalizedPeople[0].email,
-                location: normalizedPeople[0].location,
+                location: isGll ? undefined : normalizedPeople[0].location,
               },
               action,
               notes: normalizedPeople[0].notes?.trim() || undefined,
@@ -632,7 +655,7 @@ export default function ManagerForm() {
                 firstName,
                 lastName,
                 email,
-                location,
+                location: isGll ? undefined : location,
                 notes: notes?.trim() || undefined,
               })),
               action,
@@ -767,7 +790,7 @@ export default function ManagerForm() {
   }, [directoryPeople, personForms]);
 
   const defaultLocationPeople = useMemo(() => {
-    if (isHealthFitness) {
+    if (isHealthFitness || isGll) {
       return directoryPeople;
     }
     const managerLoc = (managerDetails.club || '').trim().toLowerCase();
@@ -778,7 +801,7 @@ export default function ManagerForm() {
       const personLoc = (person.location || '').trim().toLowerCase();
       return personLoc === managerLoc;
     });
-  }, [directoryPeople, isHealthFitness, managerDetails.club]);
+  }, [directoryPeople, isHealthFitness, isGll, managerDetails.club]);
 
   const displayResults = useMemo(() => {
     const byId = new Map();
@@ -1091,7 +1114,7 @@ export default function ManagerForm() {
                     Taken from your signed-in account and cannot be changed here.
                   </p>
                 )}
-                <div className={isHealthFitness ? 'grid grid-cols-1 gap-3 sm:grid-cols-2' : managerGridClass}>
+                <div className={isHealthFitness ? 'grid grid-cols-1 gap-3 sm:grid-cols-2' : isGll ? 'grid grid-cols-1 gap-3 sm:grid-cols-3' : managerGridClass}>
                   {isHealthFitness ? (
                     <>
                       <Field
@@ -1175,18 +1198,20 @@ export default function ManagerForm() {
                           className={managerReadonlyInputClass}
                         />
                       </Field>
-                      <Field id={ids.managerClub} label={terms.managerClubLabel} required labelMuted>
-                        <input
-                          id={ids.managerClub}
-                          type="text"
-                          disabled
-                          readOnly
-                          aria-readonly="true"
-                          autoComplete="organization"
-                          value={managerDetails.club}
-                          className={managerReadonlyInputClass}
-                        />
-                      </Field>
+                      {!isGll && (
+                        <Field id={ids.managerClub} label={terms.managerClubLabel} required labelMuted>
+                          <input
+                            id={ids.managerClub}
+                            type="text"
+                            disabled
+                            readOnly
+                            aria-readonly="true"
+                            autoComplete="organization"
+                            value={managerDetails.club}
+                            className={managerReadonlyInputClass}
+                          />
+                        </Field>
+                      )}
                     </>
                   )}
                 </div>
@@ -1304,31 +1329,33 @@ export default function ManagerForm() {
                               />
                             )}
                           </Field>
-                          <Field
-                            id={rowIds.location}
-                            label={isHealthFitness ? 'User Client' : 'User Location'}
-                            required
-                            error={getFieldError(index, 'location')}
-                          >
-                            {({ describedBy, invalid }) => (
-                              <input
-                                ref={(node) => setPersonFieldRef(index, 'location', node)}
-                                id={rowIds.location}
-                                type="text"
-                                required
-                                autoComplete="organization"
-                                maxLength={PERSON_FIELD_LIMITS.location}
-                                value={personForm.location}
-                                onChange={(e) =>
-                                  handlePersonChange(index, 'location', e.target.value)
-                                }
-                                onBlur={() => handlePersonBlur(index, 'location')}
-                                aria-invalid={invalid || undefined}
-                                aria-describedby={describedBy}
-                                className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
-                              />
-                            )}
-                          </Field>
+                          {!terms.isGll && (
+                            <Field
+                              id={rowIds.location}
+                              label={isHealthFitness ? 'User Client' : 'User Location'}
+                              required
+                              error={getFieldError(index, 'location')}
+                            >
+                              {({ describedBy, invalid }) => (
+                                <input
+                                  ref={(node) => setPersonFieldRef(index, 'location', node)}
+                                  id={rowIds.location}
+                                  type="text"
+                                  required
+                                  autoComplete="organization"
+                                  maxLength={PERSON_FIELD_LIMITS.location}
+                                  value={personForm.location}
+                                  onChange={(e) =>
+                                    handlePersonChange(index, 'location', e.target.value)
+                                  }
+                                  onBlur={() => handlePersonBlur(index, 'location')}
+                                  aria-invalid={invalid || undefined}
+                                  aria-describedby={describedBy}
+                                  className={`${inputClass}${invalid ? ` ${invalidInputClass}` : ''}`}
+                                />
+                              )}
+                            </Field>
+                          )}
 
                         </div>
 
@@ -1462,11 +1489,11 @@ export default function ManagerForm() {
                     <input
                       id={ids.search}
                       type="search"
-                      placeholder={isHealthFitness ? "Search by name, email, or client..." : "Search by name, email, or location..."}
+                      placeholder={isGll ? "Search by name or email..." : (isHealthFitness ? "Search by name, email, or client..." : "Search by name, email, or location...")}
                       value={searchInput}
                       onChange={(e) => setSearchInput(e.target.value)}
                       disabled={submitted}
-                      aria-label={isHealthFitness ? "Search by name, email, or client" : "Search by name, email, or location"}
+                      aria-label={isGll ? "Search by name or email" : (isHealthFitness ? "Search by name, email, or client" : "Search by name, email, or location")}
                       className={directorySearchInputClass}
                     />
                   </div>
@@ -1534,7 +1561,7 @@ export default function ManagerForm() {
                   {row.email && (
                   <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{row.email}</p>
                   )}
-                  {row.location && (
+                  {!isGll && row.location && (
                   <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">{row.location}</p>
                   )}
                   </div>
@@ -1567,11 +1594,22 @@ export default function ManagerForm() {
                   {isRemoveAction ? 'Removed users search results' : 'Directory search results'}
                   </caption>
                   <colgroup>
+                  {isGll ? (
+                  <>
+                  <col className="w-[25%]" />
+                  <col className="w-[45%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[15%]" />
+                  </>
+                  ) : (
+                  <>
                   <col className="w-[18%]" />
                   <col className="w-[36%]" />
                   <col className="w-[18%]" />
                   <col className="w-[14%]" />
                   <col className="w-[14%]" />
+                  </>
+                  )}
                   </colgroup>
                   <thead>
                   <tr className={directoryTableHeadClass}>
@@ -1587,12 +1625,14 @@ export default function ManagerForm() {
                   >
                   Email
                   </th>
+                  {!isGll && (
                   <th
                   scope="col"
                   className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]"
                   >
                   {isHealthFitness ? 'Client' : 'Location'}
                   </th>
+                  )}
                   <th
                   scope="col"
                   className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-brand-secondary)]"
@@ -1610,14 +1650,14 @@ export default function ManagerForm() {
                   <tbody className="divide-y divide-[var(--color-manager-border)]">
                   {!showDirectoryResults && !showInitialDirectoryLoading && !isSearchTooBroad && (
                   <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
+                  <td colSpan={isGll ? 4 : 5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
                   {directoryEmptyMessage}
                   </td>
                   </tr>
                   )}
                   {showInitialDirectoryLoading && (
                   <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
+                  <td colSpan={isGll ? 4 : 5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
                   <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   {directoryLoadingLabel}
@@ -1627,14 +1667,14 @@ export default function ManagerForm() {
                   )}
                   {!showInitialDirectoryLoading && directoryError && displayResults.length === 0 && (
                   <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-red-600">
+                  <td colSpan={isGll ? 4 : 5} className="px-3 py-8 text-center text-red-600">
                   {directoryError}
                   </td>
                   </tr>
                   )}
                   {isSearchTooBroad && !showInitialDirectoryLoading && displayResults.length === 0 && (
                   <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
+                  <td colSpan={isGll ? 4 : 5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
                   {directoryEmptyMessage}
                   </td>
                   </tr>
@@ -1645,7 +1685,7 @@ export default function ManagerForm() {
                   !isSearchTooBroad &&
                   displayResults.length === 0 && (
                   <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
+                  <td colSpan={isGll ? 4 : 5} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
                   {directoryEmptyMessage}
                   </td>
                   </tr>
@@ -1684,11 +1724,13 @@ export default function ManagerForm() {
                   <td className="px-3.5 py-3 align-top text-left font-normal text-[var(--color-text-secondary)] break-all">
                   {row.email || '-'}
                   </td>
+                  {!isGll && (
                   <td className="px-3.5 py-3 align-top text-center font-normal text-[var(--color-text-secondary)]">
                   <span className="block break-words font-normal leading-snug">
                   {row.location || '-'}
                   </span>
                   </td>
+                  )}
                   <td className="px-3.5 py-3 align-top text-center whitespace-nowrap font-normal text-[var(--color-text-secondary)]">
                   {dateLabel || '-'}
                   </td>

@@ -190,7 +190,7 @@ class TestDirectoryPersonMatch:
         assert tags == [TAG_ALREADY_REMOVED]
 
         tags = duplicate_tags_for_person(db, _person(email=email), action="Add")
-        assert tags == [TAG_ALREADY_REMOVED]
+        assert tags == []
 
 
 class TestActiveRoster:

@@ -608,6 +608,7 @@ class DuplicateGroupDetailOut(BaseModel):
     createdAt: Optional[datetime] = None
     resolvedAt: Optional[datetime] = None
     directoryPersonId: Optional[str] = None
+    directoryPerson: Optional[Any] = None
     representativeRequestId: Optional[str] = None
     members: List[DuplicateGroupMemberOut] = []
     # Aggregated classification counts: { alreadyExists, duplicateCount, potentialCount }

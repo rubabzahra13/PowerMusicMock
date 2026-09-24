@@ -40,12 +40,17 @@ def _directory_conflict_for_request(
     req: models.ManagerRequest,
 ) -> Optional[models.ManagerRequest]:
     person = request_person_for_match(req)
-    from app.directory_person_match import _probe_handled_rows
+    from app.directory_person_match import _probe_handled_rows, _is_gll
+    from app.duplicate_matching import is_healthtech_partner
+    is_ht = is_healthtech_partner(db, req.partner_id)
+    gll = _is_gll(db, req.partner_id)
 
     return find_directory_conflict(
         person=person,
         action=req.action or "",
         directory_rows=_probe_handled_rows(db, person, partner_id=req.partner_id),
+        is_healthtech=is_ht,
+        is_gll=gll,
     )
 
 

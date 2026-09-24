@@ -24,6 +24,7 @@ from app.duplicate_matching import (
     are_requests_dismissed,
     get_all_dismissed_pairs,
     is_healthtech_from_request,
+    is_gll_from_request,
     match_classification,
     match_classification_for_partner,
 )
@@ -125,7 +126,6 @@ def _directory_candidates(
     q = db.query(models.ManagerRequest).filter(
         models.ManagerRequest.status == "handled",
         models.ManagerRequest.outcome.in_(("Added", "Removed")),
-        models.ManagerRequest.archived_at.is_(None),
     )
     if req.partner_id:
         q = q.filter(models.ManagerRequest.partner_id == req.partner_id)
@@ -191,9 +191,10 @@ def process_request_grouping(
 
     req_person = person_from_model(req)
 
-    # Detect whether this request belongs to the HealthTech partner so we use
-    # the correct 6-field matching logic throughout this grouping run.
+    # Detect whether this request belongs to the HealthTech or GLL partner so we
+    # use the correct matching logic throughout this grouping run.
     is_ht = is_healthtech_from_request(db, req)
+    is_gll = is_gll_from_request(db, req)
 
     # ── Step 1: scan pending new requests for a match ───────────────────────
     if pending_candidates is not None:
@@ -229,7 +230,7 @@ def process_request_grouping(
             if are_requests_dismissed(db, req.id, cand.id, dismissed_set=dismissed_set):
                 continue
             
-            classification, score = match_classification_for_partner(req_person, person_from_model(cand), is_healthtech=is_ht)
+            classification, score = match_classification_for_partner(req_person, person_from_model(cand), is_healthtech=is_ht, is_gll=is_gll)
             if classification:
                 if group_best_classification != "confirmed_duplicate" and classification == "confirmed_duplicate":
                     group_best_classification = classification
@@ -271,19 +272,21 @@ def process_request_grouping(
     if directory_candidates is not None:
         dir_candidates = [
             c for c in directory_candidates
-            if c.status == "handled" and c.outcome in ("Added", "Removed") and not c.archived_at and (not req.partner_id or c.partner_id == req.partner_id)
+            if c.status == "handled" and c.outcome in ("Added", "Removed") and (not req.partner_id or c.partner_id == req.partner_id)
         ]
     else:
         dir_candidates = _directory_candidates(db, req)
 
     dir_match_person: Optional[models.ManagerRequest] = None
+    dir_match_classification: Optional[str] = None
 
     for dir_cand in dir_candidates:
         if are_requests_dismissed(db, req.id, dir_cand.id, dismissed_set=dismissed_set):
             continue
-        classification, _ = match_classification_for_partner(req_person, person_from_model(dir_cand), is_healthtech=is_ht)
+        classification, _ = match_classification_for_partner(req_person, person_from_model(dir_cand), is_healthtech=is_ht, is_gll=is_gll)
         if classification:
             dir_match_person = dir_cand
+            dir_match_classification = classification
             break
 
     # ── Step 3: determine final classification ──────────────────────────────
@@ -292,7 +295,10 @@ def process_request_grouping(
     elif best_match_req:
         final_classification = best_group_classification
     elif dir_match_person:
-        final_classification = "already_removed" if dir_match_person.outcome == "Removed" else "already_exists"
+        if dir_match_person.outcome == "Removed":
+            final_classification = "already_removed" if dir_match_classification == "confirmed_duplicate" else "potential_duplicate"
+        else:
+            final_classification = "already_exists" if dir_match_classification == "confirmed_duplicate" else "potential_duplicate"
     else:
         return None  # No match found — no group needed
 
@@ -315,7 +321,7 @@ def process_request_grouping(
                 group.directory_person_id = dir_match_person.id
             # Absorb any other ungrouped candidates into this group too.
             _absorb_ungrouped_matches(
-                db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands, is_healthtech=is_ht
+                db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands, is_healthtech=is_ht, is_gll=is_gll
             )
             members = [req] + [c for c in p_cands if c.duplicate_group_id == group.id]
             _sync_group_representative_and_tags(db, group, member_requests=members)
@@ -342,7 +348,7 @@ def process_request_grouping(
 
     # Absorb any remaining ungrouped candidates that also match.
     _absorb_ungrouped_matches(
-        db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands, dismissed_set=dismissed_set, is_healthtech=is_ht
+        db, group, req_person, exclude_id=req.id, ungrouped_candidates=p_cands, dismissed_set=dismissed_set, is_healthtech=is_ht, is_gll=is_gll
     )
 
     members = [req] + [c for c in p_cands if c.duplicate_group_id == group.id]
@@ -362,6 +368,7 @@ def _absorb_ungrouped_matches(
     ungrouped_candidates: Optional[List[models.ManagerRequest]] = None,
     dismissed_set: Optional[Set[Tuple[str, str]]] = None,
     is_healthtech: bool = False,
+    is_gll: bool = False,
 ) -> None:
     """Pull any still-ungrouped pending requests that match req_person into *group*."""
     if ungrouped_candidates is not None:
@@ -391,7 +398,7 @@ def _absorb_ungrouped_matches(
         if is_request_dismissed_from_group(db, cand.id, group.id):
             continue
         
-        classification, score = match_classification_for_partner(req_person, person_from_model(cand), is_healthtech=is_healthtech)
+        classification, score = match_classification_for_partner(req_person, person_from_model(cand), is_healthtech=is_healthtech, is_gll=is_gll)
         if classification:
             cand.duplicate_group_id = group.id
             upgraded = _best_classification(group.classification, classification)
@@ -462,10 +469,12 @@ def _sync_group_representative_and_tags(
     if len(members) >= 2:
         predecessor = members[1]
         is_ht_group = is_healthtech_from_request(db, latest_req)
+        is_gll_group = is_gll_from_request(db, latest_req)
         result = match_classification_for_partner(
             person_from_model(latest_req),
             person_from_model(predecessor),
             is_healthtech=is_ht_group,
+            is_gll=is_gll_group,
         )
         # match_classification_for_partner returns bare None when last names are missing,
         # or (classification, score) otherwise.
@@ -479,12 +488,33 @@ def _sync_group_representative_and_tags(
 
     # ── Directory tag is orthogonal to the peer relationship ───────────────────
     if group.directory_person_id:
-        from app.manager_request_tags import TAG_ALREADY_REMOVED, TAG_ALREADY_EXISTS
+        from app.manager_request_tags import TAG_ALREADY_REMOVED, TAG_ALREADY_EXISTS, TAG_POTENTIAL_DUPLICATE, TAG_CONFIRMED_DUPLICATE
         dir_person = db.query(models.ManagerRequest).filter_by(id=group.directory_person_id).first()
-        if dir_person and dir_person.outcome == "Removed":
-            tags_to_add.append(TAG_ALREADY_REMOVED)
-        else:
-            tags_to_add.append(TAG_ALREADY_EXISTS)
+        if dir_person:
+            is_ht_group = is_healthtech_from_request(db, latest_req)
+            is_gll_group = is_gll_from_request(db, latest_req)
+            result = match_classification_for_partner(
+                person_from_model(latest_req),
+                person_from_model(dir_person),
+                is_healthtech=is_ht_group,
+                is_gll=is_gll_group,
+            )
+            dir_classification = None
+            if isinstance(result, tuple):
+                dir_classification, _ = result
+
+            if dir_person.outcome == "Removed":
+                if dir_classification == "confirmed_duplicate":
+                    tags_to_add.append(TAG_ALREADY_REMOVED)
+                elif dir_classification == "potential_duplicate":
+                    if TAG_POTENTIAL_DUPLICATE not in tags_to_add:
+                        tags_to_add.append(TAG_POTENTIAL_DUPLICATE)
+            else:
+                if dir_classification == "confirmed_duplicate":
+                    tags_to_add.append(TAG_ALREADY_EXISTS)
+                elif dir_classification == "potential_duplicate":
+                    if TAG_POTENTIAL_DUPLICATE not in tags_to_add:
+                        tags_to_add.append(TAG_POTENTIAL_DUPLICATE)
 
     # Strip any stale peer-duplicate tags before applying the freshly computed one
     # so we never accumulate both confirmed duplicate and potential duplicate.

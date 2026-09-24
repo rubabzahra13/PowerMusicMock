@@ -1685,6 +1685,17 @@ def get_duplicate_group_details(
     # Compute aggregated classification summary for this group
     classification_summary = compute_group_classification_summary(db, group, members=members)
 
+    directory_person = None
+    if group.directory_person_id:
+        dir_row = (
+            db.query(models.ManagerRequest)
+            .filter(models.ManagerRequest.id == group.directory_person_id)
+            .first()
+        )
+        if dir_row:
+            from app.manager_request_serialize import directory_person_to_api_dict
+            directory_person = directory_person_to_api_dict(dir_row, db=db)
+
     return {
         "id": group.id,
         "partnerId": group.partner_id,
@@ -1693,6 +1704,7 @@ def get_duplicate_group_details(
         "createdAt": group.created_at,
         "resolvedAt": group.resolved_at,
         "directoryPersonId": group.directory_person_id,
+        "directoryPerson": directory_person,
         "representativeRequestId": group.representative_request_id,
         "members": member_out,
         "classificationSummary": classification_summary,

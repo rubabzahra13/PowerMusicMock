@@ -1,12 +1,19 @@
 """Duplicate matching logic supporting name derivatives, location probes, and false-positive dismissal checks.
 
-Both PureGym and Health Fitness share the same 4-field duplicate matching:
+PureGym and Health Fitness share the same 4-field duplicate matching:
   first name, last name, email, location
 
 For Health Fitness, the "location" field stores what the partner calls "client".
-The is_healthtech detection helper is retained so call-sites remain unchanged,
-but match_classification_for_partner() now delegates to the same 4-field
-match_classification() for all partners.
+
+GLL uses a 3-field model (first name, last name, email) with no location scoring:
+  Last Name  = 35 pts  (Jaro-Winkler)
+  First Name = 30 pts  (Jaro-Winkler)
+  Email      = 10 pts  (exact match)
+  Max score  = 75 pts
+  Threshold  = 33.75 pts
+
+Partner isolation is enforced by the caller filtering to the correct partner_id
+before comparing requests; these functions receive already-filtered sets.
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ import re
 # ---------------------------------------------------------------------------
 
 _HEALTHTECH_PARTNER_CACHE: dict[str, bool] = {}
+_GLL_PARTNER_CACHE: dict[str, bool] = {}
 
 
 def is_healthtech_partner(db: Session, partner_id: Optional[str]) -> bool:
@@ -54,9 +62,33 @@ def is_healthtech_partner(db: Session, partner_id: Optional[str]) -> bool:
     return result
 
 
+def is_gll_partner(db: Session, partner_id: Optional[str]) -> bool:
+    """Return True when *partner_id* belongs to the GLL partner.
+
+    The check is name-based (case-insensitive substring) so it survives
+    partner renames as long as 'gll' is present in the name or slug.
+    Results are cached for the lifetime of the process.
+    """
+    if not partner_id:
+        return False
+    if partner_id in _GLL_PARTNER_CACHE:
+        return _GLL_PARTNER_CACHE[partner_id]
+    partner = db.query(models.Partner).filter(models.Partner.id == partner_id).first()
+    name_lower = (partner.name if partner else "").lower()
+    result = "gll" in name_lower
+    _GLL_PARTNER_CACHE[partner_id] = result
+    return result
+
+
+def is_gll_from_request(db: Session, req: models.ManagerRequest) -> bool:
+    """Convenience wrapper — detect GLL from a ManagerRequest instance."""
+    return is_gll_partner(db, req.partner_id)
+
+
 def is_healthtech_from_request(db: Session, req: models.ManagerRequest) -> bool:
     """Convenience wrapper — detect Health Fitness from a ManagerRequest instance."""
     return is_healthtech_partner(db, req.partner_id)
+
 
 def _norm(val: Optional[str]) -> str:
     if not val:
@@ -170,13 +202,21 @@ def get_dismissed_request_ids_for(db: Session, req_id: str) -> Set[str]:
 
 POTENTIAL_DUPLICATE_THRESHOLD = 45.0
 
+# ---------------------------------------------------------------------------
+# GLL: 3-field matching constants
+# ---------------------------------------------------------------------------
+
+# GLL has no location field; max score = 30 (first) + 35 (last) + 10 (email) = 75
+GLL_POTENTIAL_DUPLICATE_THRESHOLD = 33.75
+
+
 def match_classification(
     left: schemas.PersonInfo,
     right: schemas.PersonInfo,
 ) -> Tuple[Optional[str], float]:
     """Returns ('confirmed_duplicate' | 'potential_duplicate' | None, score).
 
-    Shared 4-field implementation for ALL partners (PureGym and Health Fitness).
+    Shared 4-field implementation for PureGym and Health Fitness.
     For Health Fitness, the "location" field stores what the partner calls "client".
     The stored value and matching logic are identical — only the UI label differs.
     """
@@ -210,17 +250,74 @@ def match_classification(
     return None, total_score
 
 
+def match_classification_gll(
+    left: schemas.PersonInfo,
+    right: schemas.PersonInfo,
+) -> Tuple[Optional[str], float]:
+    """GLL-specific 3-field matching (First Name, Last Name, Email — no Location).
+
+    Weights:
+      Last Name  = 35 pts  (Jaro-Winkler, max)
+      First Name = 30 pts  (Jaro-Winkler, max)
+      Email      = 10 pts  (exact match)
+      Max total  = 75 pts
+      Threshold  = 33.75 pts  (45% of 75)
+
+    Confirmed Duplicate: exact match on all three fields.
+    Potential Duplicate: score >= GLL_POTENTIAL_DUPLICATE_THRESHOLD.
+    Location is never scored — GLL records have NULL location.
+    """
+    first_l = _norm(left.firstName)
+    last_l = _norm(left.lastName)
+    email_l = _norm(left.email)
+
+    first_r = _norm(right.firstName)
+    last_r = _norm(right.lastName)
+    email_r = _norm(right.email)
+
+    if not last_l or not last_r:
+        return None, 0.0
+
+    same_last = (last_l == last_r)
+    same_first = (first_l == first_r)
+    same_email = bool(email_l and email_r and email_l == email_r)
+
+    # Confirmed Duplicate: exact match across all three identity fields
+    if same_first and same_last and same_email:
+        first_name_score = 30.0
+        last_name_score = 35.0
+        email_score = 10.0
+        return "confirmed_duplicate", first_name_score + last_name_score + email_score
+
+    # Potential Duplicate: weighted Jaro-Winkler scoring (no location)
+    first_name_score = jaro_winkler(first_l, first_r) * 30.0
+    last_name_score = jaro_winkler(last_l, last_r) * 35.0
+    email_score = 10.0 if same_email else 0.0
+
+    total_score = first_name_score + last_name_score + email_score
+
+    if total_score >= GLL_POTENTIAL_DUPLICATE_THRESHOLD:
+        return "potential_duplicate", total_score
+
+    return None, total_score
+
+
 def match_classification_for_partner(
     left: schemas.PersonInfo,
     right: schemas.PersonInfo,
     *,
     is_healthtech: bool = False,
+    is_gll: bool = False,
 ) -> Tuple[Optional[str], float]:
-    """Partner-aware wrapper.
+    """Partner-aware classification wrapper.
 
-    Both PureGym and Health Fitness use the same 4-field scoring. The
-    is_healthtech flag is accepted for call-site compatibility but no longer
-    selects a different algorithm — the shared match_classification() is used
-    for all partners.
+    * GLL (is_gll=True)  → 3-field engine (no location, max 75 pts, threshold 33.75)
+    * All others          → shared 4-field engine (PureGym / Health Fitness)
+
+    The is_healthtech flag is accepted for backwards compatibility but no longer
+    selects a different algorithm — PureGym and Health Fitness share the same
+    4-field match_classification().
     """
+    if is_gll:
+        return match_classification_gll(left, right)
     return match_classification(left, right)

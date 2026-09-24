@@ -14,16 +14,30 @@ export function isHealthFitnessPartner(partnerName, partnerSlug = '') {
   );
 }
 
+export function isGllPartner(partnerName, partnerSlug = '') {
+  const name = (partnerName || '').toLowerCase();
+  const slug = (partnerSlug || '').toLowerCase();
+  return (
+    slug === 'gll' ||
+    slug.includes('gll') ||
+    name === 'gll' ||
+    name.includes('gll')
+  );
+}
+
 export function getPartnerTerminology(partnerName, partnerSlug = '') {
   const isHF = isHealthFitnessPartner(partnerName, partnerSlug);
+  const isGLL = isGllPartner(partnerName, partnerSlug);
   return {
     isHealthFitness: isHF,
+    isGll: isGLL,
+    requiresLocation: !isGLL,
     managerTerm: isHF ? 'Director' : 'Manager',
     managerTermLower: isHF ? 'director' : 'manager',
     managerTermPlural: isHF ? 'Directors' : 'Managers',
-    locationTerm: isHF ? 'Client' : 'Location',
-    locationTermLower: isHF ? 'client' : 'location',
-    clubOrClientLabel: isHF ? 'Client' : 'Club Location',
+    locationTerm: isHF ? 'Client' : (isGLL ? '' : 'Location'),
+    locationTermLower: isHF ? 'client' : (isGLL ? '' : 'location'),
+    clubOrClientLabel: isHF ? 'Client' : (isGLL ? '' : 'Club Location'),
     clubOrClientPlaceholder: isHF ? 'e.g. Health Fitness HQ' : 'e.g. London Central',
     managerDetailsTitle: isHF ? 'Director Details' : 'Manager Details',
     managerFirstLabel: isHF ? 'Director First Name' : 'Manager First Name',

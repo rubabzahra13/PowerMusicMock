@@ -314,11 +314,15 @@ export default function RequestDetailView({
                         {personEmail}
                       </span>
                     </span>
-                    <span className="text-[var(--color-border-default)]" aria-hidden="true">·</span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                      <span className="text-[var(--color-text-primary)]">{personLocation}</span>
-                    </span>
+                    {!terms.isGll && (
+                      <>
+                        <span className="text-[var(--color-border-default)]" aria-hidden="true">·</span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          <span className="text-[var(--color-text-primary)]">{personLocation}</span>
+                        </span>
+                      </>
+                    )}
                   </p>
                 </div>
 
@@ -451,14 +455,16 @@ export default function RequestDetailView({
                         }
                         mono={!(attributedManager && adminEntry) || Boolean(attributedFields.rawEmail)}
                       />
-                      <MetaItem
-                        label={`${terms.managerTerm} ${terms.locationTermLower}`}
-                        value={
-                          attributedManager && adminEntry
-                            ? attributedFields.club
-                            : clubLabel
-                        }
-                      />
+                      {!terms.isGll && (
+                        <MetaItem
+                          label={`${terms.managerTerm} ${terms.locationTermLower}`}
+                          value={
+                            attributedManager && adminEntry
+                              ? attributedFields.club
+                              : clubLabel
+                          }
+                        />
+                      )}
                     </>
                   )}
                 </dl>
@@ -493,7 +499,7 @@ export default function RequestDetailView({
                 <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
                   Optional {terms.managerTermLower} details entered when this was added via Admin form.
                 </p>
-                <dl className={`grid grid-cols-1 gap-4 ${terms.isHealthFitness ? 'sm:grid-cols-1' : 'sm:grid-cols-3'} sm:gap-x-8`}>
+                <dl className={`grid grid-cols-1 gap-4 ${terms.isHealthFitness || terms.isGll ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} sm:gap-x-8`}>
                   <MetaItem label={`${terms.managerTerm} name`} value={adminOverlayFields.name} />
                   {!terms.isHealthFitness && (
                     <>
@@ -502,7 +508,9 @@ export default function RequestDetailView({
                         value={adminOverlayFields.email}
                         mono={Boolean(adminOverlayFields.rawEmail)}
                       />
-                      <MetaItem label={`${terms.managerTerm} ${terms.locationTermLower}`} value={adminOverlayFields.club} />
+                      {!terms.isGll && (
+                        <MetaItem label={`${terms.managerTerm} ${terms.locationTermLower}`} value={adminOverlayFields.club} />
+                      )}
                     </>
                   )}
                 </dl>

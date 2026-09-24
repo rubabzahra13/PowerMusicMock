@@ -550,6 +550,7 @@ export default function Signup() {
       enforceDomain: appConfig.enforceDomainCheck,
       allowedDomains: authAllowedDomains,
       isHealthFitness: terms.isHealthFitness,
+      isGll: terms.isGll,
     });
     if (!validated.ok) {
       setErrorMsg(validated.error);
@@ -576,6 +577,7 @@ export default function Signup() {
       const result = await registerManager(formData, {
         enforceDomain: appConfig.enforceDomainCheck,
         isHealthFitness: terms.isHealthFitness,
+        isGll: terms.isGll,
       });
 
       if (result.needsConfirmation) {
@@ -1250,7 +1252,7 @@ export default function Signup() {
           />
         </div>
 
-        {!terms.isHealthFitness && (
+        {!terms.isHealthFitness && !terms.isGll && (
           <div>
             <label htmlFor="signup-club" className={labelClass}>
               {terms.clubOrClientLabel}
@@ -1310,7 +1312,7 @@ export default function Signup() {
             !formData.firstName.trim() ||
             !formData.lastName.trim() ||
             !formData.email.trim() ||
-            (!terms.isHealthFitness && !formData.club.trim()) ||
+            (!terms.isHealthFitness && !terms.isGll && !formData.club.trim()) ||
             !formData.password ||
             !formData.confirmPassword ||
             !isPasswordStrongEnough(formData.password, { email: formData.email }) ||

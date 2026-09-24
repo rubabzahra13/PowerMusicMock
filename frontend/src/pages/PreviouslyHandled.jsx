@@ -4,6 +4,8 @@ import { formatTimestampSplit, formatShortDateAndTime, formatTimeOnly } from '..
 import { handledRequests } from '../data/mockData';
 import { TAG_ALREADY_EXISTS, TAG_AUTO_MAIL, TAG_PARTNER_REQUEST, TAG_UNVERIFIED, TAG_VERIFIED, requestTagVariant, requestTagLabel, sortRequestTags } from '../utils/requestTags';
 import { DataTable, Tag, Drawer, EMPTY_CELL, HoverTip } from '../components/ui';
+import { usePartnerContext } from '../context/PartnerContext';
+import { getPartnerTerminology } from '../utils/managerAuthBranding';
 
 // ─── Shared Controls Bar (same pattern as NewRequests) ────────────────────────
 function ControlsBar({
@@ -138,6 +140,8 @@ function ControlsBar({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function PreviouslyHandled() {
+  const { selectedPartner } = usePartnerContext();
+  const terms = getPartnerTerminology(selectedPartner?.name, selectedPartner?.slug);
   const [requests] = useState(handledRequests);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAction, setFilterAction] = useState('All');
@@ -280,6 +284,7 @@ export default function PreviouslyHandled() {
     {
       key: 'personLocation',
       label: 'Location',
+      hidden: terms.isGll,
       render: (_, row) => (
         <span className="text-xs text-[var(--color-text-secondary)]">{row.person.location || EMPTY_CELL}</span>
       )
@@ -306,6 +311,7 @@ export default function PreviouslyHandled() {
     {
       key: 'managerClub',
       label: 'Manager Club',
+      hidden: terms.isGll,
       render: (_, row) => (
         <span className="text-xs text-[var(--color-text-secondary)]">{row.submittedBy.club}</span>
       )

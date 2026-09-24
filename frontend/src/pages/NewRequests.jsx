@@ -397,9 +397,11 @@ function NewRequestsMobileList({
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{name}</p>
                       <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{email}</p>
+                      {!rowTerms.isGll && (
                       <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
                         {location}
                       </p>
+                      )}
                     </div>
 
                     <div className="min-w-0">
@@ -533,6 +535,8 @@ export default function Requests() {
     () => getPartnerTerminology(selectedPartner?.name, selectedPartner?.slug),
     [selectedPartner],
   );
+  const isGll = terms.isGll;
+
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1237,7 +1241,7 @@ export default function Requests() {
           <StackedTextCell
             primary={name}
             secondary={email}
-            tertiary={location}
+            tertiary={terms.isGll ? undefined : location}
           />
         );
       },
@@ -1516,11 +1520,11 @@ export default function Requests() {
               { value: 'Older', label: 'Older' }
             ]
           },
-          {
+          ...(!isGll ? [{
             label: `User ${terms.locationTerm}`, value: filterLocation, onChange: setFilterLocation,
             options: locationOptions,
             searchable: true,
-          },
+          }] : []),
           {
             label: 'Sent via', value: filterSentVia, onChange: setFilterSentVia,
             options: [
@@ -1653,7 +1657,10 @@ export default function Requests() {
             </div>
             {!terms.isHealthFitness && (
               <div className={formGridClass}>
-                {[['Email', 'email', 'email'], [terms.clubOrClientLabel, 'club', 'text']].map(([label, field, type]) => (
+                {(terms.isGll
+                  ? [['Email', 'email', 'email']]
+                  : [['Email', 'email', 'email'], [terms.clubOrClientLabel, 'club', 'text']]
+                ).map(([label, field, type]) => (
                   <div key={field}>
                     <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{label}</label>
                     <input type={type} value={managerForm[field]}
@@ -1739,6 +1746,8 @@ export default function Requests() {
                     <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'email')}</p>
                   )}
                 </div>
+                {/* Location field — hidden for GLL */}
+                {!terms.isGll && (
                 <div>
                   <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{terms.locationTerm} *</label>
                   <input
@@ -1756,6 +1765,7 @@ export default function Requests() {
                     <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'location')}</p>
                   )}
                 </div>
+                )}
 
                 <div>
                   <label

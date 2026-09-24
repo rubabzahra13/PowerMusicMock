@@ -137,13 +137,14 @@ function ControlsBar({
   filterOpen, setFilterOpen,
   filterSlots,
   sortPreset, setSortPreset,
+  sortPresets = SORT_PRESETS,
   activeFilterCount,
   dateFilter, setDateFilter
 }) {
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef(null);
   const isSortCustom = sortPreset !== DEFAULT_SORT;
-  const activeSortLabel = SORT_PRESETS.find((o) => o.value === sortPreset)?.label ?? 'Sort';
+  const activeSortLabel = sortPresets.find((o) => o.value === sortPreset)?.label ?? 'Sort';
 
   useEffect(() => {
     if (!sortOpen) return;
@@ -223,7 +224,7 @@ function ControlsBar({
 
               {sortOpen && (
                 <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-56 max-h-72 overflow-y-auto py-1 bg-white rounded-xl border border-[var(--color-brand-secondary-border)]/45 shadow-[var(--shadow-modal)]">
-                  {SORT_PRESETS.map((opt) => (
+                  {sortPresets.map((opt) => (
                     <button
                       key={opt.value}
                       type="button"
@@ -347,6 +348,10 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
       (selectedPartner?.name || '').toLowerCase().includes('health fitness'),
     [selectedPartner],
   );
+  const isGll = useMemo(
+    () => (selectedPartner?.name || '').toLowerCase().includes('gll'),
+    [selectedPartner],
+  );
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -380,7 +385,8 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
     } else if (!/\S+@\S+\.\S+/.test(formData.email.trim())) {
       errs.email = 'Enter a valid email address.';
     }
-    if (!formData.location.trim()) errs.location = 'Location is required.';
+    // GLL has no location field — skip validation
+    if (!isGll && !formData.location.trim()) errs.location = 'Location is required.';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -495,6 +501,7 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
           {errors.email && <p className="mt-1 text-xs font-medium text-red-600">{errors.email}</p>}
         </div>
 
+        {!isGll && (
         <div>
           <label htmlFor="edit-person-location" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
             {isHealthFitness ? 'Client' : 'Location'} <span className="text-red-500">*</span>
@@ -512,6 +519,8 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
           />
           {errors.location && <p className="mt-1 text-xs font-medium text-red-600">{errors.location}</p>}
         </div>
+        )}
+
       </form>
     </Modal>
   );
@@ -657,9 +666,11 @@ function DirectoryMobileList({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{name}</p>
                     <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{email}</p>
+                    {!rowTerms.isGll && (
                     <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
                       {location}
                     </p>
+                    )}
                   </div>
 
                   <div className="min-w-0">
@@ -676,7 +687,7 @@ function DirectoryMobileList({
                         {manager.secondary}
                       </p>
                     ) : null}
-                    {manager.tertiary ? (
+                    {!rowTerms.isGll && manager.tertiary ? (
                       <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
                         <span className="font-semibold">{rowTerms.locationTerm}:</span> {manager.tertiary}
                       </p>
@@ -708,6 +719,8 @@ export default function UserLedger() {
     () => getPartnerTerminology(selectedPartner?.name, selectedPartner?.slug),
     [selectedPartner],
   );
+  const isGll = terms.isGll;
+
   const [liveUserLedger, setLiveUserLedger] = useState([]);
   const [tableLoading, setTableLoading] = useState(true);
   const [highlightVersion, setHighlightVersion] = useState(0);
@@ -1238,6 +1251,7 @@ export default function UserLedger() {
       width: '14%',
       headerClassName: 'text-center',
       cellClassName: 'align-top text-left max-w-0 overflow-hidden',
+      hidden: isGll,
       render: (_, row) => {
         const { location } = formatPersonFields(row);
         return (
@@ -1508,13 +1522,17 @@ export default function UserLedger() {
             onChange: setFilterEmail,
             options: emailOptions
           },
-          {
+          ...(!isGll ? [{
             label: `User ${terms.locationTerm}`,
             value: filterLocation,
             onChange: setFilterLocation,
             options: locationOptions
-          }
+          }] : [])
         ]}
+        sortPresets={isGll
+          ? SORT_PRESETS.filter((o) => !o.value.startsWith('personLocation'))
+          : SORT_PRESETS
+        }
         sortPreset={sortPreset}
         setSortPreset={setSortPreset}
       />
@@ -1541,7 +1559,7 @@ export default function UserLedger() {
 
       <div className="hidden w-full sm:block">
         <DataTable
-          columns={columns}
+          columns={columns.filter((c) => !c.hidden)}
           rows={pageItems}
           onRowClick={handleOpenUser}
           getRowClassName={(row) => {
@@ -1558,6 +1576,7 @@ export default function UserLedger() {
           onToggleSelectAll={directoryView === 'active' ? handleToggleSelectAll : (directoryView === 'archived' ? handleToggleArchivedSelectAll : null)}
         />
       </div>
+
 
       <TablePagination
         page={page}
@@ -1657,9 +1676,11 @@ export default function UserLedger() {
                     <p className="mt-0.5 break-all font-mono text-xs text-[var(--color-text-secondary)]">
                       {personEmail}
                     </p>
-                    <p className="mt-0.5 break-words text-xs text-[var(--color-text-muted)]">
-                      {personLocation}
-                    </p>
+                    {!rowTerms.isGll && (
+                      <p className="mt-0.5 break-words text-xs text-[var(--color-text-muted)]">
+                        {personLocation}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <dl className="mt-4 space-y-2 border-t border-[var(--color-border-default)] pt-3">
@@ -1679,7 +1700,7 @@ export default function UserLedger() {
                   {manager.secondary ? (
                     <DrawerMetaRow label="Detail" value={manager.secondary} mono={!manager.muted} />
                   ) : null}
-                  {manager.tertiary ? (
+                  {!rowTerms.isGll && manager.tertiary ? (
                     <DrawerMetaRow label={rowTerms.locationTerm} value={manager.tertiary} />
                   ) : null}
                 </dl>

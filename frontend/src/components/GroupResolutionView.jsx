@@ -182,16 +182,17 @@ export default function GroupResolutionView({
   const repMember = group.members.find((m) => m.isRepresentative) || group.members[0];
   const hasDirectory = Boolean(group.directoryPersonId);
 
-  // Find Directory person for Section A by email match
+  // Find Directory person for Section A (prefer attached directoryPerson from backend)
   const dirPerson =
-    hasDirectory
+    group.directoryPerson ||
+    (hasDirectory
       ? directory.find((d) => d.id === group.directoryPersonId) ||
       directory.find(
         (d) =>
           (d.email || '').toLowerCase() ===
           (repMember?.person?.email || '').toLowerCase(),
       )
-      : null;
+      : null);
 
   const { selectedPartner, partners } = usePartners();
   const rawPartnerId = group?.partnerId || group?.partner_id || repMember?.partnerId || repMember?.partner_id;
@@ -202,6 +203,7 @@ export default function GroupResolutionView({
 
   const terms = getPartnerTerminology(partnerName, partnerSlug);
   const isHealthFitness = terms.isHealthFitness;
+  const isGll = terms.isGll;
   const managerTerm = terms.managerTerm;
   const locationTerm = terms.locationTerm;
 
@@ -898,12 +900,13 @@ export default function GroupResolutionView({
                             <MetaItem label="First Name" value={member.person.firstName || '—'} />
                             <MetaItem label="Last Name" value={member.person.lastName || '—'} />
                             <MetaItem label="Email" value={member.person.email || '—'} />
-                            <MetaItem label={locationTerm} value={member.person.location || '—'} />
+                            {!isGll && <MetaItem label={locationTerm} value={member.person.location || '—'} />}
+
                             <MetaItem label={`${managerTerm} name`} value={managerName || '—'} />
                             {!terms.isHealthFitness && (
                               <>
                                 <MetaItem label={`${managerTerm} email`} value={managerEmail || '—'} />
-                                <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={managerClub || '—'} />
+                                {!isGll && <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={managerClub || '—'} />}
                               </>
                             )}
                             <MetaItem label={`${managerTerm} notes`} value={notesText || 'No notes'} />
@@ -976,7 +979,7 @@ export default function GroupResolutionView({
               <MetaItem label="First Name" value={dirPerson.firstName} />
               <MetaItem label="Last Name" value={dirPerson.lastName} />
               <MetaItem label="Email" value={dirPerson.email} />
-              <MetaItem label={isHealthFitness ? 'Client' : 'Location'} value={dirPerson.location} />
+              {!isGll && <MetaItem label={isHealthFitness ? 'Client' : 'Location'} value={dirPerson.location} />}
               {dirPerson.status && <MetaItem label="Status" value={dirPerson.status} />}
             </dl>
           ) : (
@@ -1011,12 +1014,12 @@ export default function GroupResolutionView({
             <MetaItem label="First Name" value={currentRequest.person?.firstName} />
             <MetaItem label="Last Name" value={currentRequest.person?.lastName} />
             <MetaItem label="Email" value={currentRequest.person?.email} />
-            <MetaItem label={locationTerm} value={currentRequest.person?.location} />
+            {!isGll && <MetaItem label={locationTerm} value={currentRequest.person?.location} />}
             <MetaItem label={`${managerTerm} name`} value={currentManager.managerName} />
             {!terms.isHealthFitness && (
               <>
                 <MetaItem label={`${managerTerm} email`} value={currentManager.managerEmail} />
-                <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={currentManager.managerClub} />
+                {!isGll && <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={currentManager.managerClub} />}
               </>
             )}
             <MetaItem label={`${managerTerm} notes`} value={currentManager.notesText || 'No notes'} />
@@ -1099,12 +1102,12 @@ export default function GroupResolutionView({
               <MetaItem label="First Name" value={member.person?.firstName} />
               <MetaItem label="Last Name" value={member.person?.lastName} />
               <MetaItem label="Email" value={member.person?.email} />
-              <MetaItem label={locationTerm} value={member.person?.location} />
+              {!isGll && <MetaItem label={locationTerm} value={member.person?.location} />}
               <MetaItem label={`${managerTerm} name`} value={mgr.managerName} />
               {!terms.isHealthFitness && (
                 <>
                   <MetaItem label={`${managerTerm} email`} value={mgr.managerEmail} />
-                  <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={mgr.managerClub} />
+                  {!isGll && <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={mgr.managerClub} />}
                 </>
               )}
               <MetaItem label={`${managerTerm} notes`} value={mgr.notesText || 'No notes'} />
@@ -1220,7 +1223,7 @@ export default function GroupResolutionView({
               <MetaItem label="First Name" value={form.firstName || '—'} />
               <MetaItem label="Last Name" value={form.lastName || '—'} />
               <MetaItem label="Email" value={form.email || '—'} />
-              <MetaItem label={isHealthFitness ? 'Client' : 'Location'} value={form.location || '—'} />
+              {!isGll && <MetaItem label={isHealthFitness ? 'Client' : 'Location'} value={form.location || '—'} />}
             </dl>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1254,6 +1257,7 @@ export default function GroupResolutionView({
                   placeholder="Email address"
                 />
               </div>
+              {!isGll && (
               <div>
                 <label className={LABEL_CLASS}>{isHealthFitness ? 'Client' : 'Location'}</label>
                 <input
@@ -1264,6 +1268,7 @@ export default function GroupResolutionView({
                   placeholder={isHealthFitness ? 'Client' : 'Location'}
                 />
               </div>
+              )}
             </div>
           )}
         </div>
@@ -1434,7 +1439,7 @@ export default function GroupResolutionView({
                       <MetaItem label="First Name" value={unlinkForm.firstName || '—'} />
                       <MetaItem label="Last Name" value={unlinkForm.lastName || '—'} />
                       <MetaItem label="Email" value={unlinkForm.email || '—'} />
-                      <MetaItem label={isHealthFitness ? 'Client' : 'Location'} value={unlinkForm.location || '—'} />
+                      {!isGll && <MetaItem label={isHealthFitness ? 'Client' : 'Location'} value={unlinkForm.location || '—'} />}
                     </dl>
                   ) : (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1468,6 +1473,7 @@ export default function GroupResolutionView({
                           placeholder="Email address"
                         />
                       </div>
+                      {!isGll && (
                       <div>
                         <label className={LABEL_CLASS}>{isHealthFitness ? 'Client' : 'Location'}</label>
                         <input
@@ -1478,6 +1484,7 @@ export default function GroupResolutionView({
                           placeholder={isHealthFitness ? 'Client' : 'Location'}
                         />
                       </div>
+                      )}
                     </div>
                   )}
                 </div>

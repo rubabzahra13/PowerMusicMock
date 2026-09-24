@@ -12,7 +12,7 @@ from app import models, schemas
 from app.intake_persons import bootstrap_intake_persons, get_auto_mail_snapshot, get_partner_snapshot
 from app.manager_request_tags import TAG_ALREADY_EXISTS
 from app.person_match import person_from_model, same_person, same_person_for_partner
-from app.duplicate_matching import is_healthtech_partner
+from app.duplicate_matching import is_healthtech_partner, is_gll_partner
 
 # Only true Directory ledger outcomes. GroupResolved (and similar) are
 # historical merge inputs and must never appear as Directory people.
@@ -58,6 +58,11 @@ def _person_probe_fields(person: schemas.PersonInfo) -> tuple[str, str, str, str
     )
 
 
+def _is_gll(db: Optional[Session], partner_id: Optional[str]) -> bool:
+    """Thin wrapper — returns True when this partner is GLL."""
+    return is_gll_partner(db, partner_id) if db and partner_id else False
+
+
 def _roster_sql_candidates(
     db: Session,
     *,
@@ -67,6 +72,8 @@ def _roster_sql_candidates(
     location: str = "",
     partner_id: Optional[str] = None,
     limit: int = 80,
+    is_gll: bool = False,
+    include_archived: bool = True,
 ) -> List[models.ManagerRequest]:
     """Fetch a small set of handled rows that may match a person probe."""
     clauses = []
@@ -79,45 +86,50 @@ def _roster_sql_candidates(
                 func.lower(models.ManagerRequest.person_last_name) == last,
             )
         )
-    if email and location:
-        clauses.append(
-            and_(
-                func.lower(models.ManagerRequest.person_email) == email,
-                func.lower(models.ManagerRequest.person_location) == location,
+    # Location-based clauses are omitted for GLL (no location field)
+    if not is_gll:
+        if email and location:
+            clauses.append(
+                and_(
+                    func.lower(models.ManagerRequest.person_email) == email,
+                    func.lower(models.ManagerRequest.person_location) == location,
+                )
             )
-        )
-    if first and last and location:
-        clauses.append(
-            and_(
-                func.lower(models.ManagerRequest.person_first_name) == first,
-                func.lower(models.ManagerRequest.person_last_name) == last,
-                func.lower(models.ManagerRequest.person_location) == location,
+        if first and last and location:
+            clauses.append(
+                and_(
+                    func.lower(models.ManagerRequest.person_first_name) == first,
+                    func.lower(models.ManagerRequest.person_last_name) == last,
+                    func.lower(models.ManagerRequest.person_location) == location,
+                )
             )
-        )
-    if first and location:
-        clauses.append(
-            and_(
-                func.lower(models.ManagerRequest.person_first_name) == first,
-                func.lower(models.ManagerRequest.person_location) == location,
+        if first and location:
+            clauses.append(
+                and_(
+                    func.lower(models.ManagerRequest.person_first_name) == first,
+                    func.lower(models.ManagerRequest.person_location) == location,
+                )
             )
-        )
-    if last and location:
-        clauses.append(
-            and_(
-                func.lower(models.ManagerRequest.person_last_name) == last,
-                func.lower(models.ManagerRequest.person_location) == location,
+        if last and location:
+            clauses.append(
+                and_(
+                    func.lower(models.ManagerRequest.person_last_name) == last,
+                    func.lower(models.ManagerRequest.person_location) == location,
+                )
             )
-        )
 
     if not clauses:
         return []
 
-    query = db.query(models.ManagerRequest).filter(
+    filters = [
         models.ManagerRequest.status == "handled",
         models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
-        models.ManagerRequest.archived_at.is_(None),
         or_(*clauses),
-    )
+    ]
+    if not include_archived:
+        filters.append(models.ManagerRequest.archived_at.is_(None))
+
+    query = db.query(models.ManagerRequest).filter(*filters)
     if partner_id:
         query = query.filter(models.ManagerRequest.partner_id == partner_id)
     return query.order_by(models.ManagerRequest.handled_at.desc()).limit(limit).all()
@@ -131,6 +143,7 @@ def _probe_handled_rows(
 ) -> List[models.ManagerRequest]:
     """Handled rows relevant to one person for conflict and roster checks."""
     email, first, last, location = _person_probe_fields(person)
+    gll = _is_gll(db, partner_id)
     by_id: dict[str, models.ManagerRequest] = {}
 
     for row in _roster_sql_candidates(
@@ -140,6 +153,8 @@ def _probe_handled_rows(
         last=last,
         location=location,
         partner_id=partner_id,
+        is_gll=gll,
+        include_archived=True,
     ):
         by_id[row.id] = row
 
@@ -147,7 +162,6 @@ def _probe_handled_rows(
         query = db.query(models.ManagerRequest).filter(
             models.ManagerRequest.status == "handled",
             models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
-            models.ManagerRequest.archived_at.is_(None),
             func.lower(models.ManagerRequest.person_email) == email,
         )
         if partner_id:
@@ -166,11 +180,12 @@ def _dedupe_current_outcome(
     db: Optional[Session] = None,
 ) -> List[models.ManagerRequest]:
     is_ht = is_healthtech_partner(db, partner_id) if db and partner_id else False
+    gll = _is_gll(db, partner_id)
     roster: List[models.ManagerRequest] = []
     represented: List[models.ManagerRequest] = []
 
     for row in sorted(rows, key=_handled_at_sort_key, reverse=True):
-        if any(same_person_for_partner(row, prior, is_healthtech=is_ht) for prior in represented):
+        if any(same_person_for_partner(row, prior, is_healthtech=is_ht, is_gll=gll) for prior in represented):
             continue
         represented.append(row)
         if row.outcome == outcome:
@@ -187,10 +202,11 @@ def find_latest_directory_match(
     directory_rows: List[models.ManagerRequest],
     *,
     is_healthtech: bool = False,
+    is_gll: bool = False,
 ) -> Optional[models.ManagerRequest]:
     """Most recent handled row for the same person (partner-aware same_person rules)."""
     for row in sorted(directory_rows, key=_handled_at_sort_key, reverse=True):
-        if same_person_for_partner(row, person, is_healthtech=is_healthtech):
+        if same_person_for_partner(row, person, is_healthtech=is_healthtech, is_gll=is_gll):
             return row
     return None
 
@@ -201,10 +217,11 @@ def find_directory_conflict(
     action: str,
     directory_rows: List[models.ManagerRequest],
     is_healthtech: bool = False,
+    is_gll: bool = False,
 ) -> Optional[models.ManagerRequest]:
     """Directory row that triggers already-exists or already-removed for this request action."""
-    match = find_latest_directory_match(person, directory_rows, is_healthtech=is_healthtech)
-    if match:
+    match = find_latest_directory_match(person, directory_rows, is_healthtech=is_healthtech, is_gll=is_gll)
+    if match and directory_outcome_conflicts(action, match.outcome):
         return match
     return None
 
@@ -266,9 +283,10 @@ def roster_snapshot_rows(
 def _dedupe_latest_person(rows: List[models.ManagerRequest], *, partner_id: Optional[str] = None, db: Optional[Session] = None) -> List[models.ManagerRequest]:
     """Keep the most recent handled row per person, regardless of Added/Removed."""
     is_ht = is_healthtech_partner(db, partner_id) if db and partner_id else False
+    gll = _is_gll(db, partner_id)
     represented: List[models.ManagerRequest] = []
     for row in sorted(rows, key=_handled_at_sort_key, reverse=True):
-        if any(same_person_for_partner(row, prior, is_healthtech=is_ht) for prior in represented):
+        if any(same_person_for_partner(row, prior, is_healthtech=is_ht, is_gll=gll) for prior in represented):
             continue
         represented.append(row)
     return represented
@@ -346,10 +364,12 @@ def find_roster_person(
 ) -> Optional[models.ManagerRequest]:
     """Latest directory row when the person is currently Added to the roster."""
     is_ht = is_healthtech_partner(db, partner_id)
+    gll = _is_gll(db, partner_id)
     match = find_latest_directory_match(
         person,
         _probe_handled_rows(db, person, partner_id=partner_id),
         is_healthtech=is_ht,
+        is_gll=gll,
     )
     if match and match.outcome == "Added":
         return match
@@ -365,6 +385,7 @@ def roster_match_candidates(
 ) -> List[models.ManagerRequest]:
     """Roster rows that match the person probe (same_person rules)."""
     email, first, last, location = _person_probe_fields(person)
+    gll = _is_gll(db, partner_id)
     candidates = _roster_sql_candidates(
         db,
         email=email,
@@ -372,10 +393,11 @@ def roster_match_candidates(
         last=last,
         location=location,
         partner_id=partner_id,
+        is_gll=gll,
     )
     roster = _dedupe_latest_roster(candidates, partner_id=partner_id, db=db)
     is_ht = is_healthtech_partner(db, partner_id)
-    matches = [row for row in roster if same_person_for_partner(row, person, is_healthtech=is_ht)]
+    matches = [row for row in roster if same_person_for_partner(row, person, is_healthtech=is_ht, is_gll=gll)]
     return matches[:limit]
 
 
@@ -398,11 +420,13 @@ def duplicate_tags_for_person(
     partner_id: Optional[str] = None,
 ) -> List[str]:
     is_ht = is_healthtech_partner(db, partner_id)
+    gll = _is_gll(db, partner_id)
     match = find_directory_conflict(
         person=person,
         action=action,
         directory_rows=_probe_handled_rows(db, person, partner_id=partner_id),
         is_healthtech=is_ht,
+        is_gll=gll,
     )
     if match:
         from app.manager_request_tags import TAG_ALREADY_REMOVED
