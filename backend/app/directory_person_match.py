@@ -140,6 +140,7 @@ def _probe_handled_rows(
     person: schemas.PersonInfo,
     *,
     partner_id: Optional[str] = None,
+    include_archived: bool = False,
 ) -> List[models.ManagerRequest]:
     """Handled rows relevant to one person for conflict and roster checks."""
     email, first, last, location = _person_probe_fields(person)
@@ -154,7 +155,7 @@ def _probe_handled_rows(
         location=location,
         partner_id=partner_id,
         is_gll=gll,
-        include_archived=True,
+        include_archived=include_archived,
     ):
         by_id[row.id] = row
 
@@ -164,6 +165,8 @@ def _probe_handled_rows(
             models.ManagerRequest.outcome.in_(DIRECTORY_LEDGER_OUTCOMES),
             func.lower(models.ManagerRequest.person_email) == email,
         )
+        if not include_archived:
+            query = query.filter(models.ManagerRequest.archived_at.is_(None))
         if partner_id:
             query = query.filter(models.ManagerRequest.partner_id == partner_id)
         for row in query.order_by(models.ManagerRequest.handled_at.desc()).limit(25).all():

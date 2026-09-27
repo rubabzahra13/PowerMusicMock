@@ -25,28 +25,47 @@ export function isGllPartner(partnerName, partnerSlug = '') {
   );
 }
 
+export function isJdGymsPartner(partnerName, partnerSlug = '') {
+  const name = (partnerName || '').toLowerCase();
+  const slug = (partnerSlug || '').toLowerCase();
+  return (
+    slug === 'jd-gyms' ||
+    slug === 'jdgyms' ||
+    slug === 'jd' ||
+    slug.includes('jd-gyms') ||
+    slug.includes('jdgyms') ||
+    name.includes('jd gyms') ||
+    name.includes('jdgyms') ||
+    name === 'jd'
+  );
+}
+
 export function getPartnerTerminology(partnerName, partnerSlug = '') {
   const isHF = isHealthFitnessPartner(partnerName, partnerSlug);
   const isGLL = isGllPartner(partnerName, partnerSlug);
+  const isJD = isJdGymsPartner(partnerName, partnerSlug);
   return {
     isHealthFitness: isHF,
     isGll: isGLL,
+    isJdGyms: isJD,
     requiresLocation: !isGLL,
-    managerTerm: isHF ? 'Director' : 'Manager',
-    managerTermLower: isHF ? 'director' : 'manager',
-    managerTermPlural: isHF ? 'Directors' : 'Managers',
-    locationTerm: isHF ? 'Client' : (isGLL ? '' : 'Location'),
-    locationTermLower: isHF ? 'client' : (isGLL ? '' : 'location'),
-    clubOrClientLabel: isHF ? 'Client' : (isGLL ? '' : 'Club Location'),
+    managerTerm: 'Manager',
+    managerTermLower: 'manager',
+    managerTermPlural: 'Managers',
+    locationTerm: isHF ? 'Client' : (isGLL ? 'Gym Location' : 'Location'),
+    locationTermLower: isHF ? 'client' : (isGLL ? 'gym location' : 'location'),
+    clubOrClientLabel: isHF ? 'Client' : (isGLL ? 'Gym Location' : 'Club Location'),
     clubOrClientPlaceholder: isHF ? 'e.g. Health Fitness HQ' : 'e.g. London Central',
-    managerDetailsTitle: isHF ? 'Director Details' : 'Manager Details',
-    managerFirstLabel: isHF ? 'Director First Name' : 'Manager First Name',
-    managerLastLabel: isHF ? 'Director Last Name' : 'Manager Last Name',
+    managerDetailsTitle: 'Manager Details',
+    managerFirstLabel: 'Manager First Name',
+    managerLastLabel: 'Manager Last Name',
     managerEmailLabel: 'Manager Email',
-    managerClubLabel: isHF ? 'Director Client' : 'Manager Club Location',
+    managerClubLabel: isHF ? 'Client' : 'Manager Club Location',
+    directorDetailsTitle: 'Director Details',
+    directorFirstLabel: 'Director First Name',
+    directorLastLabel: 'Director Last Name',
     roleBadge: (name) => {
       const p = name?.trim();
-      if (isHF) return p ? `Manager ${p}` : 'Manager';
       return p ? `${p} Manager` : 'Manager';
     },
   };

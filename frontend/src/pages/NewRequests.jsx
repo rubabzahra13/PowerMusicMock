@@ -512,6 +512,7 @@ const emptyPersonForm = () => ({
   lastName: '',
   email: '',
   location: '',
+  role: '',
   notes: '',
 });
 
@@ -751,8 +752,11 @@ export default function Requests() {
   };
 
   const personValidation = useMemo(
-    () => validatePersonForms(personForms),
-    [personForms],
+    () => validatePersonForms(personForms, {
+      locationLabel: terms.isGll ? 'Gym Location' : terms.locationTerm,
+      requiresLocation: !terms.isGll,
+    }),
+    [personForms, terms.isGll, terms.locationTerm],
   );
 
   const updatePersonForm = (index, field, value) => {
@@ -945,11 +949,12 @@ export default function Requests() {
         body: JSON.stringify({
           submittedBy: managerForm,
           partnerId: selectedPartnerId || undefined,
-          people: normalizedPeople.map(({ firstName, lastName, email, location, notes }) => ({
+          people: normalizedPeople.map(({ firstName, lastName, email, location, role, notes }) => ({
             firstName,
             lastName,
             email,
             location,
+            role: terms.isJdGyms && role?.trim() ? role.trim() : undefined,
             notes: notes?.trim() || undefined,
           })),
           action: action,
@@ -1232,24 +1237,47 @@ export default function Requests() {
     {
       key: 'person',
       label: 'Person',
-      width: '16%',
+      width: terms.isHealthFitness ? '14%' : terms.isJdGyms ? '14%' : '16%',
       headerClassName: 'text-center',
       cellClassName: 'align-top max-w-0 overflow-hidden text-left',
       render: (_, row) => {
         const { name, email, location } = formatPersonFields(row.person);
+        const gllLocation = terms.isGll
+          ? (row.person?.location || '').trim() || 'No location'
+          : undefined;
         return (
           <StackedTextCell
             primary={name}
             secondary={email}
-            tertiary={terms.isGll ? undefined : location}
+            tertiary={terms.isGll ? gllLocation : location}
           />
         );
       },
     },
+    ...(terms.isHealthFitness ? [{
+      key: 'director',
+      label: 'Director',
+      width: '12%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-top max-w-0 overflow-hidden text-left',
+      render: (_, row) => {
+        const dFirst = (row.directorFirst || row.person?.directorFirst || '').trim();
+        const dLast = (row.directorLast || row.person?.directorLast || '').trim();
+        if (!dFirst && !dLast) {
+          return <span className="text-xs text-[var(--color-text-muted)]">—</span>;
+        }
+        return (
+          <StackedTextCell
+            primary={dFirst || EMPTY_CELL}
+            secondary={dLast || EMPTY_CELL}
+          />
+        );
+      },
+    }] : []),
     {
       key: 'manager',
       label: terms.managerTerm,
-      width: '15%',
+      width: terms.isHealthFitness ? '12%' : terms.isJdGyms ? '13%' : '15%',
       headerClassName: 'text-center',
       cellClassName: 'align-top max-w-0 overflow-hidden text-left',
       render: (_, row) => {
@@ -1271,6 +1299,25 @@ export default function Requests() {
         );
       }
     },
+    ...(terms.isJdGyms ? [{
+      key: 'role',
+      label: 'Role',
+      width: '10%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-middle max-w-0 overflow-hidden text-center px-1',
+      render: (_, row) => {
+        const val = row.role || row.person?.role;
+        const trimmed = (val || '').trim();
+        if (!trimmed) {
+          return <span className="text-xs text-[var(--color-text-muted)]">—</span>;
+        }
+        return (
+          <span className="text-xs font-medium text-[var(--color-text-primary)] truncate block" title={trimmed}>
+            {trimmed}
+          </span>
+        );
+      },
+    }] : []),
     {
       key: 'action',
       label: 'Type',
@@ -1287,7 +1334,7 @@ export default function Requests() {
     {
       key: 'sentVia',
       label: 'Sent via',
-      width: '7.5rem',
+      width: terms.isHealthFitness ? '6.5rem' : terms.isJdGyms ? '6.5rem' : '7.5rem',
       noShrink: true,
       headerClassName: 'text-center',
       cellClassName: 'align-middle overflow-hidden text-center',
@@ -1313,7 +1360,7 @@ export default function Requests() {
     {
       key: 'status',
       label: 'Status',
-      width: '14%',
+      width: terms.isHealthFitness ? '12%' : terms.isJdGyms ? '12%' : '14%',
       headerClassName: 'text-center',
       cellClassName: 'align-middle overflow-hidden text-center px-1',
       render: (_, row) => {
@@ -1520,11 +1567,11 @@ export default function Requests() {
               { value: 'Older', label: 'Older' }
             ]
           },
-          ...(!isGll ? [{
+          {
             label: `User ${terms.locationTerm}`, value: filterLocation, onChange: setFilterLocation,
             options: locationOptions,
             searchable: true,
-          }] : []),
+          },
           {
             label: 'Sent via', value: filterSentVia, onChange: setFilterSentVia,
             options: [
@@ -1746,7 +1793,7 @@ export default function Requests() {
                     <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'email')}</p>
                   )}
                 </div>
-                {/* Location field — hidden for GLL */}
+                {/* Location field — optional for GLL, required for others */}
                 {!terms.isGll && (
                 <div>
                   <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">{terms.locationTerm} *</label>
@@ -1764,6 +1811,38 @@ export default function Requests() {
                   {getManualFieldError(index, 'location') && (
                     <p className="mt-1 text-[11px] text-red-600">{getManualFieldError(index, 'location')}</p>
                   )}
+                </div>
+                )}
+
+                {terms.isGll && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Gym Location (Optional)</label>
+                  <input
+                    type="text"
+                    maxLength={PERSON_FIELD_LIMITS.location}
+                    value={person.location}
+                    onChange={(e) => updatePersonForm(index, 'location', e.target.value)}
+                    onBlur={() => handleManualPersonBlur(index, 'location', person.location)}
+                    ref={(node) => setManualPersonFieldRef(index, 'location', node)}
+                    placeholder="e.g. London, Manchester"
+                    className="w-full px-3 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all"
+                  />
+                </div>
+                )}
+
+                {terms.isJdGyms && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-[var(--color-text-secondary)] mb-1">Role (Optional)</label>
+                  <input
+                    type="text"
+                    maxLength={PERSON_FIELD_LIMITS.role}
+                    value={person.role || ''}
+                    onChange={(e) => updatePersonForm(index, 'role', e.target.value)}
+                    onBlur={() => handleManualPersonBlur(index, 'role', person.role)}
+                    ref={(node) => setManualPersonFieldRef(index, 'role', node)}
+                    placeholder="e.g. PT, Instructor, Assistant Manager"
+                    className="w-full px-3 py-2 bg-white border border-[var(--color-border-default)] rounded-lg text-sm placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[rgba(233,69,96,0.08)] transition-all"
+                  />
                 </div>
                 )}
 

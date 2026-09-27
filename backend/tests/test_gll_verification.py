@@ -489,3 +489,39 @@ class TestAlreadyRemovedDirectoryRecordResolution:
         assert out["directoryPerson"]["email"] == email
         assert out["directoryPerson"]["status"] == "Removed"
 
+
+class TestGllManagerLocation:
+    def test_manager_user_fields_extracts_club_as_location(self):
+        from app.models import PowermusicUser
+        from app.user_display import user_manager_fields
+
+        user = PowermusicUser(
+            id=uuid.uuid4(),
+            email="gll.manager@example.com",
+            first_name="Jane",
+            last_name="Doe",
+            club="London Central",
+            role="manager"
+        )
+        fields = user_manager_fields(user)
+        assert fields["firstName"] == "Jane"
+        assert fields["lastName"] == "Doe"
+        assert fields["email"] == "gll.manager@example.com"
+        assert fields["club"] == "London Central"
+
+    def test_manager_user_fields_handles_null_club(self):
+        from app.models import PowermusicUser
+        from app.user_display import user_manager_fields
+
+        user = PowermusicUser(
+            id=uuid.uuid4(),
+            email="gll.manager2@example.com",
+            first_name="John",
+            last_name="Smith",
+            club=None,
+            role="manager"
+        )
+        fields = user_manager_fields(user)
+        assert fields["club"] == ""
+
+

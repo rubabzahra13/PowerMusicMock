@@ -51,7 +51,10 @@ class PersonInfo(BaseModel):
     # Stores "location" for PureGym and "client" for Health Fitness.
     # Partner-specific label is applied at the presentation layer.
     location: Optional[str] = Field(default=None, max_length=200)
+    role: Optional[str] = Field(default=None, max_length=200)
     notes: Optional[str] = Field(default=None, max_length=5000)
+    directorFirst: Optional[str] = Field(default=None, max_length=100)
+    directorLast: Optional[str] = Field(default=None, max_length=100)
 
     @field_validator("firstName", "lastName", mode="before")
     @classmethod
@@ -67,6 +70,13 @@ class PersonInfo(BaseModel):
         if value is None:
             return None
         return normalize_roster_person_location(value, field_name="User Location")
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def clean_person_role(cls, value):
+        if value is None:
+            return None
+        return normalize_text(value, max_length=200, allow_empty=True, field_name="role")
 
     @field_validator("notes", mode="before")
     @classmethod
@@ -83,9 +93,12 @@ class PersonUpdateIn(BaseModel):
     firstName: str = Field(min_length=1, max_length=100)
     lastName: str = Field(min_length=1, max_length=100)
     email: str = Field(min_length=3, max_length=254)
-    # For PureGym: location. For Health Fitness: client.
+    # For PureGym: location. For Health Fitness: client. For GLL: gym location (optional).
     # Stored in the same column; label applied at presentation layer.
-    location: str = Field(min_length=1, max_length=200)
+    location: Optional[str] = Field(default=None, max_length=200)
+    role: Optional[str] = Field(default=None, max_length=200)
+    directorFirst: Optional[str] = Field(default=None, max_length=100)
+    directorLast: Optional[str] = Field(default=None, max_length=100)
 
     @field_validator("firstName", "lastName", mode="before")
     @classmethod
@@ -96,7 +109,16 @@ class PersonUpdateIn(BaseModel):
     @field_validator("location", mode="before")
     @classmethod
     def clean_person_location(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
         return normalize_roster_person_location(value, field_name="User Location")
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def clean_person_role(cls, value):
+        if value is None:
+            return None
+        return normalize_text(value, max_length=200, allow_empty=True, field_name="role")
 
     @field_validator("email", mode="before")
     @classmethod
@@ -305,6 +327,9 @@ class PersonOut(BaseModel):
     email: Optional[str] = None
     # label is "Location" for PureGym, "Client" for Health Fitness (presentation layer)
     location: Optional[str] = None
+    role: Optional[str] = None
+    directorFirst: Optional[str] = None
+    directorLast: Optional[str] = None
     status: str
     action: Optional[str] = None
     dateAdded: Optional[datetime] = None
@@ -322,6 +347,8 @@ class PersonOut(BaseModel):
     archivedAt: Optional[datetime] = None
     requestHistory: List[PersonHistoryEventOut] = []
     partnerId: Optional[str] = None
+    partnerName: Optional[str] = None
+    partnerSlug: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -330,7 +357,15 @@ class PersonOut(BaseModel):
             if "firstName" in data:
                 mgr = data.get("managerNotes") or data.get("notes")
                 adm = data.get("adminNotes")
-                return {**data, "managerNotes": mgr, "adminNotes": adm, "notes": mgr}
+                return {
+                    **data,
+                    "managerNotes": mgr,
+                    "adminNotes": adm,
+                    "notes": mgr,
+                    "role": data.get("role"),
+                    "directorFirst": data.get("directorFirst"),
+                    "directorLast": data.get("directorLast"),
+                }
             mgr_notes = data.get("notes")
             adm_notes = data.get("admin_notes")
             return {
@@ -340,6 +375,9 @@ class PersonOut(BaseModel):
                 "lastName": data.get("last_name"),
                 "email": data.get("email"),
                 "location": data.get("location"),
+                "role": data.get("role"),
+                "directorFirst": data.get("directorFirst") or data.get("director_first_name"),
+                "directorLast": data.get("directorLast") or data.get("director_last_name"),
                 "status": data.get("status"),
                 "dateAdded": data.get("date_added"),
                 "addedBy": data.get("handled_by") or data.get("added_by"),
@@ -354,6 +392,9 @@ class PersonOut(BaseModel):
                 "adminNotes": adm_notes,
                 "notes": mgr_notes,
                 "requestHistory": data.get("requestHistory") or data.get("request_history") or [],
+                "partnerId": data.get("partner_id") or data.get("partnerId"),
+                "partnerName": data.get("partnerName"),
+                "partnerSlug": data.get("partnerSlug"),
             }
 
         mgr_notes = getattr(data, "notes", None)
@@ -365,6 +406,9 @@ class PersonOut(BaseModel):
             "lastName": getattr(data, "last_name", None),
             "email": getattr(data, "email", None),
             "location": getattr(data, "location", None),
+            "role": getattr(data, "role", None),
+            "directorFirst": getattr(data, "directorFirst", None) or getattr(data, "director_first_name", None),
+            "directorLast": getattr(data, "directorLast", None) or getattr(data, "director_last_name", None),
             "status": getattr(data, "status", None),
             "dateAdded": getattr(data, "date_added", None),
             "addedBy": getattr(data, "handled_by", None) or getattr(data, "added_by", None),
@@ -378,6 +422,9 @@ class PersonOut(BaseModel):
             "managerNotes": mgr_notes,
             "adminNotes": adm_notes,
             "notes": mgr_notes,
+            "partnerId": getattr(data, "partner_id", None) or getattr(data, "partnerId", None),
+            "partnerName": getattr(data, "partnerName", None),
+            "partnerSlug": getattr(data, "partnerSlug", None),
         }
 
 class ActivityOut(BaseModel):
@@ -596,6 +643,8 @@ class DuplicateGroupMemberOut(BaseModel):
     notes: Optional[str] = None
     tags: List[str] = []
     createdBy: Optional[str] = None
+    directorFirst: Optional[str] = None
+    directorLast: Optional[str] = None
 
 
 class DuplicateGroupDetailOut(BaseModel):

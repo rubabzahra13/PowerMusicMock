@@ -13,13 +13,14 @@ export const PERSON_FIELD_LIMITS = {
   email: 254,
   // "location" for PureGym, "client" for Health Fitness — same physical field.
   location: 200,
+  role: 200,
   notes: 5000,
 };
 
 export const MIN_ROSTER_NAME_LENGTH = 2;
 export const MIN_ROSTER_LOCATION_LENGTH = 2;
 
-const PERSON_FIELDS = ['firstName', 'lastName', 'email', 'location', 'notes'];
+const PERSON_FIELDS = ['firstName', 'lastName', 'email', 'location', 'role', 'notes'];
 
 /** Strip invalid characters as the user types. */
 export function sanitizePersonFieldInput(field, value) {
@@ -32,6 +33,9 @@ export function sanitizePersonFieldInput(field, value) {
   }
   if (field === 'location') {
     return raw.replace(LOCATION_CHARS, '').slice(0, PERSON_FIELD_LIMITS.location);
+  }
+  if (field === 'role') {
+    return raw.slice(0, PERSON_FIELD_LIMITS.role);
   }
   const max = PERSON_FIELD_LIMITS[field] ?? 5000;
   return raw.slice(0, max);
@@ -97,6 +101,19 @@ export function validatePersonLocation(raw, fieldName = 'User Location') {
   return { ok: true, value: cleaned };
 }
 
+export function validatePersonRole(raw) {
+  const cleaned = sanitizePersonFieldInput('role', raw).trim();
+  if (!cleaned) {
+    return { ok: true, value: '' };
+  }
+  if (cleaned.length > PERSON_FIELD_LIMITS.role) {
+    return { ok: false, error: 'Role must be at most 200 characters.' };
+  }
+  const htmlError = rejectHtml(cleaned, 'Role');
+  if (htmlError) return { ok: false, error: htmlError };
+  return { ok: true, value: cleaned };
+}
+
 export function validatePersonNotes(raw) {
   const cleaned = sanitizePersonFieldInput('notes', raw).trim();
   if (!cleaned) {
@@ -142,8 +159,26 @@ export function validatePersonFormFields(person, { locationLabel = 'User Locatio
     if (!location.ok) errors.location = location.error;
     else values.location = location.value;
   } else {
-    values.location = '';
+    // Location is optional — preserve what the user typed (trimmed), or store empty string
+    const rawLoc = (person.location || '').trim();
+    if (rawLoc) {
+      // Validate format but not required
+      const htmlError = rawLoc.match(/<[^>]+>/) ? `${locationLabel} must not contain HTML.` : null;
+      if (htmlError) {
+        errors.location = htmlError;
+      } else if (rawLoc.length > PERSON_FIELD_LIMITS.location) {
+        errors.location = `${locationLabel} must be at most 200 characters.`;
+      } else {
+        values.location = rawLoc;
+      }
+    } else {
+      values.location = '';
+    }
   }
+
+  const role = validatePersonRole(person.role);
+  if (!role.ok) errors.role = role.error;
+  else values.role = role.value;
 
   const notes = validatePersonNotes(person.notes);
   if (!notes.ok) errors.notes = notes.error;
@@ -194,6 +229,7 @@ export function validatePersonForms(forms, options = {}) {
       lastName: result.values.lastName ?? forms[index].lastName,
       email: result.values.email ?? forms[index].email,
       location: result.values.location ?? forms[index].location,
+      role: result.values.role ?? forms[index].role ?? '',
       notes: result.values.notes ?? forms[index].notes ?? '',
     })),
   };

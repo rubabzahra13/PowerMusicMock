@@ -51,11 +51,15 @@ export function normalizeDirectoryPerson(person) {
   if (!id) return null;
 
   return {
+    ...person,
     id,
     firstName: person.firstName ?? person.first_name ?? '',
     lastName: person.lastName ?? person.last_name ?? '',
     email: person.email ?? '',
     location: person.location ?? '',
+    role: person.role ?? person.person?.role ?? '',
+    directorFirst: person.directorFirst ?? person.person?.directorFirst ?? '',
+    directorLast: person.directorLast ?? person.person?.directorLast ?? '',
     status: person.status ?? '',
     dateAdded: person.dateAdded ?? person.date_added ?? null,
   };

@@ -34,6 +34,7 @@ def person_from_model(row: models.ManagerRequest) -> schemas.PersonInfo:
         lastName=row.person_last_name or "",
         email=row.person_email or "",
         location=row.person_location or "",
+        role=getattr(row, "role", None),
     )
 
 

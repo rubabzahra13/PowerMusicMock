@@ -54,6 +54,7 @@ class ManagerRequest(Base):
     # Stores "location" for PureGym and "client" for Health Fitness.
     # The distinction is handled at the presentation layer via partner config.
     person_location = Column(String, nullable=False)
+    role = Column(String, nullable=True)
 
     action = Column(String, nullable=False)
     manager_notes = Column(Text, nullable=True)

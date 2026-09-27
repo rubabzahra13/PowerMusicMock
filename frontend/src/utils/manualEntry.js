@@ -39,12 +39,12 @@ export function formatAttributedManagerFields(submittedBy, options = {}) {
   const pSlug = options.partnerSlug || submittedBy?.partnerSlug || submittedBy?.partner_slug;
   const terms = getPartnerTerminology(pName, pSlug);
   const name = submittedByName(submittedBy);
-  const email = terms.isHealthFitness ? '' : (submittedBy?.email || '').trim();
-  const club = (terms.isHealthFitness || terms.isGll) ? '' : submittedByClub(submittedBy);
+  const email = (submittedBy?.email || '').trim();
+  const club = terms.isGll ? '' : submittedByClub(submittedBy);
   return {
     name: name || NO_MANAGER_NAME,
-    email: terms.isHealthFitness ? '' : (email || NO_MANAGER_EMAIL),
-    club: (terms.isHealthFitness || terms.isGll) ? '' : (club || `No ${terms.locationTermLower}`),
+    email: email || NO_MANAGER_EMAIL,
+    club: terms.isGll ? '' : (club || `No ${terms.locationTermLower}`),
     hasAny: Boolean(name || email || club),
     rawName: name,
     rawEmail: email,
@@ -95,8 +95,10 @@ export function getManagerColumnContent(request, options = {}) {
   if (isAutomatedSubmittedBy(submittedBy)) {
     return {
       primary: getManagerDisplayName(submittedBy, tags, request),
-      secondary: terms.isHealthFitness ? '' : AWAITING_MANAGER_HINT,
-      tertiary: (terms.isHealthFitness || terms.isGll) ? '' : (submittedBy?.club || ''),
+      secondary: AWAITING_MANAGER_HINT,
+      tertiary: terms.isGll
+        ? ((submittedBy?.club || '').trim() || 'No location')
+        : (submittedBy?.club || ''),
       muted: true,
     };
   }
@@ -114,8 +116,10 @@ export function getManagerColumnContent(request, options = {}) {
     }
     return {
       primary: fields.name,
-      secondary: terms.isHealthFitness ? '' : fields.email,
-      tertiary: (terms.isHealthFitness || terms.isGll) ? '' : fields.club,
+      secondary: fields.email,
+      tertiary: terms.isGll
+        ? ((fields.club || '').trim() || 'No location')
+        : fields.club,
       lines: null,
       muted: false,
     };
@@ -124,15 +128,17 @@ export function getManagerColumnContent(request, options = {}) {
   if (!name) {
     return {
       primary: AWAITING_MANAGER_LABEL,
-      secondary: terms.isHealthFitness ? '' : AWAITING_MANAGER_HINT,
+      secondary: AWAITING_MANAGER_HINT,
       tertiary: '',
       muted: true,
     };
   }
   return {
     primary: name,
-    secondary: terms.isHealthFitness ? '' : ((submittedBy?.email || '').trim() || 'No email'),
-    tertiary: (terms.isHealthFitness || terms.isGll) ? '' : ((submittedBy?.club || '').trim() || `No ${terms.locationTermLower}`),
+    secondary: (submittedBy?.email || '').trim() || 'No email',
+    tertiary: terms.isGll
+      ? ((submittedBy?.club || '').trim() || 'No location')
+      : ((submittedBy?.club || '').trim() || `No ${terms.locationTermLower}`),
     muted: false,
   };
 }

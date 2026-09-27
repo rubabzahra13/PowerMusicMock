@@ -1252,7 +1252,24 @@ export default function Signup() {
           />
         </div>
 
-        {!terms.isHealthFitness && !terms.isGll && (
+        {terms.isGll ? (
+          <div>
+            <label htmlFor="signup-club" className={labelClass}>
+              Gym Location <span className="font-normal text-[var(--color-text-muted)]">(Optional)</span>
+            </label>
+            <input
+              id="signup-club"
+              type="text"
+              autoComplete="organization"
+              maxLength={200}
+              placeholder="e.g. London, Manchester"
+              value={formData.club}
+              onChange={(e) => handleChange('club', e.target.value)}
+              disabled={loading}
+              className={inputClass}
+            />
+          </div>
+        ) : !terms.isHealthFitness ? (
           <div>
             <label htmlFor="signup-club" className={labelClass}>
               {terms.clubOrClientLabel}
@@ -1270,7 +1287,7 @@ export default function Signup() {
               required
             />
           </div>
-        )}
+        ) : null}
 
         <div>
           <label htmlFor="signup-password" className={labelClass}>

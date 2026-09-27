@@ -49,17 +49,22 @@ const PERSON_FIELD_ROWS = [
   { key: 'name', label: 'Name' },
   { key: 'email', label: 'Email', mono: true },
   { key: 'location', label: 'Location' },
+  { key: 'directorFirst', label: 'Director First Name' },
+  { key: 'directorLast', label: 'Director Last Name' },
+  { key: 'role', label: 'Role' },
 ];
 
 /**
  * One matrix: fields as rows, sources as columns.
  * Fits the available page width (table-fixed, wrapping) — no horizontal scroll.
  */
-function ComparisonMatrix({ sources, embedded = false, includeManagerRow = false, locationLabel = 'Location', isHealthFitness = false }) {
+function ComparisonMatrix({ sources, embedded = false, includeManagerRow = false, locationLabel = 'Location', isHealthFitness = false, isJdGyms = false }) {
   const rows = [
-    ...PERSON_FIELD_ROWS.map((r) => r.key === 'location' ? { ...r, label: locationLabel } : r).filter(({ key }) =>
-      sources.some((source) => source.values[key]),
-    ),
+    ...PERSON_FIELD_ROWS
+      .filter(({ key }) => key !== 'role' || isJdGyms)
+      .filter(({ key }) => (key !== 'directorFirst' && key !== 'directorLast') || isHealthFitness)
+      .map((r) => r.key === 'location' ? { ...r, label: locationLabel } : r)
+      .filter(({ key }) => sources.some((source) => source.values[key])),
     ...(includeManagerRow ? [{ key: 'manager', label: 'Sent by' }] : []),
   ];
 
@@ -363,6 +368,9 @@ function personValuesFromRequest(requestPerson) {
     name,
     email: (requestPerson.email || '').trim(),
     location: (requestPerson.location || '').trim(),
+    role: (requestPerson.role || requestPerson.person?.role || '').trim(),
+    directorFirst: (requestPerson.directorFirst || requestPerson.person?.directorFirst || '').trim(),
+    directorLast: (requestPerson.directorLast || requestPerson.person?.directorLast || '').trim(),
   };
 }
 
@@ -504,6 +512,7 @@ export default function RequestComparison({
             name: intakeField('name', 'leftValue') || requestPersonValues?.name || '',
             email: intakeField('email', 'leftValue') || requestPersonValues?.email || '',
             location: intakeField('location', 'leftValue') || requestPersonValues?.location || '',
+            role: intakeField('role', 'leftValue') || requestPersonValues?.role || '',
             manager: requestManagerValue,
           },
         }
@@ -517,6 +526,7 @@ export default function RequestComparison({
             name: adminPersonValues?.name || '',
             email: adminPersonValues?.email || '',
             location: adminPersonValues?.location || '',
+            role: adminPersonValues?.role || '',
             manager: adminSenderValue,
           },
         }
@@ -543,6 +553,11 @@ export default function RequestComparison({
               || directoryRecord?.location
               || requestPersonValues?.location
               || '',
+            role: intakeField('role', 'rightValue')
+              || directoryRecord?.role
+              || directoryRecord?.person?.role
+              || requestPersonValues?.role
+              || '',
             manager: autoSenderValue,
           },
         }
@@ -559,6 +574,7 @@ export default function RequestComparison({
                 name: `${directoryRecord.firstName || ''} ${directoryRecord.lastName || ''}`.trim(),
                 email: directoryRecord.email,
                 location: directoryRecord.location,
+                role: directoryRecord.role || directoryRecord.person?.role || '',
                 manager: directoryManager,
               }
             : {
@@ -566,6 +582,7 @@ export default function RequestComparison({
                 email: directoryMatch?.fields?.find((f) => f.field === 'email')?.rightValue || '',
                 location:
                   directoryMatch?.fields?.find((f) => f.field === 'location')?.rightValue || '',
+                role: directoryMatch?.fields?.find((f) => f.field === 'role')?.rightValue || '',
                 manager: directoryManager,
               },
         }
@@ -582,6 +599,7 @@ export default function RequestComparison({
         includeManagerRow={includeSentByRow || includeDirectory}
         locationLabel={terms.locationTerm}
         isHealthFitness={terms.isHealthFitness}
+        isJdGyms={terms.isJdGyms}
       />
     </div>
   );

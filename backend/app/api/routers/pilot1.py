@@ -89,6 +89,7 @@ from app.duplicate_group_service import (
     get_active_groups,
     get_dismiss_impact,
     get_group_members,
+    permanently_delete_requests,
 )
 from app.partner_logo_storage import (
     delete_partner_logo,
@@ -313,7 +314,16 @@ def update_person(
     req.person_first_name = payload.firstName
     req.person_last_name = payload.lastName
     req.person_email = payload.email
-    req.person_location = payload.location
+    req.person_location = (payload.location or "").strip()
+    if hasattr(payload, "role"):
+        req.role = payload.role or None
+    if getattr(payload, "directorFirst", None) is not None or getattr(payload, "directorLast", None) is not None:
+        from app.intake_persons import set_director_fields
+        set_director_fields(
+            req,
+            getattr(payload, "directorFirst", None) or "",
+            getattr(payload, "directorLast", None) or "",
+        )
 
     if req.intake_persons and isinstance(req.intake_persons, dict):
         updated_dict = dict(req.intake_persons)
@@ -321,7 +331,8 @@ def update_person(
             "firstName": payload.firstName,
             "lastName": payload.lastName,
             "email": payload.email,
-            "location": payload.location,
+            "location": (payload.location or "").strip(),
+            "role": payload.role or None,
         }
         for key in ("partner", "autoMail", "admin"):
             if key in updated_dict and isinstance(updated_dict[key], dict):
@@ -908,6 +919,15 @@ def mark_request_handled(
         req.person_last_name = (payload.finalValues.lastName or "").strip()
         req.person_email = (payload.finalValues.email or "").strip()
         req.person_location = (payload.finalValues.location or "").strip()
+        if hasattr(payload.finalValues, "role") and payload.finalValues.role is not None:
+            req.role = (payload.finalValues.role or "").strip() or None
+        if getattr(payload.finalValues, "directorFirst", None) is not None or getattr(payload.finalValues, "directorLast", None) is not None:
+            from app.intake_persons import set_director_fields
+            set_director_fields(
+                req,
+                getattr(payload.finalValues, "directorFirst", None) or "",
+                getattr(payload.finalValues, "directorLast", None) or "",
+            )
 
     if was_new:
         decrement_manager_pending_stat(db, req)
@@ -948,31 +968,16 @@ def dismiss_request(
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
 
-    if req.status == "dismissed":
-        hydrate_request_users(db, [req])
-        return request_to_api_dict(req)
+    hydrate_request_display([req])
+    hydrate_request_users(db, [req])
+    out_dict = request_to_api_dict(req)
 
     was_new = req.status == "new"
     group_id = req.duplicate_group_id
     requests_to_dismiss, survivors = collect_selective_dismiss_targets(db, req)
 
-    for r in requests_to_dismiss:
-        if r.status == "dismissed":
-            continue
-        if r.status == "new":
-            decrement_manager_pending_stat(db, r)
-            if r.manager_id:
-                invalidate_manager_request_summary(str(r.manager_id))
-        r.status = "dismissed"
-        r.handled_at = datetime.now(timezone.utc)
-        r.duplicate_group_id = None
-        _clear_duplicate_tags(r)
-        if admin.id != "dev-bypass":
-            try:
-                import uuid
-                r.handled_by_admin_id = uuid.UUID(admin.id)
-            except ValueError:
-                pass
+    dismiss_ids = [r.id for r in requests_to_dismiss]
+    permanently_delete_requests(db, dismiss_ids)
 
     if group_id:
         group = (
@@ -984,17 +989,14 @@ def dismiss_request(
             finalize_group_after_selective_dismiss(
                 db,
                 group,
-                {s.id for s in survivors},
+                {s.id for s in survivors if s.id not in set(dismiss_ids)},
                 admin.id,
             )
 
     db.commit()
-    db.refresh(req)
-    hydrate_request_display([req])
-    hydrate_request_users(db, [req])
     if was_new:
         notify_admin_requests_changed("dismiss_request")
-    return request_to_api_dict(req)
+    return out_dict
 
 
 @router.post("/api/admin/requests/bulk-dismiss", response_model=List[schemas.RequestOut])
@@ -1007,44 +1009,24 @@ def bulk_dismiss_requests(
         return []
 
     reqs = db.query(models.ManagerRequest).filter(models.ManagerRequest.id.in_(payload.ids)).all()
-    all_dismissed = []
-    any_was_new = False
-    processed_ids = set()
+    if not reqs:
+        return []
+
+    hydrate_request_display(reqs)
+    hydrate_request_users(db, reqs)
+    out_dicts = requests_to_api_dicts(db, reqs)
+
+    any_was_new = any(r.status == "new" for r in reqs)
+    all_dismiss_ids = set()
 
     for req in reqs:
-        if req.id in processed_ids:
+        if req.id in all_dismiss_ids:
             continue
-        if req.status == "dismissed":
-            all_dismissed.append(req)
-            processed_ids.add(req.id)
-            continue
-
-        was_new = req.status == "new"
-        if was_new:
-            any_was_new = True
 
         group_id = req.duplicate_group_id
         requests_to_dismiss, survivors = collect_selective_dismiss_targets(db, req)
-
-        for r in requests_to_dismiss:
-            if r.id in processed_ids or r.status == "dismissed":
-                continue
-            if r.status == "new":
-                decrement_manager_pending_stat(db, r)
-                if r.manager_id:
-                    invalidate_manager_request_summary(str(r.manager_id))
-            r.status = "dismissed"
-            r.handled_at = datetime.now(timezone.utc)
-            r.duplicate_group_id = None
-            _clear_duplicate_tags(r)
-            if admin.id != "dev-bypass":
-                try:
-                    import uuid
-                    r.handled_by_admin_id = uuid.UUID(admin.id)
-                except ValueError:
-                    pass
-            all_dismissed.append(r)
-            processed_ids.add(r.id)
+        dismiss_ids = [r.id for r in requests_to_dismiss]
+        all_dismiss_ids.update(dismiss_ids)
 
         if group_id:
             group = (
@@ -1056,21 +1038,17 @@ def bulk_dismiss_requests(
                 finalize_group_after_selective_dismiss(
                     db,
                     group,
-                    {s.id for s in survivors if s.id not in processed_ids},
+                    {s.id for s in survivors if s.id not in all_dismiss_ids},
                     admin.id,
                 )
 
+    permanently_delete_requests(db, list(all_dismiss_ids))
     db.commit()
-    for req in all_dismissed:
-        db.refresh(req)
-
-    hydrate_request_display(all_dismissed)
-    hydrate_request_users(db, all_dismissed)
     if any_was_new:
         notify_admin_requests_changed("dismiss_request_bulk")
 
-    unique_dismissed = {r.id: r for r in all_dismissed}.values()
-    return requests_to_api_dicts(db, list(unique_dismissed))
+    return out_dicts
+
 
 
 @router.post("/api/admin/requests/manual", response_model=List[schemas.RequestOut])
@@ -1661,8 +1639,10 @@ def get_duplicate_group_details(
     latest_req_id = members[-1].id if members else None
 
     member_out = []
+    from app.intake_persons import get_director_fields
     for m in members:
         api = request_to_api_dict(m, db=db, persist_auto_mail_side_effects=False)
+        dir_fields = get_director_fields(m)
         member_out.append({
             "id": m.id,
             "displayId": getattr(m, "displayId", None) or 0,
@@ -1672,7 +1652,12 @@ def get_duplicate_group_details(
                 "lastName": m.person_last_name,
                 "email": m.person_email,
                 "location": m.person_location,
+                "role": getattr(m, "role", None),
+                "directorFirst": dir_fields["firstName"] or None,
+                "directorLast": dir_fields["lastName"] or None,
             },
+            "directorFirst": dir_fields["firstName"] or None,
+            "directorLast": dir_fields["lastName"] or None,
             "action": m.action,
             "status": m.status,
             "isRepresentative": m.id == latest_req_id,

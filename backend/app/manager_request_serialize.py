@@ -430,6 +430,9 @@ def request_to_api_dict(
             if not created_by:
                 created_by = "Admin"
 
+    from app.intake_persons import get_director_fields
+    director = get_director_fields(req)
+
     payload = {
         "id": req.id,
         "displayId": getattr(req, "displayId", None) or parse_request_display_number(req.id),
@@ -441,7 +444,11 @@ def request_to_api_dict(
             "lastName": req.person_last_name,
             "email": req.person_email,
             "location": req.person_location,
+            "role": getattr(req, "role", None),
+            "directorFirst": director["firstName"] or None,
+            "directorLast": director["lastName"] or None,
         },
+        "role": getattr(req, "role", None),
         "action": req.action,
         "notes": manager_notes,
         "managerNotes": manager_notes,
@@ -475,6 +482,13 @@ def request_to_api_dict(
     admin_submitted = get_admin_submitted_by(req)
     if any(admin_submitted.values()):
         payload["adminSubmittedBy"] = admin_submitted
+
+    if director["firstName"] or director["lastName"]:
+        payload["directorFirst"] = director["firstName"]
+        payload["directorLast"] = director["lastName"]
+    else:
+        payload["directorFirst"] = None
+        payload["directorLast"] = None
 
     if db is not None:
         automated = _automated_email_meta(
@@ -691,6 +705,26 @@ def directory_person_to_api_dict(
     history_source = related_rows if related_rows is not None else [req]
     request_history = _build_directory_request_history(db, history_source)
 
+    from app.intake_persons import get_director_fields
+    director = get_director_fields(req)
+    if not (director["firstName"] or director["lastName"]):
+        source = _manager_source_for_directory_person(
+            req,
+            db=db,
+            related_rows=related_rows,
+            group_by_directory_id=group_by_directory_id,
+        )
+        if source is not None:
+            source_director = get_director_fields(source)
+            if source_director["firstName"] or source_director["lastName"]:
+                director = source_director
+        if not (director["firstName"] or director["lastName"]) and related_rows:
+            for r_row in related_rows:
+                rd = get_director_fields(r_row)
+                if rd["firstName"] or rd["lastName"]:
+                    director = rd
+                    break
+
     return {
         "id": req.id,
         "displayId": parse_request_display_number(req.id),
@@ -698,6 +732,18 @@ def directory_person_to_api_dict(
         "lastName": req.person_last_name,
         "email": req.person_email,
         "location": req.person_location,
+        "role": getattr(req, "role", None),
+        "directorFirst": director["firstName"] or None,
+        "directorLast": director["lastName"] or None,
+        "person": {
+            "firstName": req.person_first_name,
+            "lastName": req.person_last_name,
+            "email": req.person_email,
+            "location": req.person_location,
+            "role": getattr(req, "role", None),
+            "directorFirst": director["firstName"] or None,
+            "directorLast": director["lastName"] or None,
+        },
         "status": req.outcome or "",
         "action": req.action or "",
         "dateAdded": req.handled_at,
@@ -776,11 +822,16 @@ def _build_directory_request_history(
         stored_events = get_lifecycle_history(req)
         stored_ids_for_req: set[str] = set()
         for stored_event in stored_events:
+            event_req_id = stored_event.get("requestId")
+            if event_req_id and event_req_id != req.id:
+                # Exclude legacy snapshot events belonging to discarded/consumed member requests
+                continue
             eid = stored_event.get("id")
             if eid and eid not in seen:
                 seen.add(eid)
                 stored_ids_for_req.add(eid)
                 events.append(stored_event)
+
 
         # If we stored suffixed handled variants ("-handled-add" / "-handled-remove")
         # for this row, the bare live-derivation ID would produce a duplicate
@@ -895,6 +946,8 @@ def manager_request_list_item_to_api_dict(
     *,
     seen_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
+    from app.intake_persons import get_director_fields
+    director = get_director_fields(req)
     return {
         "id": req.id,
         "displayId": parse_request_display_number(req.id),
@@ -905,7 +958,13 @@ def manager_request_list_item_to_api_dict(
             "lastName": req.person_last_name,
             "email": req.person_email,
             "location": req.person_location,
+            "role": getattr(req, "role", None),
+            "directorFirst": director["firstName"] or None,
+            "directorLast": director["lastName"] or None,
         },
+        "directorFirst": director["firstName"] or None,
+        "directorLast": director["lastName"] or None,
+        "role": getattr(req, "role", None),
         "action": req.action,
         "status": req.status,
         "outcome": req.outcome,

@@ -47,6 +47,7 @@ export const EMPTY_PERSON_FORM = {
   lastName: '',
   email: '',
   location: '',
+  role: '',
   notes: '',
 };
 

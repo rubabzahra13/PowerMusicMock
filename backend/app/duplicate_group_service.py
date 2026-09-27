@@ -30,6 +30,7 @@ from app.duplicate_matching import (
 )
 from app.manager_request_tags import (
     TAG_ALREADY_EXISTS,
+    TAG_ALREADY_REMOVED,
     TAG_CONFIRMED_DUPLICATE,
     TAG_POTENTIAL_DUPLICATE,
     merge_tags,
@@ -488,7 +489,6 @@ def _sync_group_representative_and_tags(
 
     # ── Directory tag is orthogonal to the peer relationship ───────────────────
     if group.directory_person_id:
-        from app.manager_request_tags import TAG_ALREADY_REMOVED, TAG_ALREADY_EXISTS, TAG_POTENTIAL_DUPLICATE, TAG_CONFIRMED_DUPLICATE
         dir_person = db.query(models.ManagerRequest).filter_by(id=group.directory_person_id).first()
         if dir_person:
             is_ht_group = is_healthtech_from_request(db, latest_req)
@@ -518,7 +518,6 @@ def _sync_group_representative_and_tags(
 
     # Strip any stale peer-duplicate tags before applying the freshly computed one
     # so we never accumulate both confirmed duplicate and potential duplicate.
-    from app.manager_request_tags import TAG_ALREADY_REMOVED, TAG_ALREADY_EXISTS
     stale_peer_tags = {TAG_CONFIRMED_DUPLICATE, TAG_POTENTIAL_DUPLICATE, TAG_ALREADY_EXISTS, TAG_ALREADY_REMOVED}
     latest_req.tags = [t for t in (latest_req.tags or []) if t not in stale_peer_tags]
     if tags_to_add:
@@ -775,15 +774,14 @@ def collect_selective_dismiss_targets(
 ) -> Tuple[List[models.ManagerRequest], List[models.ManagerRequest]]:
     """Return (requests_to_dismiss, survivors_to_keep).
 
-    Always includes ``req``. Also includes active group siblings that are a
-    confirmed duplicate of ``req``. Potential-only siblings are survivors.
+    Only dismisses the requested ``req``. All other active group members are survivors.
     """
     to_dismiss = [req]
     survivors: List[models.ManagerRequest] = []
     if not req.duplicate_group_id or req.status != "new":
         return to_dismiss, survivors
 
-    members = (
+    survivors = (
         db.query(models.ManagerRequest)
         .filter(
             models.ManagerRequest.duplicate_group_id == req.duplicate_group_id,
@@ -792,15 +790,8 @@ def collect_selective_dismiss_targets(
         )
         .all()
     )
-    target_person = person_from_model(req)
-    is_ht_req = is_healthtech_from_request(db, req)
-    for member in members:
-        classification, _ = match_classification_for_partner(target_person, person_from_model(member), is_healthtech=is_ht_req)
-        if classification == "confirmed_duplicate":
-            to_dismiss.append(member)
-        else:
-            survivors.append(member)
     return to_dismiss, survivors
+
 
 
 def finalize_group_after_selective_dismiss(
@@ -1211,6 +1202,12 @@ def _finalize_group(
             "email": final_values.email or "",
             "location": final_values.location or "",
         }
+        if getattr(final_values, "role", None):
+            meta["final_values"]["role"] = final_values.role
+        if getattr(final_values, "directorFirst", None):
+            meta["final_values"]["directorFirst"] = final_values.directorFirst
+        if getattr(final_values, "directorLast", None):
+            meta["final_values"]["directorLast"] = final_values.directorLast
     if previous_values:
         meta["previous_values"] = {
             "firstName": previous_values.firstName or "",
@@ -1218,6 +1215,12 @@ def _finalize_group(
             "email": previous_values.email or "",
             "location": previous_values.location or "",
         }
+        if getattr(previous_values, "role", None):
+            meta["previous_values"]["role"] = previous_values.role
+        if getattr(previous_values, "directorFirst", None):
+            meta["previous_values"]["directorFirst"] = previous_values.directorFirst
+        if getattr(previous_values, "directorLast", None):
+            meta["previous_values"]["directorLast"] = previous_values.directorLast
     if admin_note:
         meta["admin_note"] = admin_note
 
@@ -1240,43 +1243,12 @@ def _snapshot_discarded_manager_requests(
     members: List[models.ManagerRequest],
     existing_stored_ids: set,
 ) -> list:
-    from app.user_display import resolve_handled_by_name, resolve_manager_name
-    from app.request_display import parse_request_display_number
-    from app.manager_request_tags import TAG_PARTNER_REQUEST, TAG_VERIFIED, has_tag as _has_tag
+    """Discarded/consumed member requests are terminal and must never be snapshotted
 
-    snapshot_events = []
-    for member in members:
-        if member.id == directory_person.id:
-            continue
-        mem_tags = member.tags or []
-        mem_display_id = parse_request_display_number(member.id)
-        mem_action = member.action or ""
-        mem_action_verb = "remove" if mem_action == "Remove" else "add" if mem_action == "Add" else mem_action.lower()
-        mem_manager_name = resolve_manager_name(member)
-        
-        has_mem_manager = (
-            _has_tag(mem_tags, TAG_PARTNER_REQUEST)
-            or _has_tag(mem_tags, TAG_VERIFIED)
-            or bool(member.manager_id)
-        )
-        if has_mem_manager and member.received_at:
-            is_admin_entry = not member.manager_id and _has_tag(mem_tags, TAG_PARTNER_REQUEST)
-            who = mem_manager_name or ("an admin" if is_admin_entry else "a manager")
-            title_prefix = "Admin entry" if is_admin_entry else "Manager requested"
-            event_id = f"{member.id}-manager-request"
-            if event_id not in existing_stored_ids:
-                snapshot_events.append({
-                    "id": event_id,
-                    "type": "manager_request",
-                    "at": member.received_at.isoformat() if hasattr(member.received_at, "isoformat") else str(member.received_at),
-                    "requestId": member.id,
-                    "displayId": mem_display_id,
-                    "action": mem_action,
-                    "title": f"{title_prefix} to {mem_action_verb or 'update'}",
-                    "detail": f"Submitted by {mem_manager_name}" if mem_manager_name else f"Submitted by {who}",
-                    "managerName": mem_manager_name or ("Admin" if is_admin_entry else None),
-                })
-    return snapshot_events
+    into the Directory record's intake_persons['history'].
+    """
+    return []
+
 
 
 # ── Case A: Resolve & Add ────────────────────────────────────────────────────
@@ -1343,6 +1315,15 @@ def resolve_group_add(
         dir_row.person_last_name = (final_values.lastName or "").strip()
         dir_row.person_email = (final_values.email or "").strip()
         dir_row.person_location = (final_values.location or "").strip()
+        if hasattr(final_values, "role") and final_values.role is not None:
+            dir_row.role = (final_values.role or "").strip() or None
+        if getattr(final_values, "directorFirst", None) is not None or getattr(final_values, "directorLast", None) is not None:
+            from app.intake_persons import set_director_fields
+            set_director_fields(
+                dir_row,
+                getattr(final_values, "directorFirst", None) or "",
+                getattr(final_values, "directorLast", None) or "",
+            )
         _apply_merge_manager_provenance(dir_row, retained_req, final_values=final_values)
         if admin_uuid:
             dir_row.handled_by_admin_id = admin_uuid
@@ -1368,10 +1349,18 @@ def resolve_group_add(
             person_last_name=(final_values.lastName or "").strip(),
             person_email=(final_values.email or "").strip(),
             person_location=(final_values.location or "").strip(),
+            role=(final_values.role or "").strip() or None if hasattr(final_values, "role") and final_values.role else None,
             intake_persons={},
             tags=[],
             partner_id=partner_id or group.partner_id,
         )
+        if getattr(final_values, "directorFirst", None) or getattr(final_values, "directorLast", None):
+            from app.intake_persons import set_director_fields
+            set_director_fields(
+                dir_row,
+                getattr(final_values, "directorFirst", None) or "",
+                getattr(final_values, "directorLast", None) or "",
+            )
         if admin_uuid:
             dir_row.handled_by_admin_id = admin_uuid
         if admin_note:
@@ -1433,11 +1422,16 @@ def resolve_group_update(
     hydrate_request_users(db, members + [directory_person])
 
     # Snapshot the current values for audit BEFORE modifying.
+    from app.intake_persons import get_director_fields
+    prev_dir = get_director_fields(directory_person)
     previous = schemas.PersonInfo(
         firstName=directory_person.person_first_name or "",
         lastName=directory_person.person_last_name or "",
         email=directory_person.person_email or "",
         location=directory_person.person_location or "",
+        role=getattr(directory_person, "role", None),
+        directorFirst=prev_dir.get("firstName") or None,
+        directorLast=prev_dir.get("lastName") or None,
     )
 
     # Update the Directory row in-place.
@@ -1445,6 +1439,15 @@ def resolve_group_update(
     directory_person.person_last_name = (final_values.lastName or "").strip()
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
+    if hasattr(final_values, "role") and final_values.role is not None:
+        directory_person.role = (final_values.role or "").strip() or None
+    if getattr(final_values, "directorFirst", None) is not None or getattr(final_values, "directorLast", None) is not None:
+        from app.intake_persons import set_director_fields
+        set_director_fields(
+            directory_person,
+            getattr(final_values, "directorFirst", None) or "",
+            getattr(final_values, "directorLast", None) or "",
+        )
 
     from app.intake_persons import append_lifecycle_history, get_lifecycle_history
     
@@ -1704,6 +1707,15 @@ def resolve_group_delete_from_directory(
     directory_person.person_last_name = (final_values.lastName or "").strip()
     directory_person.person_email = (final_values.email or "").strip()
     directory_person.person_location = (final_values.location or "").strip()
+    if hasattr(final_values, "role") and final_values.role is not None:
+        directory_person.role = (final_values.role or "").strip() or None
+    if getattr(final_values, "directorFirst", None) is not None or getattr(final_values, "directorLast", None) is not None:
+        from app.intake_persons import set_director_fields
+        set_director_fields(
+            directory_person,
+            getattr(final_values, "directorFirst", None) or "",
+            getattr(final_values, "directorLast", None) or "",
+        )
     
     manager_source = _current_request_member(
         members,
@@ -1828,6 +1840,15 @@ def resolve_group_mark_removed(
         dir_row.person_last_name = (final_values.lastName or "").strip()
         dir_row.person_email = (final_values.email or "").strip()
         dir_row.person_location = (final_values.location or "").strip()
+        if hasattr(final_values, "role") and final_values.role is not None:
+            dir_row.role = (final_values.role or "").strip() or None
+        if getattr(final_values, "directorFirst", None) is not None or getattr(final_values, "directorLast", None) is not None:
+            from app.intake_persons import set_director_fields
+            set_director_fields(
+                dir_row,
+                getattr(final_values, "directorFirst", None) or "",
+                getattr(final_values, "directorLast", None) or "",
+            )
         dir_row.archived_at = now
         
         manager_source = _current_request_member(
@@ -1862,10 +1883,18 @@ def resolve_group_mark_removed(
             person_last_name=(final_values.lastName or "").strip(),
             person_email=(final_values.email or "").strip(),
             person_location=(final_values.location or "").strip(),
+            role=(final_values.role or "").strip() or None if hasattr(final_values, "role") and final_values.role else None,
             tags=[TAG_VERIFIED, TAG_PARTNER_REQUEST, TAG_REMOVED],
             partner_id=partner_id or group.partner_id,
             archived_at=now,
         )
+        if getattr(final_values, "directorFirst", None) is not None or getattr(final_values, "directorLast", None) is not None:
+            from app.intake_persons import set_director_fields
+            set_director_fields(
+                dir_row,
+                getattr(final_values, "directorFirst", None) or "",
+                getattr(final_values, "directorLast", None) or "",
+            )
         if admin_uuid:
             dir_row.handled_by_admin_id = admin_uuid
         if admin_note:

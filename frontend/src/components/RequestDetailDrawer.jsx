@@ -324,6 +324,17 @@ export default function RequestDetailView({
                       </>
                     )}
                   </p>
+                  {terms.isHealthFitness && (
+                    <p className="mt-2 text-xs text-[var(--color-text-secondary)]">
+                      <span className="font-semibold uppercase tracking-wider text-[var(--color-brand-secondary)]">Director: </span>
+                      <span className="font-semibold text-[var(--color-text-primary)]">
+                        {[
+                          request.directorFirst || request.person?.directorFirst,
+                          request.directorLast || request.person?.directorLast,
+                        ].filter(Boolean).join(' ') || 'No director'}
+                      </span>
+                    </p>
+                  )}
                 </div>
 
                 <Tag
@@ -435,7 +446,7 @@ export default function RequestDetailView({
                     {terms.managerTerm} Form
                   </h3>
                 ) : null}
-                <dl className={`grid grid-cols-1 gap-4 ${terms.isHealthFitness ? 'sm:grid-cols-1' : 'sm:grid-cols-3'} sm:gap-x-8`}>
+                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-x-8">
                   <MetaItem
                     label={`${terms.managerTerm} name`}
                     value={
@@ -444,29 +455,23 @@ export default function RequestDetailView({
                         : getManagerDisplayName(request.submittedBy, request.tags, request)
                     }
                   />
-                  {!terms.isHealthFitness && (
-                    <>
-                      <MetaItem
-                        label={`${terms.managerTerm} email`}
-                        value={
-                          attributedManager && adminEntry
-                            ? attributedFields.email
-                            : (request.submittedBy?.email || null)
-                        }
-                        mono={!(attributedManager && adminEntry) || Boolean(attributedFields.rawEmail)}
-                      />
-                      {!terms.isGll && (
-                        <MetaItem
-                          label={`${terms.managerTerm} ${terms.locationTermLower}`}
-                          value={
-                            attributedManager && adminEntry
-                              ? attributedFields.club
-                              : clubLabel
-                          }
-                        />
-                      )}
-                    </>
-                  )}
+                  <MetaItem
+                    label={`${terms.managerTerm} email`}
+                    value={
+                      attributedManager && adminEntry
+                        ? attributedFields.email
+                        : (request.submittedBy?.email || null)
+                    }
+                    mono={!(attributedManager && adminEntry) || Boolean(attributedFields.rawEmail)}
+                  />
+                  <MetaItem
+                    label={`${terms.managerTerm} ${terms.locationTermLower}`}
+                    value={
+                      terms.isGll
+                        ? ((attributedManager && adminEntry ? attributedFields.club : clubLabel) || '').trim() || 'No location'
+                        : (attributedManager && adminEntry ? attributedFields.club : clubLabel)
+                    }
+                  />
                 </dl>
 
                 <div className="mt-5">
@@ -483,6 +488,61 @@ export default function RequestDetailView({
                     {formatManagerNotes(request)}
                   </p>
                 </div>
+
+                {terms.isJdGyms && (
+                  <div className="mt-5">
+                    <h3 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
+                      Role
+                    </h3>
+                    <p
+                      className={`max-w-3xl text-sm leading-relaxed whitespace-pre-wrap ${
+                        (request.role || request.person?.role)?.trim()
+                          ? 'text-[var(--color-text-primary)] font-medium'
+                          : 'text-[var(--color-text-muted)] italic'
+                      }`}
+                    >
+                      {(request.role || request.person?.role)?.trim() || 'No role'}
+                    </p>
+                  </div>
+                )}
+
+                {terms.isGll && (
+                  <div className="mt-5">
+                    <h3 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
+                      Gym Location
+                    </h3>
+                    <p
+                      className={`max-w-3xl text-sm leading-relaxed whitespace-pre-wrap ${
+                        (request.person?.location || '').trim()
+                          ? 'text-[var(--color-text-primary)] font-medium'
+                          : 'text-[var(--color-text-muted)] italic'
+                      }`}
+                    >
+                      {(request.person?.location || '').trim() || 'No location'}
+                    </p>
+                  </div>
+                )}
+                {terms.isHealthFitness && (
+                  <div className="mt-5">
+                    <h3 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-brand-secondary)]/75">
+                      Director
+                    </h3>
+                    <p
+                      className={`max-w-3xl text-sm leading-relaxed whitespace-pre-wrap ${
+                        (request.directorFirst || request.directorLast || request.person?.directorFirst || request.person?.directorLast)
+                          ? 'text-[var(--color-text-primary)] font-medium'
+                          : 'text-[var(--color-text-muted)] italic'
+                      }`}
+                    >
+                      {[
+                        request.directorFirst || request.person?.directorFirst,
+                        request.directorLast || request.person?.directorLast,
+                      ]
+                        .filter(Boolean)
+                        .join(' ') || 'No director'}
+                    </p>
+                  </div>
+                )}
               </div>
             ) : null}
 
@@ -508,9 +568,10 @@ export default function RequestDetailView({
                         value={adminOverlayFields.email}
                         mono={Boolean(adminOverlayFields.rawEmail)}
                       />
-                      {!terms.isGll && (
-                        <MetaItem label={`${terms.managerTerm} ${terms.locationTermLower}`} value={adminOverlayFields.club} />
-                      )}
+                      <MetaItem
+                        label={`${terms.managerTerm} ${terms.locationTermLower}`}
+                        value={terms.isGll ? ((adminOverlayFields.club || '').trim() || 'No location') : adminOverlayFields.club}
+                      />
                     </>
                   )}
                 </dl>

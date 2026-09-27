@@ -358,6 +358,8 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
     lastName: '',
     email: '',
     location: '',
+    directorFirst: '',
+    directorLast: '',
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -369,6 +371,8 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
         lastName: user.lastName || '',
         email: user.email || '',
         location: user.location || '',
+        directorFirst: user.directorFirst || user.person?.directorFirst || '',
+        directorLast: user.directorLast || user.person?.directorLast || '',
       });
       setErrors({});
     }
@@ -401,6 +405,10 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
         lastName: formData.lastName.trim(),
         email: formData.email.trim().toLowerCase(),
         location: formData.location.trim(),
+        ...(isHealthFitness ? {
+          directorFirst: formData.directorFirst.trim(),
+          directorLast: formData.directorLast.trim(),
+        } : {}),
       };
       const updated = await updatePerson(user.id, payload, selectedPartnerId || '');
       showToast('Directory record updated successfully.', 'success');
@@ -501,16 +509,16 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
           {errors.email && <p className="mt-1 text-xs font-medium text-red-600">{errors.email}</p>}
         </div>
 
-        {!isGll && (
         <div>
           <label htmlFor="edit-person-location" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-            {isHealthFitness ? 'Client' : 'Location'} <span className="text-red-500">*</span>
+            {isGll ? 'Gym Location' : (isHealthFitness ? 'Client' : 'Location')} {!isGll && <span className="text-red-500">*</span>}
           </label>
           <input
             id="edit-person-location"
             type="text"
             value={formData.location}
             onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
+            placeholder={isGll ? 'e.g. London, Manchester (optional)' : undefined}
             className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
               errors.location
                 ? 'border-red-300 focus:border-red-500 focus:ring-red-200 bg-red-50/30'
@@ -519,6 +527,36 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
           />
           {errors.location && <p className="mt-1 text-xs font-medium text-red-600">{errors.location}</p>}
         </div>
+
+        {isHealthFitness && (
+          <>
+            <div>
+              <label htmlFor="edit-person-director-first" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                Director First Name
+              </label>
+              <input
+                id="edit-person-director-first"
+                type="text"
+                value={formData.directorFirst}
+                onChange={(e) => setFormData((prev) => ({ ...prev, directorFirst: e.target.value }))}
+                className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
+                placeholder="Director first name"
+              />
+            </div>
+            <div>
+              <label htmlFor="edit-person-director-last" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                Director Last Name
+              </label>
+              <input
+                id="edit-person-director-last"
+                type="text"
+                value={formData.directorLast}
+                onChange={(e) => setFormData((prev) => ({ ...prev, directorLast: e.target.value }))}
+                className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
+                placeholder="Director last name"
+              />
+            </div>
+          </>
         )}
 
       </form>
@@ -666,11 +704,11 @@ function DirectoryMobileList({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{name}</p>
                     <p className="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]">{email}</p>
-                    {!rowTerms.isGll && (
                     <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
-                      {location}
+                      {rowTerms.isGll
+                        ? ((row.location || '').trim() || 'No location')
+                        : location}
                     </p>
-                    )}
                   </div>
 
                   <div className="min-w-0">
@@ -687,9 +725,9 @@ function DirectoryMobileList({
                         {manager.secondary}
                       </p>
                     ) : null}
-                    {!rowTerms.isGll && manager.tertiary ? (
+                    {manager.tertiary ? (
                       <p className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
-                        <span className="font-semibold">{rowTerms.locationTerm}:</span> {manager.tertiary}
+                        <span className="font-semibold">{rowTerms.isGll ? 'Gym Location' : rowTerms.locationTerm}:</span> {manager.tertiary}
                       </p>
                     ) : null}
                   </div>
@@ -1248,10 +1286,10 @@ export default function UserLedger() {
     {
       key: 'personLocation',
       label: terms.locationTerm,
-      width: '14%',
+      width: terms.isHealthFitness ? '12%' : '14%',
       headerClassName: 'text-center',
       cellClassName: 'align-top text-left max-w-0 overflow-hidden',
-      hidden: isGll,
+      hidden: false,
       render: (_, row) => {
         const { location } = formatPersonFields(row);
         return (
@@ -1261,10 +1299,30 @@ export default function UserLedger() {
         );
       },
     },
+    ...(terms.isHealthFitness ? [{
+      key: 'director',
+      label: 'Director',
+      width: '12%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-top max-w-0 overflow-hidden text-left',
+      render: (_, row) => {
+        const dFirst = (row.directorFirst || row.person?.directorFirst || '').trim();
+        const dLast = (row.directorLast || row.person?.directorLast || '').trim();
+        if (!dFirst && !dLast) {
+          return <span className="text-xs text-[var(--color-text-muted)]">—</span>;
+        }
+        return (
+          <StackedTextCell
+            primary={dFirst || EMPTY_CELL}
+            secondary={dLast || EMPTY_CELL}
+          />
+        );
+      },
+    }] : []),
     {
       key: 'manager',
       label: terms.managerTerm,
-      width: '20%',
+      width: terms.isHealthFitness ? '14%' : terms.isJdGyms ? '15%' : '20%',
       wrap: true,
       headerClassName: 'text-center',
       cellClassName: 'align-top max-w-0 overflow-hidden text-left',
@@ -1286,6 +1344,25 @@ export default function UserLedger() {
         );
       }
     },
+    ...(terms.isJdGyms ? [{
+      key: 'role',
+      label: 'Role',
+      width: '10%',
+      headerClassName: 'text-center',
+      cellClassName: 'align-top text-left max-w-0 overflow-hidden',
+      render: (_, row) => {
+        const val = row.role || row.person?.role;
+        const trimmed = (val || '').trim();
+        if (!trimmed) {
+          return <span className="text-sm font-normal leading-5 text-[var(--color-text-muted)]">—</span>;
+        }
+        return (
+          <TruncateCell className="text-sm font-normal leading-5 text-[var(--color-text-primary)]" title={trimmed}>
+            {trimmed}
+          </TruncateCell>
+        );
+      },
+    }] : []),
     {
       key: 'open',
       label: 'Actions',
@@ -1522,17 +1599,14 @@ export default function UserLedger() {
             onChange: setFilterEmail,
             options: emailOptions
           },
-          ...(!isGll ? [{
+          {
             label: `User ${terms.locationTerm}`,
             value: filterLocation,
             onChange: setFilterLocation,
             options: locationOptions
-          }] : [])
+          }
         ]}
-        sortPresets={isGll
-          ? SORT_PRESETS.filter((o) => !o.value.startsWith('personLocation'))
-          : SORT_PRESETS
-        }
+        sortPresets={SORT_PRESETS}
         sortPreset={sortPreset}
         setSortPreset={setSortPreset}
       />
@@ -1623,6 +1697,19 @@ export default function UserLedger() {
                     {initials}
                   </div>
                   <div className="min-w-0 flex-1">
+                    {rowTerms.isHealthFitness && (
+                      <div className="mb-2.5 pb-2 border-b border-[var(--color-border-default)]/60">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-brand-secondary)]">
+                          Director
+                        </p>
+                        <p className="text-xs font-semibold text-[var(--color-text-primary)]">
+                          {(selectedUser.directorFirst || selectedUser.person?.directorFirst || '').trim() || '—'}
+                        </p>
+                        <p className="text-xs font-semibold text-[var(--color-text-primary)]">
+                          {(selectedUser.directorLast || selectedUser.person?.directorLast || '').trim() || '—'}
+                        </p>
+                      </div>
+                    )}
                     <div className="flex items-start gap-2">
                       <h3 className="min-w-0 flex-1 break-words text-base font-bold leading-snug text-[var(--color-text-primary)]">
                         {fullName}
@@ -1676,17 +1763,20 @@ export default function UserLedger() {
                     <p className="mt-0.5 break-all font-mono text-xs text-[var(--color-text-secondary)]">
                       {personEmail}
                     </p>
-                    {!rowTerms.isGll && (
-                      <p className="mt-0.5 break-words text-xs text-[var(--color-text-muted)]">
-                        {personLocation}
-                      </p>
-                    )}
+                    <p className="mt-0.5 break-words text-xs text-[var(--color-text-muted)]">
+                      {rowTerms.isGll
+                        ? ((personLocation || '').trim() || 'No location')
+                        : personLocation}
+                    </p>
                   </div>
                 </div>
                 <dl className="mt-4 space-y-2 border-t border-[var(--color-border-default)] pt-3">
                   <DrawerMetaRow label="Request ID" value={formatRequestDisplayId(selectedUser.displayId)} />
                   <DrawerMetaRow label="Handled" value={formatAdminDateTime(selectedUser.dateAdded)} />
                   <DrawerMetaRow label="Handled by" value={personHandledBy(selectedUser)} />
+                  {rowTerms.isJdGyms && (
+                    <DrawerMetaRow label="Role" value={(selectedUser.role || selectedUser.person?.role || '').trim() || 'No role'} />
+                  )}
                 </dl>
               </div>
 
@@ -1700,7 +1790,9 @@ export default function UserLedger() {
                   {manager.secondary ? (
                     <DrawerMetaRow label="Detail" value={manager.secondary} mono={!manager.muted} />
                   ) : null}
-                  {!rowTerms.isGll && manager.tertiary ? (
+                  {rowTerms.isGll ? (
+                    <DrawerMetaRow label="Gym Location" value={(manager.tertiary || '').trim() || 'No location'} />
+                  ) : manager.tertiary ? (
                     <DrawerMetaRow label={rowTerms.locationTerm} value={manager.tertiary} />
                   ) : null}
                 </dl>

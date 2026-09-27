@@ -427,10 +427,14 @@ export function validateManagerSignupFields(
   if (!emailResult.ok) return emailResult;
 
   let clubValue = '';
-  if (!isHealthFitness && !isGll) {
-    const clubResult = validateClub(club);
-    if (!clubResult.ok) return clubResult;
-    clubValue = clubResult.value;
+  if (!isHealthFitness) {
+    if (isGll) {
+      clubValue = (club || '').trim();
+    } else {
+      const clubResult = validateClub(club);
+      if (!clubResult.ok) return clubResult;
+      clubValue = clubResult.value;
+    }
   }
 
   const passwordResult = validatePassword(password, { email: emailResult.value });

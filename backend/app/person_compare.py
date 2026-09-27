@@ -34,23 +34,30 @@ def person_from_mapping(data: Optional[Dict[str, Any]]) -> Optional[schemas.Pers
         lastName=data.get("lastName") or "",
         email=data.get("email") or "",
         location=data.get("location") or "",
+        role=data.get("role") or None,
     )
 
 
 def person_to_mapping(person: Union[schemas.PersonInfo, models.ManagerRequest]) -> Dict[str, str]:
     if isinstance(person, models.ManagerRequest):
-        return {
+        res = {
             "firstName": person.person_first_name or "",
             "lastName": person.person_last_name or "",
             "email": person.person_email or "",
             "location": person.person_location or "",
         }
-    return {
+        if getattr(person, "role", None):
+            res["role"] = person.role
+        return res
+    res = {
         "firstName": person.firstName or "",
         "lastName": person.lastName or "",
         "email": person.email or "",
         "location": person.location or "",
     }
+    if getattr(person, "role", None):
+        res["role"] = person.role
+    return res
 
 
 def compare_person_fields(
@@ -73,6 +80,9 @@ def compare_person_fields(
     email_r = _norm(right.email)
     loc_l = _norm(left.location)
     loc_r = _norm(right.location)
+
+    role_l = _norm(getattr(left, "role", None))
+    role_r = _norm(getattr(right, "role", None))
 
     fields: List[Dict[str, Any]] = [
         {
@@ -105,6 +115,19 @@ def compare_person_fields(
             "rightLabel": right_label,
         },
     ]
+
+    if role_l or role_r:
+        fields.append(
+            {
+                "field": "role",
+                "label": "Role",
+                "status": "same" if role_l == role_r else "differs",
+                "leftValue": getattr(left, "role", None) or "",
+                "rightValue": getattr(right, "role", None) or "",
+                "leftLabel": left_label,
+                "rightLabel": right_label,
+            }
+        )
 
     all_match = all(item["status"] == "same" for item in fields)
     summary = "All same" if all_match else _build_summary(fields)

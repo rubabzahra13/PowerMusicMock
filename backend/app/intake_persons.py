@@ -86,6 +86,41 @@ def set_submitted_by_attribution(
     req.intake_persons = current
 
 
+def get_director_fields(req: models.ManagerRequest) -> Dict[str, str]:
+    """Return the Director First/Last Name stored on a Health Fitness request.
+
+    These are request-level data-entry fields (not manager identity).
+    They are stored under intake_persons["director"] to keep them
+    completely separate from submittedBy (which represents the manager).
+    """
+    raw = get_intake_persons(req).get("director")
+    if not isinstance(raw, dict):
+        return {"firstName": "", "lastName": ""}
+    return {
+        "firstName": str(raw.get("firstName") or "").strip(),
+        "lastName": str(raw.get("lastName") or "").strip(),
+    }
+
+
+def set_director_fields(
+    req: models.ManagerRequest,
+    first_name: str = "",
+    last_name: str = "",
+) -> None:
+    """Persist Director First/Last Name for a Health Fitness request.
+
+    Clears the entry if both values are empty.
+    """
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    current = dict(get_intake_persons(req))
+    if not first and not last:
+        current.pop("director", None)
+    else:
+        current["director"] = {"firstName": first, "lastName": last}
+    req.intake_persons = current
+
+
 def set_admin_submitted_by(
     req: models.ManagerRequest,
     *,
@@ -166,6 +201,8 @@ def sync_display_person(req: models.ManagerRequest) -> None:
     req.person_last_name = chosen.lastName or ""
     req.person_email = chosen.email or ""
     req.person_location = chosen.location or ""
+    if hasattr(req, "role"):
+        req.role = chosen.role or None
 
 
 def bootstrap_intake_persons(req: models.ManagerRequest) -> None:
@@ -178,6 +215,7 @@ def bootstrap_intake_persons(req: models.ManagerRequest) -> None:
         lastName=req.person_last_name,
         email=req.person_email,
         location=req.person_location,
+        role=getattr(req, "role", None),
     )
     tags = req.tags or []
     current: Dict[str, Any] = {}

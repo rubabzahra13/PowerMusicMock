@@ -376,6 +376,7 @@ def create_manager_request(
         person_last_name=person.lastName,
         person_email=person.email,
         person_location=person.location or "",
+        role=person.role or None,
         action=action,
         manager_notes=manager_notes,
         tags=build_tags(db, person, action=action, partner_id=partner_id, extra_tags=extra_tags),
@@ -389,6 +390,9 @@ def create_manager_request(
         apply_person_to_row(row, person, source="partner")
     elif has_tag(normalized_extra, TAG_AUTO_MAIL):
         apply_person_to_row(row, person, source="autoMail")
+    if getattr(person, "directorFirst", None) or getattr(person, "directorLast", None):
+        from app.intake_persons import set_director_fields
+        set_director_fields(row, getattr(person, "directorFirst", None) or "", getattr(person, "directorLast", None) or "")
     sync_display_person(row)
     db.add(row)
     db.flush()

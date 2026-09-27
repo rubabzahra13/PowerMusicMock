@@ -83,7 +83,7 @@ function personFullName(person) {
 function MetaItem({ label, value }) {
   if (!value) return null;
   const text = String(value);
-  const isPlaceholder = text === '—' || /^No notes$/i.test(text);
+  const isPlaceholder = text === '—' || /^No notes$/i.test(text) || /^No role$/i.test(text);
   return (
     <div className="min-w-0">
       <dt className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
@@ -209,10 +209,13 @@ export default function GroupResolutionView({
 
   // Final values form state — pre-filled from representative
   const [form, setForm] = useState({
-    firstName: repMember?.person?.firstName || '',
-    lastName: repMember?.person?.lastName || '',
-    email: repMember?.person?.email || '',
-    location: repMember?.person?.location || '',
+    firstName: repMember?.person?.firstName || repMember?.firstName || '',
+    lastName: repMember?.person?.lastName || repMember?.lastName || '',
+    email: repMember?.person?.email || repMember?.email || '',
+    location: repMember?.person?.location || repMember?.location || '',
+    role: repMember?.person?.role || repMember?.role || '',
+    directorFirst: repMember?.directorFirst || repMember?.person?.directorFirst || '',
+    directorLast: repMember?.directorLast || repMember?.person?.directorLast || '',
   });
   const [isEditing, setIsEditing] = useState(false);
   const [draftForm, setDraftForm] = useState(form);
@@ -363,6 +366,9 @@ export default function GroupResolutionView({
             lastName: values.lastName.trim(),
             email: (values.email || '').trim(),
             location: (values.location || '').trim(),
+            role: (values.role || '').trim() || null,
+            directorFirst: (values.directorFirst || '').trim() || null,
+            directorLast: (values.directorLast || '').trim() || null,
           },
           adminNote: adminNote.trim() || null,
           sourceRequestId: currentSourceRequestId,
@@ -374,6 +380,9 @@ export default function GroupResolutionView({
             lastName: values.lastName.trim(),
             email: (values.email || '').trim(),
             location: (values.location || '').trim(),
+            role: (values.role || '').trim() || null,
+            directorFirst: (values.directorFirst || '').trim() || null,
+            directorLast: (values.directorLast || '').trim() || null,
           },
           adminNote: adminNote.trim() || null,
           sourceRequestId: currentSourceRequestId,
@@ -400,6 +409,9 @@ export default function GroupResolutionView({
           lastName: values.lastName.trim(),
           email: (values.email || '').trim(),
           location: (values.location || '').trim(),
+          role: (values.role || '').trim() || null,
+          directorFirst: (values.directorFirst || '').trim() || null,
+          directorLast: (values.directorLast || '').trim() || null,
         },
         adminNote: adminNote.trim() || null,
         sourceRequestId: currentSourceRequestId,
@@ -427,6 +439,9 @@ export default function GroupResolutionView({
           lastName: values.lastName.trim(),
           email: (values.email || '').trim(),
           location: (values.location || '').trim(),
+          role: (values.role || '').trim() || null,
+          directorFirst: (values.directorFirst || '').trim() || null,
+          directorLast: (values.directorLast || '').trim() || null,
         },
         adminNote: adminNote.trim() || null,
         sourceRequestId: currentSourceRequestId,
@@ -897,19 +912,24 @@ export default function GroupResolutionView({
                           </div>
 
                           <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
-                            <MetaItem label="First Name" value={member.person.firstName || '—'} />
-                            <MetaItem label="Last Name" value={member.person.lastName || '—'} />
-                            <MetaItem label="Email" value={member.person.email || '—'} />
-                            {!isGll && <MetaItem label={locationTerm} value={member.person.location || '—'} />}
-
-                            <MetaItem label={`${managerTerm} name`} value={managerName || '—'} />
-                            {!terms.isHealthFitness && (
+                            <MetaItem label="First Name" value={member.person?.firstName || '—'} />
+                            <MetaItem label="Last Name" value={member.person?.lastName || '—'} />
+                            <MetaItem label="Email" value={member.person?.email || '—'} />
+                            <MetaItem label={locationTerm} value={(member.person?.location || '').trim() || 'No location'} />
+                            {isHealthFitness && (
                               <>
-                                <MetaItem label={`${managerTerm} email`} value={managerEmail || '—'} />
-                                {!isGll && <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={managerClub || '—'} />}
+                                <MetaItem label="Director First Name" value={member.directorFirst || member.person?.directorFirst || '—'} />
+                                <MetaItem label="Director Last Name" value={member.directorLast || member.person?.directorLast || '—'} />
                               </>
                             )}
+
+                            <MetaItem label={`${managerTerm} name`} value={managerName || '—'} />
+                             <MetaItem label={`${managerTerm} email`} value={managerEmail || '—'} />
+                             <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={isGll ? ((managerClub || '').trim() || 'No location') : (managerClub || '—')} />
                             <MetaItem label={`${managerTerm} notes`} value={notesText || 'No notes'} />
+                            {(!isGll && (terms.isJdGyms || Boolean(member.role || member.person?.role))) && (
+                              <MetaItem label="Role" value={(member.role || member.person?.role || '').trim() || 'No role'} />
+                            )}
                           </dl>
 
                           {member.receivedAt && (
@@ -979,7 +999,16 @@ export default function GroupResolutionView({
               <MetaItem label="First Name" value={dirPerson.firstName} />
               <MetaItem label="Last Name" value={dirPerson.lastName} />
               <MetaItem label="Email" value={dirPerson.email} />
-              {!isGll && <MetaItem label={isHealthFitness ? 'Client' : 'Location'} value={dirPerson.location} />}
+              <MetaItem label={isGll ? 'Gym Location' : (isHealthFitness ? 'Client' : 'Location')} value={(dirPerson.location || '').trim() || 'No location'} />
+              {isHealthFitness && (
+                <>
+                  <MetaItem label="Director First Name" value={dirPerson.directorFirst || dirPerson.person?.directorFirst || '—'} />
+                  <MetaItem label="Director Last Name" value={dirPerson.directorLast || dirPerson.person?.directorLast || '—'} />
+                </>
+              )}
+              {(!isGll && (terms.isJdGyms || Boolean(dirPerson.role || dirPerson.person?.role))) && (
+                <MetaItem label="Role" value={(dirPerson.role || dirPerson.person?.role || '').trim() || 'No role'} />
+              )}
               {dirPerson.status && <MetaItem label="Status" value={dirPerson.status} />}
             </dl>
           ) : (
@@ -1014,15 +1043,20 @@ export default function GroupResolutionView({
             <MetaItem label="First Name" value={currentRequest.person?.firstName} />
             <MetaItem label="Last Name" value={currentRequest.person?.lastName} />
             <MetaItem label="Email" value={currentRequest.person?.email} />
-            {!isGll && <MetaItem label={locationTerm} value={currentRequest.person?.location} />}
-            <MetaItem label={`${managerTerm} name`} value={currentManager.managerName} />
-            {!terms.isHealthFitness && (
+            <MetaItem label={isGll ? 'Gym Location' : locationTerm} value={(currentRequest.person?.location || '').trim() || 'No location'} />
+            {isHealthFitness && (
               <>
-                <MetaItem label={`${managerTerm} email`} value={currentManager.managerEmail} />
-                {!isGll && <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={currentManager.managerClub} />}
+                <MetaItem label="Director First Name" value={currentRequest.directorFirst || currentRequest.person?.directorFirst || '—'} />
+                <MetaItem label="Director Last Name" value={currentRequest.directorLast || currentRequest.person?.directorLast || '—'} />
               </>
             )}
+            <MetaItem label={`${managerTerm} name`} value={currentManager.managerName} />
+            <MetaItem label={`${managerTerm} email`} value={currentManager.managerEmail} />
+            <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={isGll ? ((currentManager.managerClub || '').trim() || 'No location') : (currentManager.managerClub || '—')} />
             <MetaItem label={`${managerTerm} notes`} value={currentManager.notesText || 'No notes'} />
+            {(!isGll && (terms.isJdGyms || Boolean(currentRequest.role || currentRequest.person?.role))) && (
+              <MetaItem label="Role" value={(currentRequest.role || currentRequest.person?.role || '').trim() || 'No role'} />
+            )}
           </dl>
 
           {currentRequest.receivedAt && (
@@ -1102,15 +1136,14 @@ export default function GroupResolutionView({
               <MetaItem label="First Name" value={member.person?.firstName} />
               <MetaItem label="Last Name" value={member.person?.lastName} />
               <MetaItem label="Email" value={member.person?.email} />
-              {!isGll && <MetaItem label={locationTerm} value={member.person?.location} />}
+              <MetaItem label={isGll ? 'Gym Location' : locationTerm} value={(member.person?.location || '').trim() || 'No location'} />
               <MetaItem label={`${managerTerm} name`} value={mgr.managerName} />
-              {!terms.isHealthFitness && (
-                <>
-                  <MetaItem label={`${managerTerm} email`} value={mgr.managerEmail} />
-                  {!isGll && <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={mgr.managerClub} />}
-                </>
-              )}
+              <MetaItem label={`${managerTerm} email`} value={mgr.managerEmail} />
+              <MetaItem label={`${managerTerm} ${terms.locationTermLower}`} value={isGll ? ((mgr.managerClub || '').trim() || 'No location') : (mgr.managerClub || '—')} />
               <MetaItem label={`${managerTerm} notes`} value={mgr.notesText || 'No notes'} />
+              {(!isGll && (terms.isJdGyms || Boolean(member.role || member.person?.role))) && (
+                <MetaItem label="Role" value={(member.role || member.person?.role || '').trim() || 'No role'} />
+              )}
             </dl>
 
             {member.receivedAt && (
@@ -1223,7 +1256,16 @@ export default function GroupResolutionView({
               <MetaItem label="First Name" value={form.firstName || '—'} />
               <MetaItem label="Last Name" value={form.lastName || '—'} />
               <MetaItem label="Email" value={form.email || '—'} />
-              {!isGll && <MetaItem label={isHealthFitness ? 'Client' : 'Location'} value={form.location || '—'} />}
+              <MetaItem label={isGll ? 'Gym Location' : (isHealthFitness ? 'Client' : 'Location')} value={(form.location || '').trim() || 'No location'} />
+              {isHealthFitness && (
+                <>
+                  <MetaItem label="Director First Name" value={form.directorFirst || '—'} />
+                  <MetaItem label="Director Last Name" value={form.directorLast || '—'} />
+                </>
+              )}
+              {(!isGll && (terms.isJdGyms || Boolean(form.role))) && (
+                <MetaItem label="Role" value={form.role ? form.role.trim() : 'No role'} />
+              )}
             </dl>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1257,15 +1299,49 @@ export default function GroupResolutionView({
                   placeholder="Email address"
                 />
               </div>
-              {!isGll && (
               <div>
-                <label className={LABEL_CLASS}>{isHealthFitness ? 'Client' : 'Location'}</label>
+                <label className={LABEL_CLASS}>{isGll ? 'Gym Location (Optional)' : (isHealthFitness ? 'Client' : 'Location')}</label>
                 <input
                   type="text"
                   value={draftForm.location}
                   onChange={(e) => updateDraftField('location', e.target.value)}
                   className={INPUT_CLASS}
-                  placeholder={isHealthFitness ? 'Client' : 'Location'}
+                  placeholder={isGll ? 'e.g. London, Manchester' : (isHealthFitness ? 'Client' : 'Location')}
+                />
+              </div>
+              {isHealthFitness && (
+                <>
+                  <div>
+                    <label className={LABEL_CLASS}>Director First Name</label>
+                    <input
+                      type="text"
+                      value={draftForm.directorFirst || ''}
+                      onChange={(e) => updateDraftField('directorFirst', e.target.value)}
+                      className={INPUT_CLASS}
+                      placeholder="Director first name"
+                    />
+                  </div>
+                  <div>
+                    <label className={LABEL_CLASS}>Director Last Name</label>
+                    <input
+                      type="text"
+                      value={draftForm.directorLast || ''}
+                      onChange={(e) => updateDraftField('directorLast', e.target.value)}
+                      className={INPUT_CLASS}
+                      placeholder="Director last name"
+                    />
+                  </div>
+                </>
+              )}
+              {(!isGll && (terms.isJdGyms || Boolean(draftForm.role))) && (
+              <div>
+                <label className={LABEL_CLASS}>Role</label>
+                <input
+                  type="text"
+                  value={draftForm.role || ''}
+                  onChange={(e) => updateDraftField('role', e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="Role (e.g. Assistant Manager)"
                 />
               </div>
               )}
@@ -1439,7 +1515,13 @@ export default function GroupResolutionView({
                       <MetaItem label="First Name" value={unlinkForm.firstName || '—'} />
                       <MetaItem label="Last Name" value={unlinkForm.lastName || '—'} />
                       <MetaItem label="Email" value={unlinkForm.email || '—'} />
-                      {!isGll && <MetaItem label={isHealthFitness ? 'Client' : 'Location'} value={unlinkForm.location || '—'} />}
+                      <MetaItem label={isGll ? 'Gym Location' : (isHealthFitness ? 'Client' : 'Location')} value={(unlinkForm.location || '').trim() || 'No location'} />
+                      {isHealthFitness && (
+                        <>
+                          <MetaItem label="Director First Name" value={unlinkForm.directorFirst || '—'} />
+                          <MetaItem label="Director Last Name" value={unlinkForm.directorLast || '—'} />
+                        </>
+                      )}
                     </dl>
                   ) : (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1473,17 +1555,39 @@ export default function GroupResolutionView({
                           placeholder="Email address"
                         />
                       </div>
-                      {!isGll && (
                       <div>
-                        <label className={LABEL_CLASS}>{isHealthFitness ? 'Client' : 'Location'}</label>
+                        <label className={LABEL_CLASS}>{isGll ? 'Gym Location (Optional)' : (isHealthFitness ? 'Client' : 'Location')}</label>
                         <input
                           type="text"
                           value={unlinkDraft.location}
                           onChange={(e) => setUnlinkDraft((f) => ({ ...f, location: e.target.value }))}
                           className={INPUT_CLASS}
-                          placeholder={isHealthFitness ? 'Client' : 'Location'}
+                          placeholder={isGll ? 'e.g. London, Manchester' : (isHealthFitness ? 'Client' : 'Location')}
                         />
                       </div>
+                      {isHealthFitness && (
+                        <>
+                          <div>
+                            <label className={LABEL_CLASS}>Director First Name</label>
+                            <input
+                              type="text"
+                              value={unlinkDraft.directorFirst || ''}
+                              onChange={(e) => setUnlinkDraft((f) => ({ ...f, directorFirst: e.target.value }))}
+                              className={INPUT_CLASS}
+                              placeholder="Director first name"
+                            />
+                          </div>
+                          <div>
+                            <label className={LABEL_CLASS}>Director Last Name</label>
+                            <input
+                              type="text"
+                              value={unlinkDraft.directorLast || ''}
+                              onChange={(e) => setUnlinkDraft((f) => ({ ...f, directorLast: e.target.value }))}
+                              className={INPUT_CLASS}
+                              placeholder="Director last name"
+                            />
+                          </div>
+                        </>
                       )}
                     </div>
                   )}

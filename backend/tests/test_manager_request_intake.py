@@ -58,7 +58,7 @@ def _person(**kwargs):
     return schemas.PersonInfo(**defaults)
 
 
-def _add_handled_directory_row(db: Session, person: schemas.PersonInfo) -> models.ManagerRequest:
+def _add_handled_directory_row(db: Session, person: schemas.PersonInfo, partner_id: str = "partner-001") -> models.ManagerRequest:
     row = models.ManagerRequest(
         id=f"test-handled-{uuid.uuid4().hex[:8]}",
         received_at=datetime.now(timezone.utc),
@@ -71,6 +71,7 @@ def _add_handled_directory_row(db: Session, person: schemas.PersonInfo) -> model
         tags=[TAG_VERIFIED],
         status="handled",
         outcome="Added",
+        partner_id=partner_id,
     )
     db.add(row)
     db.flush()
@@ -224,7 +225,12 @@ class TestManagerRequestIntake:
         )
         db.flush()
 
-        assert db.query(models.ManagerRequest).count() == start_count + 2
+        assert (
+            db.query(models.ManagerRequest)
+            .filter(models.ManagerRequest.person_email == person.email)
+            .count()
+            == 2
+        )
         rows = (
             db.query(models.ManagerRequest)
             .filter(models.ManagerRequest.person_email == person.email)
