@@ -162,8 +162,8 @@ export function getDirectoryManagerColumnContent(row, options = {}) {
   }
   return {
     primary: name || NO_MANAGER_NAME,
-    secondary: terms.isHealthFitness ? '' : (email || NO_MANAGER_EMAIL),
-    tertiary: (terms.isHealthFitness || terms.isGll) ? '' : (club || `No ${terms.locationTermLower}`),
+    secondary: email || NO_MANAGER_EMAIL,
+    tertiary: terms.isGll ? '' : (club || `No ${terms.locationTermLower}`),
     muted: !name,
   };
 }

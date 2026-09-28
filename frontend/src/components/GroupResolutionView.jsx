@@ -259,6 +259,8 @@ export default function GroupResolutionView({
       lastName: info.lastName || '',
       email: info.email || '',
       location: info.location || '',
+      directorFirst: member.directorFirst || info.directorFirst || '',
+      directorLast: member.directorLast || info.directorLast || '',
     };
     setUnlinkForm(initForm);
     setUnlinkDraft(initForm);
@@ -484,7 +486,7 @@ export default function GroupResolutionView({
       peer = active.find(
         (m) =>
           m.id !== memberId
-          && matchClassification(current.person, m.person) !== 'confirmed_duplicate',
+          && matchClassification(current.person, m.person, { isGll }) !== 'confirmed_duplicate',
       );
     } else if (current && current.id !== memberId) {
       peer = current;
@@ -853,7 +855,7 @@ export default function GroupResolutionView({
                       : { variant: 'neutral', label: 'Older' };
                     // Unlink only on older rows that are potential matches vs current.
                     const vsCurrent = currentRequest && member.id !== currentRequest.id
-                      ? matchClassification(currentRequest.person, member.person)
+                      ? matchClassification(currentRequest.person, member.person, { isGll })
                       : null;
                     const showUnlink = (
                       !unlinked

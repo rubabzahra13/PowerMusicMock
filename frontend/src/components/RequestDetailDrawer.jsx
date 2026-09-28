@@ -174,22 +174,8 @@ export default function RequestDetailView({
     request.directoryMatch,
     request.adminPerson,
   );
-  // Only show the comparison matrix when there are 2+ sources and they disagree.
-  // Matching / single-source cases use the Sent by blocks below instead.
-  const showComparison = hasConflicts
-    && hasComparisonContext(
-      request.intakeMatch,
-      request.directoryMatch,
-      request.tags,
-      request.adminPerson,
-    )
-    && hasMultipleComparisonSources({
-      tags: request.tags,
-      intakeMatch: request.intakeMatch,
-      directoryMatch: request.directoryMatch,
-      hasAutoMail,
-      adminPerson: request.adminPerson,
-    });
+  // Deprecated comparison matrix: current duplicate-group workflow uses GroupResolutionView instead.
+  const showComparison = false;
   const clubLabel = awaitingManager
     ? null
     : (() => {

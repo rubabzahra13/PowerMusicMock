@@ -588,9 +588,13 @@ def unlink_duplicate_members(
             .all()
         )
         req2_person = person_from_model(req2)
-        is_ht_grp = is_healthtech_from_request(db, req2)
+        is_ht_grp  = is_healthtech_from_request(db, req2)
+        is_gll_grp = is_gll_from_request(db, req2)
         for sibling in siblings:
-            classification, _ = match_classification_for_partner(req2_person, person_from_model(sibling), is_healthtech=is_ht_grp)
+            classification, _ = match_classification_for_partner(
+                req2_person, person_from_model(sibling),
+                is_healthtech=is_ht_grp, is_gll=is_gll_grp,
+            )
             if classification == "confirmed_duplicate":
                 cohort.append(sibling)
 
@@ -665,24 +669,27 @@ def unlink_duplicate_members(
                 .first()
             )
             if dir_person:
-                is_ht_remain = is_healthtech_from_request(db, remaining[0]) if remaining else False
+                is_ht_remain  = is_healthtech_from_request(db, remaining[0]) if remaining else False
+                is_gll_remain = is_gll_from_request(db, remaining[0]) if remaining else False
                 for m in remaining:
                     if not are_requests_dismissed(db, m.id, dir_person.id):
                         c, _ = match_classification_for_partner(
-                            person_from_model(m), person_from_model(dir_person), is_healthtech=is_ht_remain
+                            person_from_model(m), person_from_model(dir_person),
+                            is_healthtech=is_ht_remain, is_gll=is_gll_remain,
                         )
                         if c:
                             dir_match = True
                             break
 
-        is_ht_remain = is_healthtech_from_request(db, remaining[0]) if remaining else False
+        is_ht_remain  = is_healthtech_from_request(db, remaining[0]) if remaining else False
+        is_gll_remain = is_gll_from_request(db, remaining[0]) if remaining else False
         for i in range(len(remaining)):
             for j in range(i + 1, len(remaining)):
                 if not are_requests_dismissed(db, remaining[i].id, remaining[j].id):
                     c, _ = match_classification_for_partner(
                         person_from_model(remaining[i]),
                         person_from_model(remaining[j]),
-                        is_healthtech=is_ht_remain,
+                        is_healthtech=is_ht_remain, is_gll=is_gll_remain,
                     )
                     if c:
                         peer_match_class = _best_classification(peer_match_class, c)
@@ -847,22 +854,27 @@ def finalize_group_after_selective_dismiss(
             .first()
         )
         if dir_person:
-            is_ht_surv = is_healthtech_from_request(db, remaining[0]) if remaining else False
+            is_ht_surv  = is_healthtech_from_request(db, remaining[0]) if remaining else False
+            is_gll_surv = is_gll_from_request(db, remaining[0]) if remaining else False
             for m in remaining:
                 if not are_requests_dismissed(db, m.id, dir_person.id):
-                    c, _ = match_classification_for_partner(person_from_model(m), person_from_model(dir_person), is_healthtech=is_ht_surv)
+                    c, _ = match_classification_for_partner(
+                        person_from_model(m), person_from_model(dir_person),
+                        is_healthtech=is_ht_surv, is_gll=is_gll_surv,
+                    )
                     if c:
                         dir_match = True
                         break
 
-    is_ht_surv = is_healthtech_from_request(db, remaining[0]) if remaining else False
+    is_ht_surv  = is_healthtech_from_request(db, remaining[0]) if remaining else False
+    is_gll_surv = is_gll_from_request(db, remaining[0]) if remaining else False
     for i in range(len(remaining)):
         for j in range(i + 1, len(remaining)):
             if not are_requests_dismissed(db, remaining[i].id, remaining[j].id):
                 c, _ = match_classification_for_partner(
                     person_from_model(remaining[i]),
                     person_from_model(remaining[j]),
-                    is_healthtech=is_ht_surv,
+                    is_healthtech=is_ht_surv, is_gll=is_gll_surv,
                 )
                 if c:
                     peer_match_class = _best_classification(peer_match_class, c)
@@ -2007,13 +2019,18 @@ def backfill_duplicate_groups(db: Session, dry_run: bool = False) -> dict:
     # Pre-build candidate index to avoid N^2 DB round-trips
     name_counts = {}
     email_counts = {}
+    prefix_counts = {}
     for req in unhandled_requests:
+        f_name = (req.person_first_name or "").strip().lower()
         l_name = (req.person_last_name or "").strip().lower()
         l_email = (req.person_email or "").strip().lower()
         if l_name:
             name_counts[l_name] = name_counts.get(l_name, 0) + 1
         if l_email:
             email_counts[l_email] = email_counts.get(l_email, 0) + 1
+        if len(f_name) >= 3 and len(l_name) >= 3:
+            pf = f_name[:3] + "_" + l_name[:3]
+            prefix_counts[pf] = prefix_counts.get(pf, 0) + 1
 
     directory_rows = (
         db.query(models.ManagerRequest)
@@ -2026,6 +2043,12 @@ def backfill_duplicate_groups(db: Session, dry_run: bool = False) -> dict:
     )
     dir_last_names = {(d.person_last_name or "").strip().lower() for d in directory_rows if d.person_last_name}
     dir_emails = {(d.person_email or "").strip().lower() for d in directory_rows if d.person_email}
+    dir_prefixes = {
+        (d.person_first_name or "").strip().lower()[:3] + "_" + (d.person_last_name or "").strip().lower()[:3]
+        for d in directory_rows
+        if (d.person_first_name or "").strip() and len((d.person_first_name or "").strip()) >= 3
+        and (d.person_last_name or "").strip() and len((d.person_last_name or "").strip()) >= 3
+    }
 
     dismissed_set = get_all_dismissed_pairs(db)
     groups_created = []
@@ -2034,12 +2057,22 @@ def backfill_duplicate_groups(db: Session, dry_run: bool = False) -> dict:
         if req.duplicate_group_id:
             continue
 
+        f_name = (req.person_first_name or "").strip().lower()
         l_name = (req.person_last_name or "").strip().lower()
         l_email = (req.person_email or "").strip().lower()
+        pf = (f_name[:3] + "_" + l_name[:3]) if (len(f_name) >= 3 and len(l_name) >= 3) else None
 
         # Check if there is any candidate peer or directory match
-        has_peer = (l_name and name_counts.get(l_name, 0) > 1) or (l_email and email_counts.get(l_email, 0) > 1)
-        has_dir = (l_name and l_name in dir_last_names) or (l_email and l_email in dir_emails)
+        has_peer = (
+            (l_name and name_counts.get(l_name, 0) > 1)
+            or (l_email and email_counts.get(l_email, 0) > 1)
+            or (pf and prefix_counts.get(pf, 0) > 1)
+        )
+        has_dir = (
+            (l_name and l_name in dir_last_names)
+            or (l_email and l_email in dir_emails)
+            or (pf and pf in dir_prefixes)
+        )
 
         if not has_peer and not has_dir:
             continue

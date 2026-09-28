@@ -1,6 +1,12 @@
-/** Client-side mirror of backend match_classification for Request History UX. */
+/**
+ * Client-side mirror of backend match_classification for Request History UX.
+ * Uses field-flag classification rules:
+ * - FIRST_NAME_MATCH_MIN = 0.60 Jaro-Winkler similarity
+ * - Confirmed: exact equality on all identity fields
+ * - Potential: matched field count >= 2 AND (same_last OR same_email)
+ */
 
-const POTENTIAL_DUPLICATE_THRESHOLD = 45.0;
+const FIRST_NAME_MATCH_MIN = 0.60;
 
 function norm(val) {
   if (!val) return '';
@@ -59,9 +65,14 @@ function jaroWinkler(s1, s2) {
 }
 
 /**
+ * @param {object} left
+ * @param {object} right
+ * @param {object} [options] - e.g. { isGll: boolean }
  * @returns {'confirmed_duplicate' | 'potential_duplicate' | null}
  */
-export function matchClassification(left, right) {
+export function matchClassification(left, right, options = {}) {
+  const isGll = Boolean(options?.isGll);
+
   const firstL = norm(left?.firstName);
   const lastL = norm(left?.lastName);
   const emailL = norm(left?.email);
@@ -71,24 +82,31 @@ export function matchClassification(left, right) {
   const emailR = norm(right?.email);
   const locR = norm(right?.location);
 
-  if (!lastL || !lastR) return null;
-
-  const sameLast = lastL === lastR;
-  const sameFirst = firstL === firstR;
+  const sameLast = Boolean(lastL && lastR && lastL === lastR);
+  const sameFirst = Boolean(firstL && firstR && firstL === firstR);
+  const jwFirst = jaroWinkler(firstL, firstR);
+  const firstMatch = sameFirst || (Boolean(firstL && firstR) && jwFirst >= FIRST_NAME_MATCH_MIN);
   const sameEmail = Boolean(emailL && emailR && emailL === emailR);
   const sameLoc = Boolean(locL && locR && locL === locR);
 
-  const firstNameScore = jaroWinkler(firstL, firstR) * 30.0;
-  const lastNameScore = jaroWinkler(lastL, lastR) * 35.0;
-  const locScore = sameLoc ? 25.0 : 0.0;
-  const emailScore = sameEmail ? 10.0 : 0.0;
-  const totalScore = firstNameScore + lastNameScore + emailScore + locScore;
+  // Requirement: at least one anchor field (same_last OR same_email) must be true
+  const anchorFieldMatched = sameLast || sameEmail;
 
-  if (sameFirst && sameLast && sameEmail && sameLoc) {
+  if (sameFirst && sameLast && sameEmail && (isGll || sameLoc)) {
     return 'confirmed_duplicate';
   }
-  if (totalScore >= POTENTIAL_DUPLICATE_THRESHOLD) {
+
+  const matchedCount = [
+    sameLast,
+    firstMatch,
+    sameEmail,
+    isGll ? false : sameLoc,
+  ].filter(Boolean).length;
+
+  if (matchedCount >= 2 && anchorFieldMatched) {
     return 'potential_duplicate';
   }
+
   return null;
 }
+

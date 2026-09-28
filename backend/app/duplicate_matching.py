@@ -10,7 +10,6 @@ GLL uses a 3-field model (first name, last name, email) with no location scoring
   First Name = 30 pts  (Jaro-Winkler)
   Email      = 10 pts  (exact match)
   Max score  = 75 pts
-  Threshold  = 33.75 pts
 
 Partner isolation is enforced by the caller filtering to the correct partner_id
 before comparing requests; these functions receive already-filtered sets.
@@ -95,6 +94,7 @@ def _norm(val: Optional[str]) -> str:
         return ""
     val = val.strip().lower()
     return re.sub(r'\s+', ' ', val)
+
 
 def jaro_winkler(s1: str, s2: str) -> float:
     if s1 == s2:
@@ -200,14 +200,85 @@ def get_dismissed_request_ids_for(db: Session, req_id: str) -> Set[str]:
     return dismissed
 
 
+# ---------------------------------------------------------------------------
+# Scoring constants  (kept for display / debugging — no longer gate classification)
+# ---------------------------------------------------------------------------
+
+# 4-field partners: max score = 30 (first) + 35 (last) + 10 (email) + 25 (loc) = 100
 POTENTIAL_DUPLICATE_THRESHOLD = 45.0
 
+# GLL: max score = 30 (first) + 35 (last) + 10 (email) = 75
+GLL_POTENTIAL_DUPLICATE_THRESHOLD = 33.75
+
 # ---------------------------------------------------------------------------
-# GLL: 3-field matching constants
+# Field-match classification constants
 # ---------------------------------------------------------------------------
 
-# GLL has no location field; max score = 30 (first) + 35 (last) + 10 (email) = 75
-GLL_POTENTIAL_DUPLICATE_THRESHOLD = 33.75
+# Minimum Jaro-Winkler similarity for the first name to count as matching.
+# Rounded to 6 d.p. before comparison to avoid floating-point boundary instability.
+FIRST_NAME_MATCH_MIN = 0.60
+
+# Minimum number of True field flags required for a potential-duplicate verdict.
+MIN_MATCHED_FIELDS_FOR_POTENTIAL = 2
+
+
+# ---------------------------------------------------------------------------
+# Shared field-flag helper
+# ---------------------------------------------------------------------------
+
+def _field_flags(
+    left: schemas.PersonInfo,
+    right: schemas.PersonInfo,
+    *,
+    use_location: bool,
+) -> dict:
+    """Compute boolean field-match flags for two person records.
+
+    Both classifiers (4-field and GLL) MUST call this helper so their
+    field-match decisions cannot diverge.
+
+    Rules
+    -----
+    same_last   : both last names non-empty after _norm() AND exactly equal.
+                  Fuzzy matching is NOT used for last names.
+    first_match : both first names non-empty after _norm() AND
+                  round(jaro_winkler(first_l, first_r), 6) >= FIRST_NAME_MATCH_MIN.
+    same_email  : both emails non-empty after _norm() AND exactly equal.
+    same_loc    : only evaluated when use_location=True;
+                  both locations non-empty after _norm() AND exactly equal.
+                  Always False when use_location=False.
+
+    Empty strings, None, and whitespace-only values NEVER count as a match,
+    even when both sides are empty/None.
+    """
+    first_l = _norm(left.firstName)
+    last_l  = _norm(left.lastName)
+    email_l = _norm(left.email)
+
+    first_r = _norm(right.firstName)
+    last_r  = _norm(right.lastName)
+    email_r = _norm(right.email)
+
+    same_last   = bool(last_l  and last_r  and last_l  == last_r)
+    same_email  = bool(email_l and email_r and email_l == email_r)
+    first_match = bool(
+        first_l and first_r
+        and round(jaro_winkler(first_l, first_r), 6) >= FIRST_NAME_MATCH_MIN
+    )
+
+    if use_location:
+        loc_l    = _norm(left.location)
+        loc_r    = _norm(right.location)
+        same_loc = bool(loc_l and loc_r and loc_l == loc_r)
+    else:
+        same_loc = False
+
+    return {
+        "same_last":   same_last,
+        "first_match": first_match,
+        "same_email":  same_email,
+        "same_loc":    same_loc,
+    }
 
 
 def match_classification(
@@ -219,6 +290,19 @@ def match_classification(
     Shared 4-field implementation for PureGym and Health Fitness.
     For Health Fitness, the "location" field stores what the partner calls "client".
     The stored value and matching logic are identical — only the UI label differs.
+
+    Classification rule
+    -------------------
+    Confirmed duplicate (evaluated FIRST):
+      same first AND same last AND same email AND same location
+      (exact equality — unchanged from previous behaviour)
+
+    Potential duplicate:
+      number of True field flags >= MIN_MATCHED_FIELDS_FOR_POTENTIAL
+      AND (same_last OR same_email)
+
+    The numeric score is still computed with the original weights and returned
+    for display/debugging.  It no longer gates the classification decision.
     """
     first_l, last_l, email_l, loc_l = _norm(left.firstName), _norm(left.lastName), _norm(left.email), _norm(left.location)
     first_r, last_r, email_r, loc_r = _norm(right.firstName), _norm(right.lastName), _norm(right.email), _norm(right.location)
@@ -226,25 +310,30 @@ def match_classification(
     if not last_l or not last_r:
         return None, 0.0
 
-    same_last = (last_l == last_r)
-    same_first = (first_l == first_r)
-    same_email = bool(email_l and email_r and email_l == email_r)
-    same_loc = bool(loc_l and loc_r and loc_l == loc_r)
+    # ── Preserve exact confirmed-duplicate rule ──────────────────────────────
+    same_first       = (first_l == first_r)
+    same_last_exact  = (last_l  == last_r)
+    same_email_exact = bool(email_l and email_r and email_l == email_r)
+    same_loc_exact   = bool(loc_l   and loc_r   and loc_l   == loc_r)
 
-    # 2. Potential Duplicate (Deterministic Field Scoring)
+    # Score (display only — weights unchanged)
     first_name_score = jaro_winkler(first_l, first_r) * 30.0
-    last_name_score = jaro_winkler(last_l, last_r) * 35.0
-    loc_score = 25.0 if same_loc else 0.0
-    email_score = 10.0 if same_email else 0.0
+    last_name_score  = jaro_winkler(last_l,  last_r)  * 35.0
+    loc_score        = 25.0 if same_loc_exact   else 0.0
+    email_score      = 10.0 if same_email_exact else 0.0
 
     total_score = first_name_score + last_name_score + email_score + loc_score
 
-    # 1. Confirmed Duplicate (strict rule)
-    # Identical across all relevant fields (First Name + Last Name + Email + Location)
-    if same_first and same_last and same_email and same_loc:
+    # 1. Confirmed Duplicate (strict rule — evaluated first, unchanged)
+    if same_first and same_last_exact and same_email_exact and same_loc_exact:
         return "confirmed_duplicate", total_score
 
-    if total_score >= POTENTIAL_DUPLICATE_THRESHOLD:
+    # 2. Potential Duplicate — field-flag rule (replaces threshold gate)
+    flags    = _field_flags(left, right, use_location=True)
+    matched  = sum(flags.values())
+    anchored = flags["same_last"] or flags["same_email"]
+
+    if matched >= MIN_MATCHED_FIELDS_FOR_POTENTIAL and anchored:
         return "potential_duplicate", total_score
 
     return None, total_score
@@ -256,47 +345,58 @@ def match_classification_gll(
 ) -> Tuple[Optional[str], float]:
     """GLL-specific 3-field matching (First Name, Last Name, Email — no Location).
 
-    Weights:
+    Weights (display only — score no longer gates classification):
       Last Name  = 35 pts  (Jaro-Winkler, max)
       First Name = 30 pts  (Jaro-Winkler, max)
       Email      = 10 pts  (exact match)
       Max total  = 75 pts
-      Threshold  = 33.75 pts  (45% of 75)
 
-    Confirmed Duplicate: exact match on all three fields.
-    Potential Duplicate: score >= GLL_POTENTIAL_DUPLICATE_THRESHOLD.
-    Location is never scored — GLL records have NULL location.
+    Classification rule
+    -------------------
+    Confirmed duplicate (evaluated FIRST):
+      exact match on all three fields (unchanged from previous behaviour).
+
+    Potential duplicate:
+      number of True field flags >= MIN_MATCHED_FIELDS_FOR_POTENTIAL
+      AND (same_last OR same_email)
+      Location is never used — GLL records have NULL location.
     """
     first_l = _norm(left.firstName)
-    last_l = _norm(left.lastName)
+    last_l  = _norm(left.lastName)
     email_l = _norm(left.email)
 
     first_r = _norm(right.firstName)
-    last_r = _norm(right.lastName)
+    last_r  = _norm(right.lastName)
     email_r = _norm(right.email)
 
     if not last_l or not last_r:
         return None, 0.0
 
-    same_last = (last_l == last_r)
-    same_first = (first_l == first_r)
-    same_email = bool(email_l and email_r and email_l == email_r)
+    same_last_exact  = (last_l == last_r)
+    same_first_exact = (first_l == first_r)
+    same_email_exact = bool(email_l and email_r and email_l == email_r)
 
-    # Confirmed Duplicate: exact match across all three identity fields
-    if same_first and same_last and same_email:
+    # Confirmed Duplicate: exact match across all three identity fields (unchanged)
+    if same_first_exact and same_last_exact and same_email_exact:
         first_name_score = 30.0
-        last_name_score = 35.0
-        email_score = 10.0
+        last_name_score  = 35.0
+        email_score      = 10.0
         return "confirmed_duplicate", first_name_score + last_name_score + email_score
 
-    # Potential Duplicate: weighted Jaro-Winkler scoring (no location)
+    # Score (display only — weights unchanged)
     first_name_score = jaro_winkler(first_l, first_r) * 30.0
-    last_name_score = jaro_winkler(last_l, last_r) * 35.0
-    email_score = 10.0 if same_email else 0.0
+    last_name_score  = jaro_winkler(last_l,  last_r)  * 35.0
+    email_score      = 10.0 if same_email_exact else 0.0
 
     total_score = first_name_score + last_name_score + email_score
 
-    if total_score >= GLL_POTENTIAL_DUPLICATE_THRESHOLD:
+    # Potential Duplicate — field-flag rule (replaces threshold gate)
+    # use_location=False: location is never part of the GLL identity model
+    flags    = _field_flags(left, right, use_location=False)
+    matched  = sum(flags.values())
+    anchored = flags["same_last"] or flags["same_email"]
+
+    if matched >= MIN_MATCHED_FIELDS_FOR_POTENTIAL and anchored:
         return "potential_duplicate", total_score
 
     return None, total_score
@@ -311,7 +411,7 @@ def match_classification_for_partner(
 ) -> Tuple[Optional[str], float]:
     """Partner-aware classification wrapper.
 
-    * GLL (is_gll=True)  → 3-field engine (no location, max 75 pts, threshold 33.75)
+    * GLL (is_gll=True)  → 3-field engine (no location, max 75 pts)
     * All others          → shared 4-field engine (PureGym / Health Fitness)
 
     The is_healthtech flag is accepted for backwards compatibility but no longer
