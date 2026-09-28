@@ -1,23 +1,14 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["syd1"],
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
-    },
-    {
-      "src": "backend/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxDuration": 60,
-        "includeFiles": "app/**"
-      }
+  "buildCommand": "npm run build",
+  "outputDirectory": "frontend/dist",
+  "functions": {
+    "backend/index.py": {
+      "maxDuration": 60,
+      "includeFiles": "backend/app/**"
     }
-  ],
+  },
   "headers": [
     {
       "source": "/(.*)",
@@ -32,11 +23,10 @@
       ]
     }
   ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "backend/index.py" },
-    { "src": "/health", "dest": "backend/index.py" },
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "frontend/index.html" }
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/backend/index.py" },
+    { "source": "/health", "destination": "/backend/index.py" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ],
   "crons": [
     {
