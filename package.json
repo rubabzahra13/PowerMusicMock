@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "npm --prefix frontend run build",
     "seed:admin": "node scripts/seed-admin.mjs",
     "seed:admin:py": "python backend/seed_admin.py",
     "supabase:auth-urls": "node scripts/configure-supabase-auth-urls.mjs"
