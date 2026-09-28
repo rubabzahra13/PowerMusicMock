@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -305,4 +305,178 @@ class TestDuplicateLifecycleFix:
         r_b1_db = db.query(models.ManagerRequest).filter_by(id=r_b1_id).first()
         assert r_b1_db is not None
         assert r_b1_db.duplicate_group_id is None
+
+    def test_unlinked_request_from_directory_group_does_not_update_directory(self, db: Session):
+        """Unlinking a request from a directory-linked group prevents re-matching and tag_already_exists."""
+        from app.directory_person_match import find_directory_conflict, person_from_model
+        from app.duplicate_group_service import resolve_group_add, unlink_duplicate_members, process_request_grouping
+        from app.manager_request_serialize import requests_to_api_dicts, request_to_api_dict
+        from app.manager_request_tags import TAG_ALREADY_EXISTS
+
+        now = datetime.now(timezone.utc)
+        d_rec = models.ManagerRequest(
+            id=f"test-dir-{uuid.uuid4().hex[:6]}",
+            person_first_name="Diana",
+            person_last_name="Prince",
+            person_email="diana@example.com",
+            person_location="HQ",
+            action="Add",
+            status="handled",
+            outcome="Added",
+            handled_at=now,
+            received_at=now,
+        )
+        r_new = models.ManagerRequest(
+            id=f"test-req-new-{uuid.uuid4().hex[:6]}",
+            person_first_name="Diana",
+            person_last_name="Prince",
+            person_email="diana@example.com",
+            person_location="HQ",
+            action="Add",
+            status="new",
+            received_at=now,
+        )
+        db.add_all([d_rec, r_new])
+        db.flush()
+
+        group = process_request_grouping(db, r_new)
+        db.flush()
+        assert group is not None
+        assert group.directory_person_id == d_rec.id
+
+        # Unlink r_new from the directory-backed group
+        unlink_duplicate_members(db, group.id, d_rec.id, r_new.id, admin_id="dev-bypass", strict_single=True)
+        db.flush()
+
+        # Assert dismissal persisted for (d_rec.id, r_new.id)
+        from app.duplicate_matching import are_requests_dismissed
+        assert are_requests_dismissed(db, d_rec.id, r_new.id) is True
+
+        # Assert find_directory_conflict ignores d_rec for r_new
+        conflict = find_directory_conflict(
+            person=person_from_model(r_new),
+            action="Add",
+            directory_rows=[d_rec],
+            db=db,
+            req_id=r_new.id,
+        )
+        assert conflict is None
+
+        # Assert serialized request does not get TAG_ALREADY_EXISTS
+        api_dict = request_to_api_dict(r_new, db=db)
+        assert TAG_ALREADY_EXISTS not in (api_dict.get("tags") or [])
+
+    def test_unlinked_two_requests_then_one_added_to_directory(self, db: Session):
+        """When 2 new requests are unlinked and 1 is added to Directory, the other is not flagged already_exists."""
+        from app.directory_person_match import find_directory_conflict, person_from_model
+        from app.duplicate_group_service import unlink_duplicate_members, process_request_grouping
+        from app.manager_request_serialize import request_to_api_dict
+        from app.manager_request_tags import TAG_ALREADY_EXISTS
+
+        now = datetime.now(timezone.utc)
+        r1 = models.ManagerRequest(
+            id=f"test-req-e1-{uuid.uuid4().hex[:6]}",
+            person_first_name="Eve",
+            person_last_name="Polastri",
+            person_email="eve@example.com",
+            person_location="London",
+            action="Add",
+            status="new",
+            received_at=now,
+        )
+        r2 = models.ManagerRequest(
+            id=f"test-req-e2-{uuid.uuid4().hex[:6]}",
+            person_first_name="Eve",
+            person_last_name="Polastri",
+            person_email="eve@example.com",
+            person_location="London",
+            action="Add",
+            status="new",
+            received_at=now,
+        )
+        db.add_all([r1, r2])
+        db.flush()
+
+        group = process_request_grouping(db, r1)
+        process_request_grouping(db, r2)
+        db.flush()
+
+        assert group is not None
+        unlink_duplicate_members(db, group.id, r1.id, r2.id, admin_id="dev-bypass", strict_single=True)
+        db.flush()
+
+        # Mark r1 as handled directory entry
+        r1.status = "handled"
+        r1.outcome = "Added"
+        r1.handled_at = now
+        db.flush()
+
+        # Assert r2 does not match r1 as directory conflict
+        conflict = find_directory_conflict(
+            person=person_from_model(r2),
+            action="Add",
+            directory_rows=[r1],
+            db=db,
+            req_id=r2.id,
+        )
+        assert conflict is None
+
+        # Assert r2 API serialization does not include TAG_ALREADY_EXISTS
+        api_dict = request_to_api_dict(r2, db=db)
+        assert TAG_ALREADY_EXISTS not in (api_dict.get("tags") or [])
+
+    def test_unlinked_two_requests_both_added_to_directory_produce_separate_ledger_rows(self, db: Session):
+        """Verify that when 2 requests with matching emails are unlinked via Not The Same Person,
+        and both are subsequently added to the directory, both appear as distinct rows in directory_ledger_rows."""
+        from app.directory_person_match import directory_ledger_rows
+
+        now = datetime.now(timezone.utc)
+        r1 = models.ManagerRequest(
+            id=f"test-req-f1-{uuid.uuid4().hex[:6]}",
+            person_first_name="Florence",
+            person_last_name="Baker",
+            person_email="fbaker@gmail.com",
+            person_location="London",
+            action="Add",
+            status="new",
+            received_at=now - timedelta(minutes=5),
+        )
+        r2 = models.ManagerRequest(
+            id=f"test-req-f2-{uuid.uuid4().hex[:6]}",
+            person_first_name="Flouurence",
+            person_last_name="Baker",
+            person_email="fbaker@gmail.com",
+            person_location="London",
+            action="Add",
+            status="new",
+            received_at=now,
+        )
+        db.add_all([r1, r2])
+        db.flush()
+
+        group = process_request_grouping(db, r1)
+        process_request_grouping(db, r2)
+        db.flush()
+
+        assert group is not None
+        unlink_duplicate_members(db, group.id, r1.id, r2.id, admin_id="dev-bypass", strict_single=True)
+        db.flush()
+
+        # Add r1 to Directory
+        r1.status = "handled"
+        r1.outcome = "Added"
+        r1.handled_at = now - timedelta(minutes=2)
+        db.flush()
+
+        # Add r2 to Directory
+        r2.status = "handled"
+        r2.outcome = "Added"
+        r2.handled_at = now
+        db.flush()
+
+        ledger = directory_ledger_rows(db)
+        ledger_ids = {row.id for row in ledger}
+        assert r1.id in ledger_ids
+        assert r2.id in ledger_ids
+
 

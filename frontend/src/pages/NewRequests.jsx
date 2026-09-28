@@ -997,11 +997,10 @@ export default function Requests() {
     bumpHighlights();
 
     const nextRequests = newRequests.filter((r) => r.id !== req.id);
-    const emailKey = req.person.email.toLowerCase();
-    const existingPerson = liveDirectory.find((p) => p.email.toLowerCase() === emailKey);
+    const existingPerson = liveDirectory.find((p) => p.id === req.id || p.sourceRequestId === req.id);
     const nextDirectory = existingPerson
       ? liveDirectory.map((p) =>
-          p.email.toLowerCase() === emailKey
+          (p.id === req.id || p.sourceRequestId === req.id)
             ? {
                 ...p,
                 status: outcome,
@@ -1016,11 +1015,15 @@ export default function Requests() {
           {
             id: `temp-${req.id}`,
             displayId: req.displayId,
+            sourceRequestId: req.id,
             sourceRequestNumber: req.displayId,
             firstName: req.person.firstName,
             lastName: req.person.lastName,
             email: req.person.email,
             location: req.person.location,
+            role: req.person.role || req.role,
+            directorFirst: req.person.directorFirst || req.directorFirst,
+            directorLast: req.person.directorLast || req.directorLast,
             status: outcome,
             dateAdded: handledAt,
             requestReceivedAt: req.receivedAt,
@@ -1309,7 +1312,7 @@ export default function Requests() {
         const val = row.role || row.person?.role;
         const trimmed = (val || '').trim();
         if (!trimmed) {
-          return <span className="text-xs text-[var(--color-text-muted)]">—</span>;
+          return <span className="text-xs text-[var(--color-text-muted)]">No role</span>;
         }
         return (
           <span className="text-xs font-medium text-[var(--color-text-primary)] truncate block" title={trimmed}>

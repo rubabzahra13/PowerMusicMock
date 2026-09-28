@@ -94,11 +94,10 @@ export default function RequestDetail() {
     const currentDirectory = Array.isArray(cached?.persons) ? cached.persons : directory;
 
     const nextRequests = currentRequests.filter((r) => r.id !== req.id);
-    const emailKey = req.person.email.toLowerCase();
-    const existingPerson = currentDirectory.find((p) => p.email.toLowerCase() === emailKey);
+    const existingPerson = currentDirectory.find((p) => p.id === req.id || p.sourceRequestId === req.id);
     const nextDirectory = existingPerson
       ? currentDirectory.map((p) =>
-          p.email.toLowerCase() === emailKey
+          (p.id === req.id || p.sourceRequestId === req.id)
             ? {
                 ...p,
                 status: outcome,
@@ -113,11 +112,15 @@ export default function RequestDetail() {
           {
             id: `temp-${req.id}`,
             displayId: req.displayId,
+            sourceRequestId: req.id,
             sourceRequestNumber: req.displayId,
             firstName: req.person.firstName,
             lastName: req.person.lastName,
             email: req.person.email,
             location: req.person.location,
+            role: req.person.role || req.role,
+            directorFirst: req.person.directorFirst || req.directorFirst,
+            directorLast: req.person.directorLast || req.directorLast,
             status: outcome,
             dateAdded: handledAt,
             requestReceivedAt: req.receivedAt,

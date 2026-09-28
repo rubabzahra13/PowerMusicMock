@@ -51,6 +51,8 @@ def _directory_conflict_for_request(
         directory_rows=_probe_handled_rows(db, person, partner_id=req.partner_id),
         is_healthtech=is_ht,
         is_gll=gll,
+        db=db,
+        req_id=req.id,
     )
 
 
@@ -554,6 +556,8 @@ def requests_to_api_dicts(db: Session, requests: List[models.ManagerRequest]) ->
             person=person,
             action=req.action or "",
             directory_rows=[row for row in directory_rows if not req.partner_id or row.partner_id == req.partner_id],
+            db=db,
+            req_id=req.id,
         )
         summary = group_summaries.get(req.duplicate_group_id) if req.duplicate_group_id else None
         results.append(

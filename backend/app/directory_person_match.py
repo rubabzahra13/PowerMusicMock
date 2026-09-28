@@ -12,7 +12,7 @@ from app import models, schemas
 from app.intake_persons import bootstrap_intake_persons, get_auto_mail_snapshot, get_partner_snapshot
 from app.manager_request_tags import TAG_ALREADY_EXISTS
 from app.person_match import person_from_model, same_person, same_person_for_partner
-from app.duplicate_matching import is_healthtech_partner, is_gll_partner
+from app.duplicate_matching import is_healthtech_partner, is_gll_partner, are_requests_dismissed
 
 # Only true Directory ledger outcomes. GroupResolved (and similar) are
 # historical merge inputs and must never appear as Directory people.
@@ -188,7 +188,11 @@ def _dedupe_current_outcome(
     represented: List[models.ManagerRequest] = []
 
     for row in sorted(rows, key=_handled_at_sort_key, reverse=True):
-        if any(same_person_for_partner(row, prior, is_healthtech=is_ht, is_gll=gll) for prior in represented):
+        if any(
+            same_person_for_partner(row, prior, is_healthtech=is_ht, is_gll=gll)
+            and not (db and are_requests_dismissed(db, row.id, prior.id))
+            for prior in represented
+        ):
             continue
         represented.append(row)
         if row.outcome == outcome:
@@ -206,9 +210,13 @@ def find_latest_directory_match(
     *,
     is_healthtech: bool = False,
     is_gll: bool = False,
+    db: Optional[Session] = None,
+    req_id: Optional[str] = None,
 ) -> Optional[models.ManagerRequest]:
     """Most recent handled row for the same person (partner-aware same_person rules)."""
     for row in sorted(directory_rows, key=_handled_at_sort_key, reverse=True):
+        if db and req_id and are_requests_dismissed(db, req_id, row.id):
+            continue
         if same_person_for_partner(row, person, is_healthtech=is_healthtech, is_gll=is_gll):
             return row
     return None
@@ -221,9 +229,18 @@ def find_directory_conflict(
     directory_rows: List[models.ManagerRequest],
     is_healthtech: bool = False,
     is_gll: bool = False,
+    db: Optional[Session] = None,
+    req_id: Optional[str] = None,
 ) -> Optional[models.ManagerRequest]:
     """Directory row that triggers already-exists or already-removed for this request action."""
-    match = find_latest_directory_match(person, directory_rows, is_healthtech=is_healthtech, is_gll=is_gll)
+    match = find_latest_directory_match(
+        person,
+        directory_rows,
+        is_healthtech=is_healthtech,
+        is_gll=is_gll,
+        db=db,
+        req_id=req_id,
+    )
     if match and directory_outcome_conflicts(action, match.outcome):
         return match
     return None
@@ -289,7 +306,11 @@ def _dedupe_latest_person(rows: List[models.ManagerRequest], *, partner_id: Opti
     gll = _is_gll(db, partner_id)
     represented: List[models.ManagerRequest] = []
     for row in sorted(rows, key=_handled_at_sort_key, reverse=True):
-        if any(same_person_for_partner(row, prior, is_healthtech=is_ht, is_gll=gll) for prior in represented):
+        if any(
+            same_person_for_partner(row, prior, is_healthtech=is_ht, is_gll=gll)
+            and not (db and are_requests_dismissed(db, row.id, prior.id))
+            for prior in represented
+        ):
             continue
         represented.append(row)
     return represented
@@ -421,6 +442,7 @@ def duplicate_tags_for_person(
     *,
     action: str,
     partner_id: Optional[str] = None,
+    req_id: Optional[str] = None,
 ) -> List[str]:
     is_ht = is_healthtech_partner(db, partner_id)
     gll = _is_gll(db, partner_id)
@@ -430,6 +452,8 @@ def duplicate_tags_for_person(
         directory_rows=_probe_handled_rows(db, person, partner_id=partner_id),
         is_healthtech=is_ht,
         is_gll=gll,
+        db=db,
+        req_id=req_id,
     )
     if match:
         from app.manager_request_tags import TAG_ALREADY_REMOVED

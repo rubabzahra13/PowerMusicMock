@@ -611,6 +611,17 @@ def unlink_duplicate_members(
                     created_at=now,
                 )
             )
+        if group.directory_person_id and member.id != group.directory_person_id:
+            if not are_requests_dismissed(db, group.directory_person_id, member.id):
+                db.add(
+                    models.DismissedDuplicateMatch(
+                        id=f"dism-{uuid.uuid4().hex[:12]}",
+                        request_id_1=group.directory_person_id,
+                        request_id_2=member.id,
+                        dismissed_by_admin_id=admin_uuid,
+                        created_at=now,
+                    )
+                )
         db.add(
             models.DismissedGroupMatch(
                 id=f"dism-grp-{uuid.uuid4().hex[:12]}",

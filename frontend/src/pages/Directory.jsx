@@ -1354,7 +1354,7 @@ export default function UserLedger() {
         const val = row.role || row.person?.role;
         const trimmed = (val || '').trim();
         if (!trimmed) {
-          return <span className="text-sm font-normal leading-5 text-[var(--color-text-muted)]">—</span>;
+          return <span className="text-sm font-normal leading-5 text-[var(--color-text-muted)]">No role</span>;
         }
         return (
           <TruncateCell className="text-sm font-normal leading-5 text-[var(--color-text-primary)]" title={trimmed}>
