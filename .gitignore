@@ -47,3 +47,7 @@ backend/**/*.pyc
 .pytest_cache/
 .vercel
 .env*
+*.db
+backend/*.db
+test.db
+backend/dev.db
