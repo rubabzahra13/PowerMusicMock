@@ -352,12 +352,30 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
     () => (selectedPartner?.name || '').toLowerCase().includes('gll'),
     [selectedPartner],
   );
+  const isJdGyms = useMemo(
+    () => {
+      const slug = (selectedPartner?.slug || '').toLowerCase();
+      const name = (selectedPartner?.name || '').toLowerCase();
+      return (
+        slug === 'jd-gyms' ||
+        slug === 'jdgyms' ||
+        slug === 'jd' ||
+        slug.includes('jd-gyms') ||
+        slug.includes('jdgyms') ||
+        name.includes('jd gyms') ||
+        name.includes('jdgyms') ||
+        name === 'jd'
+      );
+    },
+    [selectedPartner],
+  );
 
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
     email: '',
     location: '',
+    role: '',
     directorFirst: '',
     directorLast: '',
   });
@@ -371,6 +389,7 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
         lastName: user.lastName || '',
         email: user.email || '',
         location: user.location || '',
+        role: user.role || user.person?.role || '',
         directorFirst: user.directorFirst || user.person?.directorFirst || '',
         directorLast: user.directorLast || user.person?.directorLast || '',
       });
@@ -405,6 +424,9 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
         lastName: formData.lastName.trim(),
         email: formData.email.trim().toLowerCase(),
         location: formData.location.trim(),
+        ...(isJdGyms ? {
+          role: formData.role.trim() || null,
+        } : {}),
         ...(isHealthFitness ? {
           directorFirst: formData.directorFirst.trim(),
           directorLast: formData.directorLast.trim(),
@@ -527,6 +549,22 @@ function EditPersonModal({ isOpen, onClose, user, onSave }) {
           />
           {errors.location && <p className="mt-1 text-xs font-medium text-red-600">{errors.location}</p>}
         </div>
+
+        {isJdGyms && (
+          <div>
+            <label htmlFor="edit-person-role" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+              Role
+            </label>
+            <input
+              id="edit-person-role"
+              type="text"
+              value={formData.role}
+              onChange={(e) => setFormData((prev) => ({ ...prev, role: e.target.value }))}
+              className="w-full rounded-lg border border-[var(--color-border-default)] px-3 py-2 text-sm focus:border-[var(--color-brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/20"
+              placeholder="Role (optional)"
+            />
+          </div>
+        )}
 
         {isHealthFitness && (
           <>
